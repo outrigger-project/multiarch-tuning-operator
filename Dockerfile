@@ -1,5 +1,9 @@
-# Build the manager binary
-FROM golang:1.19 as builder
+# TODO: Replace with a (public) manifest-list image when available (possibly from the OKD project)
+# Note that the following is a single-arch image, but the build process will be able to build
+# a multi-arch image by using golang-based cross-build. This needs CGO_ENABLED=0 to be set currently.
+ARG BUILD_IMAGE=registry.ci.openshift.org/openshift/release:golang-1.20
+ARG RUNTIME_IMAGE=quay.io/centos/centos:stream9-minimal
+FROM ${BUILD_IMAGE} as builder
 ARG TARGETOS
 ARG TARGETARCH
 
@@ -26,7 +30,7 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -o ma
 
 # Use distroless as minimal base image to package the manager binary
 # Refer to https://github.com/GoogleContainerTools/distroless for more details
-FROM quay.io/centos/centos:stream9-minimal
+FROM ${RUNTIME_IMAGE}
 WORKDIR /
 COPY --from=builder /workspace/manager .
 USER 65532:65532

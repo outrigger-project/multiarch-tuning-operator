@@ -78,6 +78,7 @@ endif
 
 # TODO: is there a public manifest-list image we can replace this with?
 BUILD_IMAGE ?= registry.ci.openshift.org/openshift/release:golang-1.20
+RUNTIME_IMAGE ?= quay.io/centos/centos:stream9-minimal
 
 NO_DOCKER ?= 0
 
