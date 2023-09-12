@@ -30,7 +30,7 @@ import (
 
 const (
 	// SchedulingGateName is the name of the Scheduling Gate
-	schedulingGateName = "multi-arch.openshift.io/scheduling-gate"
+	schedulingGateName = "multiarch.openshift.io/scheduling-gate"
 )
 
 var schedulingGate = corev1.PodSchedulingGate{
