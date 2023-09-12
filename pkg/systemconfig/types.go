@@ -177,22 +177,22 @@ type policyConf struct {
 	Transports map[string]map[string][]policyEntry `json:"transports"`
 }
 
-func (pc policyConf) resetTransports() {
+func (pc *policyConf) resetTransports() {
 	pc.Transports = defaultTransports()
 }
 
-func (pc policyConf) setRejectForRegistry(registry string) {
+func (pc *policyConf) setRejectForRegistry(registry string) {
 	pc.setRejectForRegistryOnTransport(registry, dockerTransport)
 	pc.setRejectForRegistryOnTransport(registry, atomicTransport)
 }
 
-func (pc policyConf) setRejectForRegistryOnTransport(registry, transport string) {
+func (pc *policyConf) setRejectForRegistryOnTransport(registry, transport string) {
 	pc.Transports[transport][registry] = []policyEntry{
 		rejectPolicyEntry(),
 	}
 }
 
-func (pc policyConf) writeToFile() error {
+func (pc *policyConf) writeToFile() error {
 	return writeJSONFile(PolicyConfPath, pc)
 }
 
