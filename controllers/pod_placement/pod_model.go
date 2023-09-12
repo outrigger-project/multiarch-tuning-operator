@@ -83,7 +83,7 @@ func (pod *Pod) SetNodeAffinityArchRequirement(pullSecretDataList [][]byte) {
 
 	if pod.Spec.NodeSelector != nil {
 		log.V(4).Info("The pod has the nodeSelector field set. Ignoring...")
-		for key, _ := range pod.Spec.NodeSelector {
+		for key := range pod.Spec.NodeSelector {
 			if key == archLabel {
 				// if the pod has the nodeSelector field set for the kubernetes.io/arch label, we ignore it.
 				// in fact, the nodeSelector field is ANDed with the nodeAffinity field, and we want to give the user the main control, if they
