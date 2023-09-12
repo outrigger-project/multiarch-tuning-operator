@@ -19,9 +19,10 @@ package pod_placement
 import (
 	"context"
 	"fmt"
+	"multiarch-operator/pkg/image"
+
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
-	"multiarch-operator/pkg/image"
 	ctrllog "sigs.k8s.io/controller-runtime/pkg/log"
 )
 

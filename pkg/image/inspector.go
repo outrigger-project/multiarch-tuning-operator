@@ -19,6 +19,10 @@ package image
 import (
 	"context"
 	"fmt"
+	"multiarch-operator/pkg/system_config"
+	"os"
+	"sync"
+
 	"github.com/containers/image/v5/docker"
 	"github.com/containers/image/v5/image"
 	"github.com/containers/image/v5/manifest"
@@ -26,10 +30,7 @@ import (
 	"github.com/go-logr/logr"
 	"golang.org/x/sys/unix"
 	"k8s.io/apimachinery/pkg/util/sets"
-	"multiarch-operator/pkg/system_config"
-	"os"
 	ctrllog "sigs.k8s.io/controller-runtime/pkg/log"
-	"sync"
 )
 
 type registryInspector struct {

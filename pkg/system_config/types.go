@@ -18,12 +18,13 @@ package system_config
 
 import (
 	"fmt"
-	"github.com/BurntSushi/toml"
-	"github.com/containers/image/v5/pkg/sysregistriesv2"
-	"k8s.io/apimachinery/pkg/util/json"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/BurntSushi/toml"
+	"github.com/containers/image/v5/pkg/sysregistriesv2"
+	"k8s.io/apimachinery/pkg/util/json"
 )
 
 const (

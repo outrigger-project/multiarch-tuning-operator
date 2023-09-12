@@ -18,14 +18,15 @@ package main
 
 import (
 	"flag"
-	ocpv1 "github.com/openshift/api/config/v1"
-	ocpv1alpha1 "github.com/openshift/api/operator/v1alpha1"
-	"k8s.io/klog/v2"
 	commonsysconfig "multiarch-operator/controllers/sysconfig_handlers/common"
 	openshiftsysconfig "multiarch-operator/controllers/sysconfig_handlers/openshift"
 	"multiarch-operator/pkg/system_config"
 	"os"
 	"time"
+
+	ocpv1 "github.com/openshift/api/config/v1"
+	ocpv1alpha1 "github.com/openshift/api/operator/v1alpha1"
+	"k8s.io/klog/v2"
 
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 

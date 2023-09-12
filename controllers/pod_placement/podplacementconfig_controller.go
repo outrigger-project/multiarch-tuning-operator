@@ -19,10 +19,11 @@ package pod_placement
 import (
 	"context"
 	"errors"
+	multiarchv1alpha1 "multiarch-operator/apis/multiarch/v1alpha1"
+
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes"
-	multiarchv1alpha1 "multiarch-operator/apis/multiarch/v1alpha1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	ctrllog "sigs.k8s.io/controller-runtime/pkg/log"

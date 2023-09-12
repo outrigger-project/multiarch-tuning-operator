@@ -20,10 +20,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"multiarch-operator/pkg/system_config"
+
 	"github.com/go-logr/logr"
 	ocpv1alpha1 "github.com/openshift/api/operator/v1alpha1"
 	"k8s.io/client-go/tools/cache"
-	"multiarch-operator/pkg/system_config"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 )
