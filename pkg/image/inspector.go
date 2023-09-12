@@ -19,7 +19,7 @@ package image
 import (
 	"context"
 	"fmt"
-	"multiarch-operator/pkg/system_config"
+	"multiarch-operator/pkg/systemconfig"
 	"os"
 	"sync"
 
@@ -61,10 +61,10 @@ func (i *registryInspector) GetCompatibleArchitecturesSet(ctx context.Context, i
 	}
 	sys := &types.SystemContext{
 		AuthFilePath:                authFile.Name(),
-		SystemRegistriesConfPath:    system_config.RegistriesConfPath,
-		SystemRegistriesConfDirPath: system_config.RegistryCertsDir,
-		SignaturePolicyPath:         system_config.PolicyConfPath,
-		DockerPerHostCertDirPath:    system_config.DockerCertsDir,
+		SystemRegistriesConfPath:    systemconfig.RegistriesConfPath,
+		SystemRegistriesConfDirPath: systemconfig.RegistryCertsDir,
+		SignaturePolicyPath:         systemconfig.PolicyConfPath,
+		DockerPerHostCertDirPath:    systemconfig.DockerCertsDir,
 	}
 	src, err := ref.NewImageSource(ctx, sys)
 	if err != nil {

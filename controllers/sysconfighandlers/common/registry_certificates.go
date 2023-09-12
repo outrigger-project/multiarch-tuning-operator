@@ -20,7 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"multiarch-operator/pkg/system_config"
+	"multiarch-operator/pkg/systemconfig"
 
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
@@ -60,7 +60,7 @@ func (s *RegistryCertificatesSyncer) Start(ctx context.Context) (err error) {
 	s.log = log.FromContext(ctx, "handler", "RegistryCertificatesSyncer", "kind", "ConfigMap [core/v1]",
 		"namespace", s.namespace, "name", s.name)
 	s.log.Info("Starting System Config Syncer")
-	ic := system_config.SystemConfigSyncerSingleton()
+	ic := systemconfig.SystemConfigSyncerSingleton()
 	clientSet := s.clientSet
 	// Watch the ConfigMap that contains the registry certificates and Sync SystemConfig
 	registryCertificatesInformer := v1.NewConfigMapInformer(clientSet, s.namespace, 0, cache.Indexers{})
@@ -83,7 +83,7 @@ func (s *RegistryCertificatesSyncer) Start(ctx context.Context) (err error) {
 	return nil
 }
 
-func (s *RegistryCertificatesSyncer) onAddOrUpdate(ic system_config.IConfigSyncer, obj interface{}) {
+func (s *RegistryCertificatesSyncer) onAddOrUpdate(ic systemconfig.IConfigSyncer, obj interface{}) {
 	cm, ok := obj.(*corev1.ConfigMap)
 	if !ok {
 		s.log.Error(errors.New("unexpected type, expected ConfigMap"), "unexpected type", "type", fmt.Sprintf("%T", obj))
@@ -94,20 +94,20 @@ func (s *RegistryCertificatesSyncer) onAddOrUpdate(ic system_config.IConfigSynce
 		return
 	}
 	s.log.Info("The configmap has been updated")
-	err := ic.StoreRegistryCerts(system_config.ParseRegistryCerts(cm.Data))
+	err := ic.StoreRegistryCerts(systemconfig.ParseRegistryCerts(cm.Data))
 	if err != nil {
 		s.log.Error(err, "Error updating registry certs")
 		return
 	}
 }
 
-func (s *RegistryCertificatesSyncer) onUpdate(ic system_config.IConfigSyncer) func(oldobj, newobj interface{}) {
+func (s *RegistryCertificatesSyncer) onUpdate(ic systemconfig.IConfigSyncer) func(oldobj, newobj interface{}) {
 	return func(oldobj, newobj interface{}) {
 		s.onAddOrUpdate(ic, newobj)
 	}
 }
 
-func (s *RegistryCertificatesSyncer) onAdd(ic system_config.IConfigSyncer) func(obj interface{}) {
+func (s *RegistryCertificatesSyncer) onAdd(ic systemconfig.IConfigSyncer) func(obj interface{}) {
 	return func(obj interface{}) {
 		s.onAddOrUpdate(ic, obj)
 	}

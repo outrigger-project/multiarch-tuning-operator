@@ -20,7 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"multiarch-operator/pkg/system_config"
+	"multiarch-operator/pkg/systemconfig"
 
 	"github.com/go-logr/logr"
 	ocpv1 "github.com/openshift/api/config/v1"
@@ -88,7 +88,7 @@ func (s *ImageRegistryConfigSyncer) Start(ctx context.Context) (err error) {
 	s.log = log.FromContext(ctx, "handler", "ImageRegistryConfigSyncer", "kind", "Image [config.openshift.io/v1]")
 	s.log.Info("Starting System Config Syncer")
 	mgr := s.mgr
-	ic := system_config.SystemConfigSyncerSingleton()
+	ic := systemconfig.SystemConfigSyncerSingleton()
 	imageInformer, err := mgr.GetCache().GetInformerForKind(ctx, ocpv1.GroupVersion.WithKind("Image"))
 	if err != nil {
 		s.log.Error(err, "Error getting the informer")
@@ -106,7 +106,7 @@ func (s *ImageRegistryConfigSyncer) Start(ctx context.Context) (err error) {
 	return nil
 }
 
-func (s *ImageRegistryConfigSyncer) onAddOrUpdate(ic system_config.IConfigSyncer, obj interface{}) {
+func (s *ImageRegistryConfigSyncer) onAddOrUpdate(ic systemconfig.IConfigSyncer, obj interface{}) {
 	image, ok := obj.(*ocpv1.Image)
 	if !ok {
 		s.log.Error(errors.New("unexpected type, expected Image"), "unexpected type", "type", fmt.Sprintf("%T", obj))
@@ -125,13 +125,13 @@ func (s *ImageRegistryConfigSyncer) onAddOrUpdate(ic system_config.IConfigSyncer
 	}
 }
 
-func (s *ImageRegistryConfigSyncer) onAdd(ic system_config.IConfigSyncer) func(interface{}) {
+func (s *ImageRegistryConfigSyncer) onAdd(ic systemconfig.IConfigSyncer) func(interface{}) {
 	return func(obj interface{}) {
 		s.onAddOrUpdate(ic, obj)
 	}
 }
 
-func (s *ImageRegistryConfigSyncer) onUpdate(ic system_config.IConfigSyncer) func(interface{}, interface{}) {
+func (s *ImageRegistryConfigSyncer) onUpdate(ic systemconfig.IConfigSyncer) func(interface{}, interface{}) {
 	return func(oldobj, newobj interface{}) {
 		s.onAddOrUpdate(ic, newobj)
 	}

@@ -20,7 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"multiarch-operator/pkg/system_config"
+	"multiarch-operator/pkg/systemconfig"
 
 	"github.com/go-logr/logr"
 	v1 "github.com/openshift/api/config/v1"
@@ -65,7 +65,7 @@ func (s *IDMSSyncer) Start(ctx context.Context) (err error) {
 	s.log = log.FromContext(ctx, "handler", "IDMSSynver", "kind", "ImageDigestMirrorSet [config.openshift.io/v1]")
 	s.log.Info("Starting System Config Syncer")
 	mgr := s.mgr
-	ic := system_config.SystemConfigSyncerSingleton()
+	ic := systemconfig.SystemConfigSyncerSingleton()
 	icspInformer, err := mgr.GetCache().GetInformerForKind(ctx, v1.GroupVersion.WithKind("ImageDigestMirrorSet"))
 	if err != nil {
 		s.log.Error(err, "Error getting informer for ImageDigestMirrorSet")
@@ -83,7 +83,7 @@ func (s *IDMSSyncer) Start(ctx context.Context) (err error) {
 	return nil
 }
 
-func (s *IDMSSyncer) onAdd(ic system_config.IConfigSyncer) func(obj interface{}) {
+func (s *IDMSSyncer) onAdd(ic systemconfig.IConfigSyncer) func(obj interface{}) {
 	return func(obj interface{}) {
 		idms, ok := obj.(*v1.ImageDigestMirrorSet)
 		if !ok {
@@ -92,7 +92,7 @@ func (s *IDMSSyncer) onAdd(ic system_config.IConfigSyncer) func(obj interface{})
 			return
 		}
 		for _, source := range idms.Spec.ImageDigestMirrors {
-			err := ic.UpdateRegistryMirroringConfig(source.Source, mirrorsToStrings(source.Mirrors), system_config.PullTypeDigestOnly)
+			err := ic.UpdateRegistryMirroringConfig(source.Source, mirrorsToStrings(source.Mirrors), systemconfig.PullTypeDigestOnly)
 			if err != nil {
 				s.log.Error(err, "Error updating registry mirroring config",
 					idms.Name, source.Source, err)
@@ -101,7 +101,7 @@ func (s *IDMSSyncer) onAdd(ic system_config.IConfigSyncer) func(obj interface{})
 	}
 }
 
-func (s *IDMSSyncer) onDelete(ic system_config.IConfigSyncer) func(obj interface{}) {
+func (s *IDMSSyncer) onDelete(ic systemconfig.IConfigSyncer) func(obj interface{}) {
 	return func(obj interface{}) {
 		idms, ok := obj.(*v1.ImageDigestMirrorSet)
 		if !ok {
@@ -120,7 +120,7 @@ func (s *IDMSSyncer) onDelete(ic system_config.IConfigSyncer) func(obj interface
 	}
 }
 
-func (s *IDMSSyncer) onUpdate(ic system_config.IConfigSyncer) func(oldobj, newobj interface{}) {
+func (s *IDMSSyncer) onUpdate(ic systemconfig.IConfigSyncer) func(oldobj, newobj interface{}) {
 	return func(oldobj, newobj interface{}) {
 		s.onDelete(ic)(oldobj)
 		s.onAdd(ic)(newobj)

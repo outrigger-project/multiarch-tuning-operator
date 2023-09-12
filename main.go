@@ -18,9 +18,9 @@ package main
 
 import (
 	"flag"
-	commonsysconfig "multiarch-operator/controllers/sysconfig_handlers/common"
-	openshiftsysconfig "multiarch-operator/controllers/sysconfig_handlers/openshift"
-	"multiarch-operator/pkg/system_config"
+	commonsysconfig "multiarch-operator/controllers/sysconfighandlers/common"
+	openshiftsysconfig "multiarch-operator/controllers/sysconfighandlers/openshift"
+	"multiarch-operator/pkg/systemconfig"
 	"os"
 	"time"
 
@@ -43,7 +43,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
 	multiarchv1alpha1 "multiarch-operator/apis/multiarch/v1alpha1"
-	podplacement "multiarch-operator/controllers/pod_placement"
+	podplacement "multiarch-operator/controllers/podplacement"
 	//+kubebuilder:scaffold:imports
 )
 
@@ -143,7 +143,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	err = mgr.Add(&system_config.ConfigSyncerRunnable{})
+	err = mgr.Add(&systemconfig.ConfigSyncerRunnable{})
 	if err != nil {
 		setupLog.Error(err, "unable to add the ConfigSyncerRunnable to the manager")
 		os.Exit(1)

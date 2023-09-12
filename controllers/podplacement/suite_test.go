@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package pod_placement
+package podplacement
 
 import (
 	"path/filepath"
