@@ -157,7 +157,11 @@ gosec: ## Goimports against code
 
 .PHONY: verify-diff
 verify-diff: ## Verify that no files have changed in the versioned working tree
-	$(DOCKER_CMD) hack/verify-diff.sh .
+	$(DOCKER_CMD) hack/verify-diff.sh
+
+.PHONY: vendor
+vendor: ## Run go mod vendor
+	$(DOCKER_CMD) hack/go-mod.sh
 
 .PHONY: test
 test: manifests generate envtest fmt vet goimports gosec lint ## Run tests.
