@@ -18,8 +18,9 @@ package image
 
 import (
 	"context"
-	"k8s.io/apimachinery/pkg/util/sets"
 	"sync"
+
+	"k8s.io/apimachinery/pkg/util/sets"
 )
 
 type cacheProxy struct {

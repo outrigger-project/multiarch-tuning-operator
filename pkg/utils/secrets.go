@@ -19,7 +19,8 @@ package utils
 import (
 	"encoding/json"
 	"errors"
-	"k8s.io/api/core/v1"
+
+	v1 "k8s.io/api/core/v1"
 )
 
 func ExtractAuthFromSecret(secret *v1.Secret) ([]byte, error) {

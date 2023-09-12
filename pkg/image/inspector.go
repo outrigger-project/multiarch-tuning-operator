@@ -19,6 +19,10 @@ package image
 import (
 	"context"
 	"fmt"
+	"multiarch-operator/pkg/systemconfig"
+	"os"
+	"sync"
+
 	"github.com/containers/image/v5/docker"
 	"github.com/containers/image/v5/image"
 	"github.com/containers/image/v5/manifest"
@@ -26,10 +30,7 @@ import (
 	"github.com/go-logr/logr"
 	"golang.org/x/sys/unix"
 	"k8s.io/apimachinery/pkg/util/sets"
-	"multiarch-operator/pkg/system_config"
-	"os"
 	ctrllog "sigs.k8s.io/controller-runtime/pkg/log"
-	"sync"
 )
 
 type registryInspector struct {
@@ -60,10 +61,10 @@ func (i *registryInspector) GetCompatibleArchitecturesSet(ctx context.Context, i
 	}
 	sys := &types.SystemContext{
 		AuthFilePath:                authFile.Name(),
-		SystemRegistriesConfPath:    system_config.RegistriesConfPath,
-		SystemRegistriesConfDirPath: system_config.RegistryCertsDir,
-		SignaturePolicyPath:         system_config.PolicyConfPath,
-		DockerPerHostCertDirPath:    system_config.DockerCertsDir,
+		SystemRegistriesConfPath:    systemconfig.RegistriesConfPath,
+		SystemRegistriesConfDirPath: systemconfig.RegistryCertsDir,
+		SignaturePolicyPath:         systemconfig.PolicyConfPath,
+		DockerPerHostCertDirPath:    systemconfig.DockerCertsDir,
 	}
 	src, err := ref.NewImageSource(ctx, sys)
 	if err != nil {

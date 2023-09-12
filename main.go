@@ -18,14 +18,14 @@ package main
 
 import (
 	"flag"
+	commonsysconfig "multiarch-operator/controllers/sysconfighandlers/common"
+	openshiftsysconfig "multiarch-operator/controllers/sysconfighandlers/openshift"
+	"multiarch-operator/pkg/systemconfig"
+	"os"
+
 	ocpv1 "github.com/openshift/api/config/v1"
 	ocpv1alpha1 "github.com/openshift/api/operator/v1alpha1"
 	"k8s.io/klog/v2"
-	commonsysconfig "multiarch-operator/controllers/sysconfig_handlers/common"
-	openshiftsysconfig "multiarch-operator/controllers/sysconfig_handlers/openshift"
-	"multiarch-operator/pkg/system_config"
-	"os"
-	"time"
 
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
@@ -42,7 +42,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
 	multiarchv1alpha1 "multiarch-operator/apis/multiarch/v1alpha1"
-	podplacement "multiarch-operator/controllers/pod_placement"
+	podplacement "multiarch-operator/controllers/podplacement"
 	//+kubebuilder:scaffold:imports
 )
 
@@ -50,8 +50,6 @@ var (
 	scheme   = runtime.NewScheme()
 	setupLog = ctrl.Log.WithName("setup")
 )
-
-const readonlySystemConfigResyncPeriod = 30 * time.Minute
 
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
@@ -90,7 +88,7 @@ func main() {
 		Development: true,
 	}
 	klog.InitFlags(nil)
-	flag.Set("alsologtostderr", "true")
+	_ = flag.Set("alsologtostderr", "true")
 
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
@@ -142,7 +140,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	err = mgr.Add(&system_config.ConfigSyncerRunnable{})
+	err = mgr.Add(&systemconfig.ConfigSyncerRunnable{})
 	if err != nil {
 		setupLog.Error(err, "unable to add the ConfigSyncerRunnable to the manager")
 		os.Exit(1)
