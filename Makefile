@@ -1,3 +1,7 @@
+ifeq ($(shell test -f .env && echo -n yes),yes)
+ include .env
+endif
+
 # VERSION defines the project version for the bundle.
 # Update this value when you upgrade the version of your project.
 # To re-generate a bundle for another specific version without changing the standard setup, you can:
@@ -63,6 +67,42 @@ endif
 SHELL = /usr/bin/env bash -o pipefail
 .SHELLFLAGS = -ec
 
+GO111MODULE = on
+export GO111MODULE
+GOFLAGS ?= -mod=vendor
+export GOFLAGS
+
+ifeq ($(DBG),1)
+GOGCFLAGS ?= -gcflags=all="-N -l"
+endif
+
+# TODO: is there a public manifest-list image we can replace this with?
+BUILD_IMAGE ?= registry.ci.openshift.org/openshift/release:golang-1.20
+
+NO_DOCKER ?= 0
+
+ifeq ($(shell command -v podman > /dev/null 2>&1 ; echo $$? ), 0)
+	ENGINE=podman
+else ifeq ($(shell command -v docker > /dev/null 2>&1 ; echo $$? ), 0)
+	ENGINE=docker
+else
+	NO_DOCKER=1
+endif
+
+FORCE_DOCKER ?= 0
+ifeq ($(FORCE_DOCKER), 1)
+	ENGINE=docker
+endif
+
+ifeq ($(NO_DOCKER), 1)
+  DOCKER_CMD =
+  IMAGE_BUILD_CMD = imagebuilder
+else
+  DOCKER_CMD := $(ENGINE) run --env GO111MODULE=$(GO111MODULE) --env GOFLAGS=$(GOFLAGS) --rm -v "$(PWD)":/go/src/github.com/openshift/multiarch-manager-operator:Z -w /go/src/github.com/openshift/multiarch-manager-operator $(BUILD_IMAGE)
+  IMAGE_BUILD_CMD = $(ENGINE) build
+endif
+
+
 .PHONY: all
 all: build
 
@@ -95,14 +135,31 @@ generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and
 
 .PHONY: fmt
 fmt: ## Run go fmt against code.
-	go fmt ./...
+	$(DOCKER_CMD) hack/go-fmt.sh ./
 
 .PHONY: vet
 vet: ## Run go vet against code.
-	go vet ./...
+	echo "Running go vet..."
+	$(DOCKER_CMD) go vet ./...
+
+.PHONY: lint
+lint:
+	$(DOCKER_CMD) hack/golangci-lint.sh ./...
+
+.PHONY: goimports
+goimports: ## Goimports against code
+	$(DOCKER_CMD) hack/goimports.sh .
+
+.PHONY: gosec
+gosec: ## Goimports against code
+	$(DOCKER_CMD) hack/gosec.sh ./...
+
+.PHONY: verify-diff
+verify-diff: ## Verify that no files have changed in the versioned working tree
+	$(DOCKER_CMD) hack/verify-diff.sh .
 
 .PHONY: test
-test: manifests generate fmt vet envtest ## Run tests.
+test: manifests generate envtest fmt vet goimports gosec lint ## Run tests.
 	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" go test ./... -coverprofile cover.out
 
 ##@ Build
@@ -120,11 +177,11 @@ run: manifests generate fmt vet ## Run a controller from your host.
 # More info: https://docs.docker.com/develop/develop-images/build_enhancements/
 .PHONY: docker-build
 docker-build: test ## Build docker image with the manager.
-	docker build -t ${IMG} .
+	$(ENGINE) build -t ${IMG} --build-arg BUILD_IMAGE=$(BUILD_IMAGE) --build-arg RUNTIME_IMAGE=$(RUNTIME_IMAGE) .
 
 .PHONY: docker-push
 docker-push: ## Push docker image with the manager.
-	docker push ${IMG}
+	$(ENGINE) push ${IMG}
 
 # PLATFORMS defines the target platforms for  the manager image be build to provide support to multiple
 # architectures. (i.e. make docker-buildx IMG=myregistry/mypoperator:0.0.1). To use this option you need to:
@@ -212,7 +269,7 @@ bundle: manifests kustomize ## Generate bundle manifests and metadata, then vali
 
 .PHONY: bundle-build
 bundle-build: ## Build the bundle image.
-	docker build -f bundle.Dockerfile -t $(BUNDLE_IMG) .
+	$(ENGINE) build -f bundle.Dockerfile -t $(BUNDLE_IMG) .
 
 .PHONY: bundle-push
 bundle-push: ## Push the bundle image.
@@ -252,9 +309,17 @@ endif
 # https://github.com/operator-framework/community-operators/blob/7f1438c/docs/packaging-operator.md#updating-your-existing-operator
 .PHONY: catalog-build
 catalog-build: opm ## Build a catalog image.
-	$(OPM) index add --container-tool docker --mode semver --tag $(CATALOG_IMG) --bundles $(BUNDLE_IMGS) $(FROM_INDEX_OPT)
+	$(OPM) index add --container-tool $(ENGINE) --mode semver --tag $(CATALOG_IMG) --bundles $(BUNDLE_IMGS) $(FROM_INDEX_OPT)
 
 # Push the catalog image.
 .PHONY: catalog-push
 catalog-push: ## Push a catalog image.
 	$(MAKE) docker-push IMG=$(CATALOG_IMG)
+
+define ensure-home
+	@ export HOME=$${HOME:=/tmp/kubebuilder-testing}; \
+	if [ $${HOME} == "/" ]; then \
+	  export HOME=/tmp/kubebuilder-testing; \
+	fi; \
+	$(1)
+endef
