@@ -50,14 +50,14 @@ func (t registryCertTuple) writeToFile() error {
 	// create folder if it doesn't exist
 	absoluteFolderPath := fmt.Sprintf("%s/%s", DockerCertsDir, t.getFolderName())
 	if _, err := os.Stat(absoluteFolderPath); os.IsNotExist(err) {
-		err = os.MkdirAll(absoluteFolderPath, 0755)
+		err = os.MkdirAll(absoluteFolderPath, 0700)
 		if err != nil {
 			return err
 		}
 	}
 	// write cert to file
 	absoluteFilePath := fmt.Sprintf("%s/%s/ca.crt", DockerCertsDir, t.getFolderName())
-	f, err := os.Create(absoluteFilePath)
+	f, err := os.Create(filepath.Clean(absoluteFilePath))
 	if err != nil {
 		return err
 	}
@@ -236,7 +236,7 @@ type policyEntry struct {
 
 func writeTomlFile(path string, data interface{}) error {
 	createBaseDir(path)
-	f, err := os.Create(path)
+	f, err := os.Create(filepath.Clean(path))
 	if err != nil {
 		return err
 	}
@@ -246,7 +246,7 @@ func writeTomlFile(path string, data interface{}) error {
 
 func createBaseDir(path string) {
 	// create base dir if it doesn't exist
-	baseDir := filepath.Dir(path)
+	baseDir := filepath.Dir(filepath.Clean(path))
 	if _, err := os.Stat(baseDir); os.IsNotExist(err) {
 		os.MkdirAll(baseDir, os.ModePerm)
 	}
@@ -254,7 +254,7 @@ func createBaseDir(path string) {
 
 func writeJSONFile(path string, data interface{}) error {
 	createBaseDir(path)
-	f, err := os.Create(path)
+	f, err := os.Create(filepath.Clean(path))
 	if err != nil {
 		return err
 	}
