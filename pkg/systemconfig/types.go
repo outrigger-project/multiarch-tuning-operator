@@ -61,7 +61,7 @@ func (t registryCertTuple) writeToFile() error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer close(f)
 	_, err = f.WriteString(t.cert)
 	if err != nil {
 		return err
@@ -83,7 +83,7 @@ type registriesConf struct {
 }
 
 func (rsc *registriesConf) getRegistryConfOrCreate(registry string) *registryConf {
-	rc, _ := rsc.registriesMap[registry]
+	rc := rsc.registriesMap[registry]
 	if rc == nil {
 		rc = &registryConf{
 			Location: registry,
@@ -240,7 +240,7 @@ func writeTomlFile(path string, data interface{}) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer close(f)
 	return toml.NewEncoder(f).Encode(data)
 }
 
@@ -248,7 +248,10 @@ func createBaseDir(path string) {
 	// create base dir if it doesn't exist
 	baseDir := filepath.Dir(filepath.Clean(path))
 	if _, err := os.Stat(baseDir); os.IsNotExist(err) {
-		os.MkdirAll(baseDir, os.ModePerm)
+		err := os.MkdirAll(baseDir, os.ModePerm)
+		if err != nil {
+			log.Error(err, "Unable to create the base dir", "path", path)
+		}
 	}
 }
 
@@ -258,8 +261,15 @@ func writeJSONFile(path string, data interface{}) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer close(f)
 	return json.NewEncoder(f).Encode(data)
+}
+
+func close(f *os.File) {
+	err := f.Close()
+	if err != nil {
+		log.Error(err, "When cosing fd")
+	}
 }
 
 /* example policy.json

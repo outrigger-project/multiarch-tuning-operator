@@ -33,9 +33,11 @@ func (ac authCfg) addAuth(registry string, auth authData) {
 	ac.Auths[registry] = auth
 }
 
-// Currently not used
-// addAuthString takes a registry and an auth string and stores it in the authCfg's Auths field
-// in case of duplicated registries, the last generated authData will be kept
+// addAuthString takes a registry and an auth string and stores it in the authCfg's Auths field.
+// In case of duplicated registries, the last generated authData will be kept.
+// This function is currently not used.
+//
+//nolint:unused
 func (ac authCfg) addAuthString(registry, auth string) {
 	ac.Auths[registry] = authData{Auth: auth}
 }

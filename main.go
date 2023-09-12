@@ -22,7 +22,6 @@ import (
 	openshiftsysconfig "multiarch-operator/controllers/sysconfighandlers/openshift"
 	"multiarch-operator/pkg/systemconfig"
 	"os"
-	"time"
 
 	ocpv1 "github.com/openshift/api/config/v1"
 	ocpv1alpha1 "github.com/openshift/api/operator/v1alpha1"
@@ -51,8 +50,6 @@ var (
 	scheme   = runtime.NewScheme()
 	setupLog = ctrl.Log.WithName("setup")
 )
-
-const readonlySystemConfigResyncPeriod = 30 * time.Minute
 
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
@@ -91,7 +88,7 @@ func main() {
 		Development: true,
 	}
 	klog.InitFlags(nil)
-	flag.Set("alsologtostderr", "true")
+	_ = flag.Set("alsologtostderr", "true")
 
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
