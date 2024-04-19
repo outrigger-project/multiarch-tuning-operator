@@ -10,8 +10,6 @@ fi
 export NO_DOCKER=1
 export NAMESPACE=openshift-multiarch-tuning-operator
 oc create namespace ${NAMESPACE}
-oc annotate namespace ${NAMESPACE} \
-  scheduler.alpha.kubernetes.io/node-selector="kubernetes.io/arch=amd64"
 
 if [ "${USE_OLM:-}" == "true" ]; then
   export HOME=/tmp/home
