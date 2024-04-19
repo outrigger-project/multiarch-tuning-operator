@@ -7,6 +7,13 @@ if ! which kubectl >/dev/null; then
   ln -s "$(which oc)" "/tmp/bin/kubectl"
 fi
 
+function debug_and_fail() {
+  oc get pods -o wide -n $NAMESPACE
+  oc get all -n $NAMESPACE
+  oc get nodes -o wide -n $NAMESPACE
+  exit 1
+}
+
 export NO_DOCKER=1
 export NAMESPACE=openshift-multiarch-tuning-operator
 oc create namespace ${NAMESPACE}
@@ -30,9 +37,9 @@ fi
 
 oc wait deployments -n ${NAMESPACE} \
   -l app.kubernetes.io/part-of=multiarch-tuning-operator \
-  --for=condition=Available=True
+  --for=condition=Available=True || debug_and_fail
 oc wait pods -n ${NAMESPACE} \
   -l control-plane=controller-manager \
-  --for=condition=Ready=True
+  --for=condition=Ready=True || debug_and_fail
 
 make e2e
