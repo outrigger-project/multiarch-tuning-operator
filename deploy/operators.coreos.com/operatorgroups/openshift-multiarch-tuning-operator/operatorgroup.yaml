@@ -1,0 +1,8 @@
+apiVersion: operators.coreos.com/v1
+kind: OperatorGroup
+metadata:
+  name: openshift-multiarch-tuning-operator
+  namespace: openshift-multiarch-tuning-operator
+spec:
+  targetNamespaces:
+    - openshift-multiarch-tuning-operator

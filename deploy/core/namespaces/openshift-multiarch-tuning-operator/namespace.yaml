@@ -1,0 +1,7 @@
+kind: Namespace
+apiVersion: v1
+metadata:
+  name: openshift-multiarch-tuning-operator
+  annotations:
+    scheduler.alpha.kubernetes.io/node-selector: kubernetes.io/arch=amd64
+    workload.openshift.io/allowed: management
