@@ -25,17 +25,43 @@ import (
 
 // ClusterPodPlacementConfigSpec defines the desired state of ClusterPodPlacementConfig
 type ClusterPodPlacementConfigSpec struct {
-	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
+	// LogVerbosity is the log level for the pod placement controller.
+	// Valid values are: "Normal", "Debug", "Trace", "TraceAll".
+	// Defaults to "Normal".
+	// +optional
+	// +kubebuilder:default=Normal
+	LogVerbosity LogVerbosityLevel `json:"logVerbosity,omitempty"`
 
-	// Foo is an example field of ClusterPodPlacementConfig. Edit clusterpodplacementconfig_types.go to remove/update
-	Foo string `json:"foo,omitempty"`
+	// NamespaceSelector filters the namespaces that the architecture aware pod placement can operate.
+	//
+	// For example, users can configure an opt-out filter to disallow the operand from operating on namespaces with a given
+	// label:
+	//
+	// {"namespaceSelector":{"matchExpressions":[{"key":"multiarch.openshift.io/exclude-pod-placement","operator":"DoesNotExist"}]}}
+	//
+	// The operand will set the node affinity requirement in all the pods created in namespaces that do not have
+	// the `multiarch.openshift.io/exclude-pod-placement` label.
+	//
+	// Alternatively, users can configure an opt-in filter to operate only on namespaces with specific labels:
+	//
+	// {"namespaceSelector":{"matchExpressions":[{"key":"multiarch.openshift.io/include-pod-placement","operator":"Exists"}]}}
+	//
+	// The operand will set the node affinity requirement in all the pods created in namespace labeled with the key
+	// `multiarch.ioenshift.io/include-pod-placement`.
+	//
+	// See
+	// https://kubernetes.io/docs/concepts/overview/working-with-objects/labels/
+	// for more examples of label selectors.
+	//
+	// Default to the empty LabelSelector, which matches everything. Selectors are ANDed.
+	// +optional
+	NamespaceSelector *metav1.LabelSelector `json:"namespaceSelector,omitempty"`
 }
 
 // ClusterPodPlacementConfigStatus defines the observed state of ClusterPodPlacementConfig
 type ClusterPodPlacementConfigStatus struct {
-	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
+	// Conditions represents the latest available observations of a ClusterPodPlacementConfig's current state.
+	Conditions []metav1.Condition `json:"conditions,omitempty"`
 }
 
 //+kubebuilder:object:root=true
