@@ -40,6 +40,7 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
+	multiarchv1beta1 "github.com/openshift/multiarch-tuning-operator/apis/multiarch/v1beta1"
 	//+kubebuilder:scaffold:imports
 
 	ocpv1 "github.com/openshift/api/config/v1"
@@ -83,6 +84,7 @@ func init() {
 	utilruntime.Must(ocpv1.Install(scheme))
 	utilruntime.Must(ocpv1alpha1.Install(scheme))
 
+	utilruntime.Must(multiarchv1beta1.AddToScheme(scheme))
 	//+kubebuilder:scaffold:scheme
 }
 
