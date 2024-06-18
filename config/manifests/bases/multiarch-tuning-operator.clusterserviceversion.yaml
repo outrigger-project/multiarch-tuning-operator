@@ -36,6 +36,12 @@ spec:
   apiservicedefinitions: {}
   customresourcedefinitions:
     owned:
+    - description: ClusterPodPlacementConfig is the Schema for the clusterpodplacementconfigs
+        API
+      displayName: Cluster Pod Placement Config
+      kind: ClusterPodPlacementConfig
+      name: clusterpodplacementconfigs.multiarch.openshift.io
+      version: v1beta1
     - description: ClusterPodPlacementConfig defines the configuration for the PodPlacement
         operand. It is a singleton resource that can consist of an object named cluster.
         Creating this object will trigger the deployment of the architecture aware

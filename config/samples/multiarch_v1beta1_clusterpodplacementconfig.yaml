@@ -1,12 +1,10 @@
 apiVersion: multiarch.openshift.io/v1beta1
 kind: ClusterPodPlacementConfig
 metadata:
-  labels:
-    app.kubernetes.io/name: clusterpodplacementconfig
-    app.kubernetes.io/instance: clusterpodplacementconfig-sample
-    app.kubernetes.io/part-of: multiarch-tuning-operator
-    app.kubernetes.io/managed-by: kustomize
-    app.kubernetes.io/created-by: multiarch-tuning-operator
-  name: clusterpodplacementconfig-sample
+  name: cluster
 spec:
-  # TODO(user): Add fields here
+  logVerbosity: Normal
+  namespaceSelector:
+      matchExpressions:
+        - key: multiarch.openshift.io/exclude-pod-placement
+          operator: DoesNotExist

@@ -5,7 +5,7 @@ metadata:
     alm-examples: |-
       [
         {
-          "apiVersion": "multiarch.openshift.io/v1alpha1",
+          "apiVersion": "multiarch.openshift.io/v1beta1",
           "kind": "ClusterPodPlacementConfig",
           "metadata": {
             "name": "cluster"
@@ -21,27 +21,12 @@ metadata:
               ]
             }
           }
-        },
-        {
-          "apiVersion": "multiarch.openshift.io/v1beta1",
-          "kind": "ClusterPodPlacementConfig",
-          "metadata": {
-            "labels": {
-              "app.kubernetes.io/created-by": "multiarch-tuning-operator",
-              "app.kubernetes.io/instance": "clusterpodplacementconfig-sample",
-              "app.kubernetes.io/managed-by": "kustomize",
-              "app.kubernetes.io/name": "clusterpodplacementconfig",
-              "app.kubernetes.io/part-of": "multiarch-tuning-operator"
-            },
-            "name": "clusterpodplacementconfig-sample"
-          },
-          "spec": null
         }
       ]
     capabilities: Seamless Upgrades
     categories: OpenShift Optional, Other
     console.openshift.io/disable-operand-delete: "true"
-    createdAt: "2024-06-18T01:08:40Z"
+    createdAt: "2024-06-18T12:22:21Z"
     features.operators.openshift.io/cnf: "false"
     features.operators.openshift.io/cni: "false"
     features.operators.openshift.io/csi: "false"
@@ -59,7 +44,7 @@ metadata:
     operatorframework.io/suggested-namespace: openshift-multiarch-tuning-operator
     operators.openshift.io/valid-subscription: '["OpenShift Kubernetes Engine", "OpenShift
       Container Platform", "OpenShift Platform Plus"]'
-    operators.operatorframework.io/builder: operator-sdk-v1.34.2
+    operators.operatorframework.io/builder: operator-sdk-v1.31.0
     operators.operatorframework.io/project_layout: go.kubebuilder.io/v3
     repository: https://github.com/openshift/multiarch-tuning-operator
     support: Red Hat
@@ -82,7 +67,10 @@ spec:
       kind: ClusterPodPlacementConfig
       name: clusterpodplacementconfigs.multiarch.openshift.io
       version: v1alpha1
-    - kind: ClusterPodPlacementConfig
+    - description: ClusterPodPlacementConfig is the Schema for the clusterpodplacementconfigs
+        API
+      displayName: Cluster Pod Placement Config
+      kind: ClusterPodPlacementConfig
       name: clusterpodplacementconfigs.multiarch.openshift.io
       version: v1beta1
   description: |
@@ -355,10 +343,6 @@ spec:
                   initialDelaySeconds: 15
                   periodSeconds: 20
                 name: manager
-                ports:
-                - containerPort: 9443
-                  name: webhook-server
-                  protocol: TCP
                 readinessProbe:
                   httpGet:
                     path: /readyz
@@ -375,9 +359,6 @@ spec:
                     drop:
                     - ALL
                 volumeMounts:
-                - mountPath: /tmp/k8s-webhook-server/serving-certs
-                  name: cert
-                  readOnly: true
                 - mountPath: /var/run/manager/tls
                   name: webhook-server-cert
                   readOnly: true
@@ -412,10 +393,6 @@ spec:
               serviceAccountName: multiarch-tuning-operator-controller-manager
               terminationGracePeriodSeconds: 10
               volumes:
-              - name: cert
-                secret:
-                  defaultMode: 420
-                  secretName: webhook-server-cert
               - name: webhook-server-cert
                 secret:
                   defaultMode: 420
