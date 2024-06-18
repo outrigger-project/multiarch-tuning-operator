@@ -11,7 +11,7 @@ spec:
     webhook:
       clientConfig:
         service:
-          name: multiarch-tuning-operator-webhook-service
+          name: multiarch-tuning-operator-controller-manager-service
           namespace: openshift-multiarch-tuning-operator
           path: /convert
       conversionReviewVersions:
