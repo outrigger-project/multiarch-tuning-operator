@@ -1,2 +1,5 @@
 resources:
   - ./service.yaml
+
+configurations:
+  - kustomizeconfig.yaml
