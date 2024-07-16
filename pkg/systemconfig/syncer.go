@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 
 	"github.com/containers/image/v5/signature"
@@ -89,6 +90,17 @@ func (s *SystemConfigSyncer) StoreImageRegistryConf(allowedRegistries []string, 
 		rc.Insecure = &trueValue
 	}
 	s.registriesConfContent.cleanupAllRegistryConfIfEmpty()
+
+	// Propagate insecure registries to the mirrors of any previously defined registry set by ICSP/ITMS/IDMS.
+	for _, rc := range s.registriesConfContent.Registries {
+		for _, mirror := range rc.Mirrors {
+			mirror.Insecure = nil
+			if mrc, ok := s.registriesConfContent.getRegistryConf(strings.Split(mirror.Location, "/")[0]); ok && mrc.Insecure != nil {
+				mirror.Insecure = mrc.Insecure
+			}
+		}
+	}
+
 	return nil
 }
 
@@ -104,11 +116,25 @@ func (s *SystemConfigSyncer) StoreRegistryCerts(registryCertTuples []registryCer
 	return nil
 }
 
+func (s *SystemConfigSyncer) mirrorsFor(locations []string, pullType PullType) []*Mirror {
+	var mirrors []*Mirror
+	var insecure *bool
+
+	for _, location := range locations {
+		insecure = nil
+		if mrc, ok := s.registriesConfContent.getRegistryConf(strings.Split(location, "/")[0]); ok && mrc.Insecure != nil {
+			insecure = mrc.Insecure
+		}
+		mirrors = append(mirrors, mirrorFor(location, pullType, insecure))
+	}
+	return mirrors
+}
+
 func (s *SystemConfigSyncer) UpdateRegistryMirroringConfig(registry string, mirrors []string, pullType PullType) error {
 	s.mu.Lock()
 	defer s.unlockAndSync()
 	rc := s.registriesConfContent.getRegistryConfOrCreate(registry)
-	rc.Mirrors = mirrorsFor(mirrors, pullType)
+	rc.Mirrors = s.mirrorsFor(mirrors, pullType)
 	return nil
 }
 

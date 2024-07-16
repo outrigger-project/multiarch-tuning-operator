@@ -164,9 +164,9 @@ func (rsc *registriesConf) cleanupAllRegistryConfIfEmpty() {
 }
 
 type registryConf struct {
-	Location string   `toml:"location"`
-	Prefix   string   `toml:"prefix"`
-	Mirrors  []Mirror `toml:"mirror"`
+	Location string    `toml:"location"`
+	Prefix   string    `toml:"prefix"`
+	Mirrors  []*Mirror `toml:"mirror"`
 	// Setting the blocked, allowed and insecure fields to nil will cause them to be omitted from the output
 	Blocked  *bool `toml:"blocked"`
 	Insecure *bool `toml:"insecure"`
@@ -175,23 +175,15 @@ type registryConf struct {
 type Mirror struct {
 	Location       string   `toml:"location"`
 	PullFromMirror PullType `toml:"pull-from-mirror"`
-	// insecure *bool  `toml:"insecure"`
+	Insecure       *bool    `toml:"insecure"`
 }
 
-func mirrorFor(location string, pullType PullType) Mirror {
-	return Mirror{
+func mirrorFor(location string, pullType PullType, insecure *bool) *Mirror {
+	return &Mirror{
 		Location:       location,
 		PullFromMirror: pullType,
-		// insecure: insecure,
+		Insecure:       insecure,
 	}
-}
-
-func mirrorsFor(locations []string, pullType PullType) []Mirror {
-	var mirrors []Mirror
-	for _, location := range locations {
-		mirrors = append(mirrors, mirrorFor(location, pullType))
-	}
-	return mirrors
 }
 
 // defaultRegistriesConf returns a default registriesConf object
