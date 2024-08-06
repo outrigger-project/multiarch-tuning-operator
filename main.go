@@ -196,9 +196,12 @@ func RunClusterPodPlacementConfigOperandControllers(mgr ctrl.Manager) {
 }
 
 func RunClusterPodPlacementConfigOperandWebHook(mgr ctrl.Manager) {
+	nsCache := podplacement.NewNamespaceCache(mgr)
+	must(mgr.Add(nsCache), unableToAddRunnable, runnableKey, "NamespaceCache")
 	mgr.GetWebhookServer().Register("/add-pod-scheduling-gate", &webhook.Admission{Handler: &podplacement.PodSchedulingGateMutatingWebHook{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
+		Client:  mgr.GetClient(),
+		Scheme:  mgr.GetScheme(),
+		NsCache: nsCache,
 	}})
 }
 

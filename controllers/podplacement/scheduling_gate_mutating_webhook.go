@@ -46,6 +46,7 @@ type PodSchedulingGateMutatingWebHook struct {
 	Client  client.Client
 	decoder *admission.Decoder
 	Scheme  *runtime.Scheme
+	NsCache *NamespaceCache
 }
 
 func (a *PodSchedulingGateMutatingWebHook) patchedPodResponse(pod *corev1.Pod, req admission.Request) admission.Response {
@@ -66,10 +67,20 @@ func (a *PodSchedulingGateMutatingWebHook) Handle(ctx context.Context, req admis
 		return admission.Errored(http.StatusBadRequest, err)
 	}
 
-	// ignore the openshift-* namespace as those are infra components, and ignore the namespace where the operand is running too
-	if utils.Namespace() == pod.Namespace || strings.HasPrefix(pod.Namespace, "openshift-") ||
-		strings.HasPrefix(pod.Namespace, "hypershift-") || strings.HasPrefix(pod.Namespace, "kube-") ||
+	// ignore the hypershift-* and kube-* namespace as those are infra components, and ignore the namespace where the operand is running too
+	if utils.Namespace() == pod.Namespace || strings.HasPrefix(pod.Namespace, "hypershift-") || strings.HasPrefix(pod.Namespace, "kube-") ||
 		pod.Spec.NodeName != "" {
+		return a.patchedPodResponse(pod, req)
+	}
+
+	// For openshift namespaces, exclude accrodingly
+	//   - check for any namespace having ownerReference of ClusterVersion of Network
+	//   - exclude the namespace if it does. If it is a namespace starting with openshift* and does not have the "-operator" suffix, add the "-operator" suffix
+	//     and check if the parent operator is managed by CVO. If so ,exclude this operand namespace as well.
+	//   - exclude "openshift-route-controller-manager" and "openshift-ingress-canary"
+	//   - include the "openshift-marketplace" and "openshift-operators" namespaces
+	// TODO: How do we firm up this logic for operand namespaces ?
+	if a.NsCache.ShouldExcludeNamespace(pod.Namespace) {
 		return a.patchedPodResponse(pod, req)
 	}
 
