@@ -135,6 +135,77 @@ var _ = Describe("The Multiarch Tuning Operator", func() {
 			verifyPodNodeAffinity(ns, "app", "test", expectedNSTs)
 			verifyPodLabels(ns, "app", "test", e2e.Present, schedulingGateLabel)
 		})
+		It("should exclude namespaces with owner reference kind ClusterVersion", func() {
+			var err error
+			ns := framework.NewEphemeralNamespaceWithOwnerRef("ClusterVersion")
+			err = client.Create(ctx, ns)
+			Expect(err).NotTo(HaveOccurred())
+			//nolint:errcheck
+			defer client.Delete(ctx, ns)
+			ps := NewPodSpec().
+				WithContainersImages(helloOpenshiftPublicMultiarchImage).
+				Build()
+			d := NewDeployment().
+				WithSelectorAndPodLabels(podLabel).
+				WithPodSpec(ps).
+				WithReplicas(utils.NewPtr(int32(1))).
+				WithName("test-deployment").
+				WithNamespace(ns.Name).
+				Build()
+			err = client.Create(ctx, &d)
+			Expect(err).NotTo(HaveOccurred())
+			//should exclude the namespace
+			verifyPodNodeAffinity(ns, "app", "test")
+			verifyPodLabels(ns, "app", "test", e2e.Absent, schedulingGateLabel)
+		})
+		It("should exclude namespaces with owner reference kind Network", func() {
+			var err error
+			ns := framework.NewEphemeralNamespaceWithOwnerRef("Network")
+			err = client.Create(ctx, ns)
+			Expect(err).NotTo(HaveOccurred())
+			//nolint:errcheck
+			defer client.Delete(ctx, ns)
+			ps := NewPodSpec().
+				WithContainersImages(helloOpenshiftPublicMultiarchImage).
+				Build()
+			d := NewDeployment().
+				WithSelectorAndPodLabels(podLabel).
+				WithPodSpec(ps).
+				WithReplicas(utils.NewPtr(int32(1))).
+				WithName("test-deployment").
+				WithNamespace(ns.Name).
+				Build()
+			err = client.Create(ctx, &d)
+			Expect(err).NotTo(HaveOccurred())
+			//should exclude the namespace
+			verifyPodNodeAffinity(ns, "app", "test")
+			verifyPodLabels(ns, "app", "test", e2e.Absent, schedulingGateLabel)
+		})
+		It("should exclude operand namespaces in the openshift* namespace with parent owner reference kind ClusterVersion", func() {
+			var err error
+			parentns, ns := framework.NewEphemeralOpenshiftOperatorNamespaceWithOwnerRef("ClusterVersion")
+			err = client.Create(ctx, parentns)
+			err = client.Create(ctx, ns)
+			Expect(err).NotTo(HaveOccurred())
+			//nolint:errcheck
+			defer client.Delete(ctx, ns)
+			defer client.Delete(ctx, parentns)
+			ps := NewPodSpec().
+				WithContainersImages(helloOpenshiftPublicMultiarchImage).
+				Build()
+			d := NewDeployment().
+				WithSelectorAndPodLabels(podLabel).
+				WithPodSpec(ps).
+				WithReplicas(utils.NewPtr(int32(1))).
+				WithName("test-deployment").
+				WithNamespace(ns.Name).
+				Build()
+			err = client.Create(ctx, &d)
+			Expect(err).NotTo(HaveOccurred())
+			//should exclude the namespace
+			verifyPodNodeAffinity(ns, "app", "test")
+			verifyPodLabels(ns, "app", "test", e2e.Absent, schedulingGateLabel)
+		})
 	})
 	Context("The operator should respect to an opt-in namespaceSelector in ClusterPodPlacementConfig CR", func() {
 		BeforeEach(func() {

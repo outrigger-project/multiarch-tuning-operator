@@ -69,7 +69,7 @@ func (s *NamespaceCache) onAdd() func(interface{}) {
 	return func(obj interface{}) {
 		ns := obj.(*v1.Namespace)
 		if len(ns.OwnerReferences) != 0 && (ns.Name != "openshift-marketplace" && ns.Name != "openshift-operators") {
-			// Print the kind of the first owner reference if available
+			// Exclude namespaces managed by CVO and networking operators
 			if ns.OwnerReferences[0].Kind == "ClusterVersion" || ns.OwnerReferences[0].Kind == "Network" {
 				s.namespaceMap.Insert(ns.Name)
 				s.log.V(5).Info("Added namespace ", ns.Name, " to map")

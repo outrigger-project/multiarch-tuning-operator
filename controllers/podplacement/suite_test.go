@@ -229,10 +229,16 @@ func runManager() {
 		ClientSet: clientset,
 	}).SetupWithManager(mgr)).NotTo(HaveOccurred())
 
+	By("Setting up Namespace Cache")
+	nscache := NewNamespaceCache(mgr)
+	err = mgr.Add(nscache)
+	Expect(err).NotTo(HaveOccurred())
+
 	mgr.GetWebhookServer().Register("/add-pod-scheduling-gate", &webhook.Admission{
 		Handler: &PodSchedulingGateMutatingWebHook{
-			Client: mgr.GetClient(),
-			Scheme: mgr.GetScheme(),
+			Client:  mgr.GetClient(),
+			Scheme:  mgr.GetScheme(),
+			NsCache: nscache,
 		}})
 	By("Setting up System Config Syncer")
 	err = mgr.Add(NewConfigSyncerRunnable())
