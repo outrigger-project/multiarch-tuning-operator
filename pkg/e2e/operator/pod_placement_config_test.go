@@ -185,10 +185,12 @@ var _ = Describe("The Multiarch Tuning Operator", func() {
 			var err error
 			parentns, ns := framework.NewEphemeralOpenshiftOperatorNamespaceWithOwnerRef("ClusterVersion")
 			err = client.Create(ctx, parentns)
+			Expect(err).NotTo(HaveOccurred())
 			err = client.Create(ctx, ns)
 			Expect(err).NotTo(HaveOccurred())
 			//nolint:errcheck
 			defer client.Delete(ctx, ns)
+			//nolint:errcheck
 			defer client.Delete(ctx, parentns)
 			ps := NewPodSpec().
 				WithContainersImages(helloOpenshiftPublicMultiarchImage).

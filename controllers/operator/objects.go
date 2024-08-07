@@ -152,6 +152,12 @@ func buildDeployment(clusterPodPlacementConfig *v1beta1.ClusterPodPlacementConfi
 							Name:            name,
 							Image:           utils.Image(),
 							ImagePullPolicy: corev1.PullIfNotPresent,
+							Env: []corev1.EnvVar{
+								{
+									Name:  "NAMESPACE",
+									Value: utils.Namespace(), // Set the namespace name directly
+								},
+							},
 							Args: append([]string{
 								"--health-probe-bind-address=:8081",
 								"--metrics-bind-address=127.0.0.1:8080",

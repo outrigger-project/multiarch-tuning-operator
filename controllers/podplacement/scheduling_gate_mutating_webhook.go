@@ -73,7 +73,7 @@ func (a *PodSchedulingGateMutatingWebHook) Handle(ctx context.Context, req admis
 		return a.patchedPodResponse(pod, req)
 	}
 
-	// For openshift namespaces, exclude accrodingly
+	// For openshift namespaces, exclude accordingly
 	//   - check for any namespace having ownerReference of ClusterVersion of Network
 	//   - exclude the namespace if it does. If it is a namespace starting with openshift* and does not have the "-operator" suffix, add the "-operator" suffix
 	//     and check if the parent operator is managed by CVO. If so ,exclude this operand namespace as well.
