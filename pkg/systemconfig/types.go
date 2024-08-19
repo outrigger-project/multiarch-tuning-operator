@@ -19,6 +19,7 @@ package systemconfig
 import (
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 
@@ -163,6 +164,25 @@ func (rsc *registriesConf) cleanupAllRegistryConfIfEmpty() {
 	}
 }
 
+func (rsc *registriesConf) newMirrorRegistries(locations []string, pullType PullType) []*Mirror {
+	var mirrors []*Mirror
+
+	for _, location := range locations {
+		mirrors = append(mirrors, mirrorFor(location, pullType, rsc.checkLocationInsecurity(location)))
+	}
+	return mirrors
+}
+
+func (rsc *registriesConf) checkLocationInsecurity(location string) *bool {
+	trueValue := true
+	for _, rc := range rsc.registriesMap {
+		if matchRegistry(location, rc.Location) && rc.Insecure != nil && *rc.Insecure != false {
+			return &trueValue
+		}
+	}
+	return nil
+}
+
 type registryConf struct {
 	Location string    `toml:"location"`
 	Prefix   string    `toml:"prefix"`
@@ -184,6 +204,65 @@ func mirrorFor(location string, pullType PullType, insecure *bool) *Mirror {
 		PullFromMirror: pullType,
 		Insecure:       insecure,
 	}
+}
+
+// matchRegistry checks if a registry matches a mirror pattern
+func matchRegistry(mirror, registry string) bool {
+	mirrorHostPort, mirrorPath := splitHostAndPath(mirror)
+
+	registryHostPort, registryPath := splitHostAndPath(registry)
+
+	// Match the host[:port] part
+	if !matchHostPort(mirrorHostPort, registryHostPort) {
+		return false
+	}
+
+	// Match the path part (namespace, repo, tag/digest)
+	return matchPath(mirrorPath, registryPath)
+}
+
+// splitHostAndPath splits the host:port and path components
+func splitHostAndPath(input string) (string, string) {
+	parts := strings.SplitN(input, "/", 2)
+	hostPort := parts[0]
+	path := ""
+	if len(parts) > 1 {
+		path = parts[1]
+	}
+	return hostPort, path
+}
+
+// matchHostPort checks if a host[:port] string matches another, considering wildcards
+func matchHostPort(mirrorHostPort, registryHostPort string) bool {
+	// Handle wildcards in the host part
+	if strings.Contains(registryHostPort, "*") {
+		matched, _ := path.Match(registryHostPort, mirrorHostPort)
+		return matched
+	}
+
+	return mirrorHostPort == registryHostPort
+}
+
+// matchPath checks if the path components match correctly
+func matchPath(mirrorPath, registryPath string) bool {
+	// Split paths into segments
+	mirrorSegments := strings.SplitAfter(mirrorPath, "/")
+	registrySegments := strings.SplitAfter(registryPath, "/")
+
+	if registrySegments[len(registrySegments)-1] == "" {
+		registrySegments = registrySegments[:len(registrySegments)-1]
+	}
+	// Compare each segment
+	for i := range mirrorSegments {
+		if i > len(registrySegments)-1 {
+			// Mirror is more specific than registry
+			break
+		}
+		if mirrorSegments[i] != registrySegments[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // defaultRegistriesConf returns a default registriesConf object
