@@ -11,10 +11,23 @@ export NO_DOCKER=1
 export NAMESPACE=openshift-multiarch-tuning-operator
 oc create namespace ${NAMESPACE}
 oc annotate namespace ${NAMESPACE} \
-  scheduler.alpha.kubernetes.io/node-selector="kubernetes.io/arch=amd64" \
   workload.openshift.io/allowed="management"
 
 if [ "${USE_OLM:-}" == "true" ]; then
+  # Get the manifest from the manifest-list
+  # Prow produces a manifest-list image even for the bundle and that bundle image is not deployed on the multi-arch clusters
+  # Therefore, it can be a single-arch one and operator-sdk isn't able to extract the bundle as the bundle image is set in a
+  # pod's container image field and cri-o will fail to pull the image when the architecture of the node is different from the
+  # bundle image's architecture.
+  # However, the bundle image is FROM scratch and doesn't have any architecture-specific binaries. It doesn't need to be
+  # a manifest-list image. Therefore, we can extract the first single-arch manifest from the manifest-list image and use it
+  # as the bundle image in a multi-arch cluster, allowing the extraction pod to be scheduled on arm64 as well.
+  # The following is a workaround for this issue until https://issues.redhat.com/browse/DPTP-4143 is resolved.
+  if oc image info --show-multiarch "${OO_BUNDLE}" | grep -q "Manifest List:"; then
+    MANIFEST_DIGEST=$(oc image info --show-multiarch "${OO_BUNDLE}" | grep "Digest: " | awk '{print $2}' | head -n1)
+    OO_BUNDLE=${OO_BUNDLE%%:*}
+    OO_BUNDLE=${OO_BUNDLE%%@*}@${MANIFEST_DIGEST}
+  fi
   export HOME=/tmp/home
   export XDG_RUNTIME_DIR=/tmp/home/containers
   OLD_KUBECONFIG=${KUBECONFIG}
