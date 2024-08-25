@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
-	"strings"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -15,7 +14,6 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 
 	ocpconfigv1 "github.com/openshift/api/config/v1"
-	ocpmachineconfigurationv1 "github.com/openshift/api/machineconfiguration/v1"
 
 	runtimeclient "sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -703,14 +701,14 @@ var _ = Describe("The Pod Placement Operand", func() {
 				image.Spec = imageForRemove.Spec
 				err = client.Update(ctx, &image)
 				Expect(err).NotTo(HaveOccurred())
-				waitForMCPComplete()
+				framework.WaitForMCPComplete(ctx, client)
 			}()
-			waitForMCPComplete()
+			framework.WaitForMCPComplete(ctx, client)
 			d := NewDeployment().
 				WithSelectorAndPodLabels(podLabel).
 				WithPodSpec(
 					NewPodSpec().
-						WithContainersImages(getMirroredImageURI(registryConfig.RegistryHost, helloOpenshiftPrivateMultiarchImageLocal)).
+						WithContainersImages(getReplacedImageURI(helloOpenshiftPrivateMultiarchImageLocal, registryConfig.RegistryHost)).
 						Build()).
 				WithReplicas(utils.NewPtr(int32(1))).
 				WithName("test-deployment").
@@ -749,7 +747,7 @@ var _ = Describe("The Pod Placement Operand", func() {
 				WithSelectorAndPodLabels(podLabel).
 				WithPodSpec(
 					NewPodSpec().
-						WithContainersImages(getMirroredImageURI(registryConfig.RegistryHost, helloOpenshiftPrivateMultiarchImageLocal)).
+						WithContainersImages(getReplacedImageURI(helloOpenshiftPrivateMultiarchImageLocal, registryConfig.RegistryHost)).
 						Build()).
 				WithReplicas(utils.NewPtr(int32(1))).
 				WithName("test-deployment").
@@ -807,7 +805,7 @@ var _ = Describe("The Pod Placement Operand", func() {
 				WithSelectorAndPodLabels(podLabel).
 				WithPodSpec(
 					NewPodSpec().
-						WithContainersImages(getMirroredImageURI(registryConfig.RegistryHost, helloOpenshiftPrivateMultiarchImageLocal)).
+						WithContainersImages(getReplacedImageURI(helloOpenshiftPrivateMultiarchImageLocal, registryConfig.RegistryHost)).
 						Build()).
 				WithReplicas(utils.NewPtr(int32(1))).
 				WithName("test-deployment").
@@ -866,14 +864,14 @@ var _ = Describe("The Pod Placement Operand", func() {
 				image.Spec = imageForRemove.Spec
 				err = client.Update(ctx, &image)
 				Expect(err).NotTo(HaveOccurred())
-				waitForMCPComplete()
+				framework.WaitForMCPComplete(ctx, client)
 			}()
-			waitForMCPComplete()
+			framework.WaitForMCPComplete(ctx, client)
 			d := NewDeployment().
 				WithSelectorAndPodLabels(podLabel).
 				WithPodSpec(
 					NewPodSpec().
-						WithContainersImages(getMirroredImageURI(registryConfig.RegistryHost, helloOpenshiftPrivateMultiarchImageLocal)).
+						WithContainersImages(getReplacedImageURI(helloOpenshiftPrivateMultiarchImageLocal, registryConfig.RegistryHost)).
 						Build()).
 				WithReplicas(utils.NewPtr(int32(1))).
 				WithName("test-deployment").
@@ -908,9 +906,9 @@ var _ = Describe("The Pod Placement Operand", func() {
 				image.Spec = imageForRemove.Spec
 				err = client.Update(ctx, &image)
 				Expect(err).NotTo(HaveOccurred())
-				waitForMCPComplete()
+				framework.WaitForMCPComplete(ctx, client)
 			}()
-			waitForMCPComplete()
+			framework.WaitForMCPComplete(ctx, client)
 			// Check ppo will block image from registry in blocked registry list
 			d := NewDeployment().
 				WithSelectorAndPodLabels(map[string]string{"app": "test-block"}).
@@ -947,13 +945,140 @@ var _ = Describe("The Pod Placement Operand", func() {
 			verifyPodNodeAffinity(ns, "app", "test", expectedNSTs)
 		})
 	})
+	Context("When deploying workloads running images in registries that have mirrors configuration", func() {
+		It("Should set node affinity for images from a fake registry with working mirrors configured in ImageTagMirrorSet and AllowContactingSource enabled", func() {
+			var err error
+			By("Create an ephemeral namespace")
+			ns := framework.NewEphemeralNamespace()
+			err = client.Create(ctx, ns)
+			Expect(err).NotTo(HaveOccurred())
+			//nolint:errcheck
+			defer client.Delete(ctx, ns)
+			By("Create a deployment running image from the fake registry, with working mirrors set in ImageTagMirrorSet")
+			ps := NewPodSpec().
+				WithContainersImages(getReplacedImageURI(helloOpenshiftPublicMultiarchImage, e2e.MyFakeITMSAllowContactSourceTestSourceRegistry)).
+				Build()
+			d := NewDeployment().
+				WithSelectorAndPodLabels(podLabel).
+				WithPodSpec(ps).
+				WithReplicas(utils.NewPtr(int32(1))).
+				WithName("test-deployment").
+				WithNamespace(ns.Name).
+				Build()
+			err = client.Create(ctx, d)
+			Expect(err).NotTo(HaveOccurred())
+			archLabelNSR := NewNodeSelectorRequirement().
+				WithKeyAndValues(utils.ArchLabel, corev1.NodeSelectorOpIn, utils.ArchitectureAmd64,
+					utils.ArchitectureArm64, utils.ArchitectureS390x, utils.ArchitecturePpc64le).
+				Build()
+			expectedNSTs := NewNodeSelectorTerm().WithMatchExpressions(&archLabelNSR).Build()
+			By("The pod should have been processed by the webhook and the scheduling gate label should be added")
+			verifyPodLabels(ns, "app", "test", e2e.Present, schedulingGateLabel)
+			By("The pod should be running")
+			Eventually(func(g Gomega) {
+				framework.VerifyPodsAreRunning(g, ctx, client, ns, "app", "test")
+			}, e2e.WaitShort).Should(Succeed())
+			By("The pod should get node affinity of arch info because the mirror registries are functional.")
+			verifyPodNodeAffinity(ns, "app", "test", expectedNSTs)
+		})
+		It("Should set node affinity for images from a working registry with fake mirrors configured in ImageTagMirrorSet and AllowContactingSource enabled", func() {
+			var err error
+			By("Create an ephemeral namespace")
+			ns := framework.NewEphemeralNamespace()
+			err = client.Create(ctx, ns)
+			Expect(err).NotTo(HaveOccurred())
+			//nolint:errcheck
+			defer client.Delete(ctx, ns)
+			By("Create a deployment running image from the working registry, with fake mirrors set in ImageTagMirrorSet")
+			ps := NewPodSpec().
+				WithContainersImages(e2e.SleepPublicMultiarchImage).
+				Build()
+			d := NewDeployment().
+				WithSelectorAndPodLabels(podLabel).
+				WithPodSpec(ps).
+				WithReplicas(utils.NewPtr(int32(1))).
+				WithName("test-deployment").
+				WithNamespace(ns.Name).
+				Build()
+			err = client.Create(ctx, d)
+			Expect(err).NotTo(HaveOccurred())
+			archLabelNSR := NewNodeSelectorRequirement().
+				WithKeyAndValues(utils.ArchLabel, corev1.NodeSelectorOpIn, utils.ArchitectureAmd64,
+					utils.ArchitectureArm64, utils.ArchitectureS390x, utils.ArchitecturePpc64le).
+				Build()
+			expectedNSTs := NewNodeSelectorTerm().WithMatchExpressions(&archLabelNSR).Build()
+			By("The pod should have been processed by the webhook and the scheduling gate label should be added")
+			verifyPodLabels(ns, "app", "test", e2e.Present, schedulingGateLabel)
+			By("The pod should get node affinity of arch info even if mirror registries down but AllowContactingSource enabled and source is functional.")
+			verifyPodNodeAffinity(ns, "app", "test", expectedNSTs)
+			By("The pod should be running")
+			Eventually(func(g Gomega) {
+				framework.VerifyPodsAreRunning(g, ctx, client, ns, "app", "test")
+			}, e2e.WaitShort).Should(Succeed())
+		})
+		It("Should set node affinity for images from a fake registry with working mirrors configured in ImageTagMirrorSet and NeverContactSource enabled", func() {
+			var err error
+			By("Create an ephemeral namespace")
+			ns := framework.NewEphemeralNamespace()
+			err = client.Create(ctx, ns)
+			Expect(err).NotTo(HaveOccurred())
+			//nolint:errcheck
+			defer client.Delete(ctx, ns)
+			By("Create a deployment running image from the fake registry, with working mirrors set in ImageTagMirrorSet")
+			ps := NewPodSpec().
+				WithContainersImages(getReplacedImageURI(e2e.OpenshifttestPublicMultiarchImage, e2e.MyFakeITMSNeverContactSourceTestSourceRegistry)).
+				Build()
+			d := NewDeployment().
+				WithSelectorAndPodLabels(podLabel).
+				WithPodSpec(ps).
+				WithReplicas(utils.NewPtr(int32(1))).
+				WithName("test-deployment").
+				WithNamespace(ns.Name).
+				Build()
+			err = client.Create(ctx, d)
+			Expect(err).NotTo(HaveOccurred())
+			archLabelNSR := NewNodeSelectorRequirement().
+				WithKeyAndValues(utils.ArchLabel, corev1.NodeSelectorOpIn, utils.ArchitectureAmd64,
+					utils.ArchitectureArm64, utils.ArchitectureS390x, utils.ArchitecturePpc64le).
+				Build()
+			expectedNSTs := NewNodeSelectorTerm().WithMatchExpressions(&archLabelNSR).Build()
+			By("The pod should have been processed by the webhook and the scheduling gate label should be added")
+			verifyPodLabels(ns, "app", "test", e2e.Present, schedulingGateLabel)
+			By("The pod should be running")
+			Eventually(func(g Gomega) {
+				framework.VerifyPodsAreRunning(g, ctx, client, ns, "app", "test")
+			}, e2e.WaitShort).Should(Succeed())
+			By("The pod should get node affinity of arch info because the mirror registries are functional.")
+			verifyPodNodeAffinity(ns, "app", "test", expectedNSTs)
+		})
+		It("Should not set node affinity for images from a working registry with fake mirrors configured in ImageTagMirrorSet and NeverContactSource enabled", func() {
+			var err error
+			By("Create an ephemeral namespace")
+			ns := framework.NewEphemeralNamespace()
+			err = client.Create(ctx, ns)
+			Expect(err).NotTo(HaveOccurred())
+			//nolint:errcheck
+			defer client.Delete(ctx, ns)
+			By("Create a deployment running image from the working registry, with fake mirrors set in ImageTagMirrorSet")
+			ps := NewPodSpec().
+				WithContainersImages(e2e.RedisPublicMultiarchImage).
+				Build()
+			d := NewDeployment().
+				WithSelectorAndPodLabels(podLabel).
+				WithPodSpec(ps).
+				WithReplicas(utils.NewPtr(int32(1))).
+				WithName("test-deployment").
+				WithNamespace(ns.Name).
+				Build()
+			err = client.Create(ctx, d)
+			Expect(err).NotTo(HaveOccurred())
+			By("The pod should have been processed by the webhook and the scheduling gate label should be added")
+			verifyPodLabels(ns, "app", "test", e2e.Present, schedulingGateLabel)
+			By("The pod should not get node affinity of arch info because mirror registries are down and NeverContactSource is enabled.")
+			verifyPodNodeAffinity(ns, "app", "test")
+		})
+	})
 })
-
-func getMirroredImageURI(registryHost, image string) string {
-	newImage := strings.Replace(image, "quay.io", registryHost, 1)
-	Expect(newImage).NotTo(BeEmpty())
-	return newImage
-}
 
 func getImageConfig(ctx context.Context, client runtimeclient.Client) ocpconfigv1.Image {
 	image := ocpconfigv1.Image{}
@@ -1066,44 +1191,6 @@ func verifyPodLabels(ns *corev1.Namespace, labelKey string, labelInValue string,
 			}
 		}
 	}, e2e.WaitShort).Should(Succeed())
-}
-
-func waitForMCPComplete() {
-	var err error
-	// wait to mcp start updating
-	Eventually(func(g Gomega) {
-		mcps := ocpmachineconfigurationv1.MachineConfigPoolList{}
-		err = client.List(ctx, &mcps)
-		Expect(err).NotTo(HaveOccurred())
-		g.Expect(mcps.Items).NotTo(BeEmpty())
-		g.Expect(mcps.Items).Should(HaveEach(WithTransform(func(mcp ocpmachineconfigurationv1.MachineConfigPool) corev1.ConditionStatus {
-			status := corev1.ConditionFalse
-			for _, condition := range mcp.Status.Conditions {
-				if condition.Type == "Updating" {
-					status = condition.Status
-					break
-				}
-			}
-			return status
-		}, Equal(corev1.ConditionTrue))))
-	}, e2e.WaitLong, e2e.WaitShort).Should(Succeed())
-	// wait to mcp finish updating
-	Eventually(func(g Gomega) {
-		mcps := ocpmachineconfigurationv1.MachineConfigPoolList{}
-		err = client.List(ctx, &mcps)
-		Expect(err).NotTo(HaveOccurred())
-		g.Expect(mcps.Items).NotTo(BeEmpty())
-		g.Expect(mcps.Items).Should(HaveEach(WithTransform(func(mcp ocpmachineconfigurationv1.MachineConfigPool) corev1.ConditionStatus {
-			status := corev1.ConditionFalse
-			for _, condition := range mcp.Status.Conditions {
-				if condition.Type == "Updated" {
-					status = condition.Status
-					break
-				}
-			}
-			return status
-		}, Equal(corev1.ConditionTrue))))
-	}, e2e.WaitLong, e2e.WaitShort).Should(Succeed())
 }
 
 func waitForCOComplete() {

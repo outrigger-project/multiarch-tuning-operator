@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -26,6 +27,8 @@ import (
 
 	"github.com/openshift/multiarch-tuning-operator/apis/multiarch/v1beta1"
 	"github.com/openshift/multiarch-tuning-operator/pkg/e2e"
+
+	. "github.com/openshift/multiarch-tuning-operator/pkg/testing/builder"
 	"github.com/openshift/multiarch-tuning-operator/pkg/testing/framework"
 )
 
@@ -75,6 +78,35 @@ var _ = BeforeSuite(func() {
 		},
 	}), &dns)
 	Expect(err).NotTo(HaveOccurred())
+	By("Create ImageTagMirrorSet for mirrors testing, with configurations enabling either the AllowContactSource policy or the NeverContactSource policy")
+	itms := NewImageTagMirrorSet().
+		WithImageTagMirrors(
+			NewImageTagMirrors().
+				WithMirrors(ocpconfigv1.ImageMirror(getImageRepository(e2e.OpenshifttestPublicMultiarchImage))).
+				WithSource(getReplacedImageURI(getImageRepository(e2e.OpenshifttestPublicMultiarchImage), e2e.MyFakeITMSAllowContactSourceTestSourceRegistry)).
+				WithMirrorAllowContactingSource().
+				Build(),
+			NewImageTagMirrors().
+				WithMirrors(ocpconfigv1.ImageMirror(getReplacedImageURI(getImageRepository(e2e.SleepPublicMultiarchImage), e2e.MyFakeITMSAllowContactSourceTestMirrorRegistry))).
+				WithSource(getImageRepository(e2e.SleepPublicMultiarchImage)).
+				WithMirrorAllowContactingSource().
+				Build(),
+			NewImageTagMirrors().
+				WithMirrors(ocpconfigv1.ImageMirror(getImageRepository(e2e.OpenshifttestPublicMultiarchImage))).
+				WithSource(getReplacedImageURI(getImageRepository(e2e.OpenshifttestPublicMultiarchImage), e2e.MyFakeITMSNeverContactSourceTestSourceRegistry)).
+				WithMirrorNeverContactSource().
+				Build(),
+			NewImageTagMirrors().
+				WithMirrors(ocpconfigv1.ImageMirror(getReplacedImageURI(getImageRepository(e2e.RedisPublicMultiarchImage), e2e.MyFakeITMSNeverContactSourceTestMirrorRegistry))).
+				WithSource(getImageRepository(e2e.RedisPublicMultiarchImage)).
+				WithMirrorNeverContactSource().
+				Build()).
+		WithName(e2e.ITMSName).
+		Build()
+	err = client.Create(ctx, itms)
+	Expect(err).NotTo(HaveOccurred())
+	By("Wait for machineconfig finishing updating")
+	framework.WaitForMCPComplete(ctx, client)
 })
 
 var _ = AfterSuite(func() {
@@ -86,6 +118,11 @@ var _ = AfterSuite(func() {
 	Expect(err).NotTo(HaveOccurred())
 	Eventually(framework.ValidateDeletion(client, ctx)).Should(Succeed())
 	deleteCertificatesConfigmap(ctx, client)
+	By("Deleting ImageTagMirrorSet after testing and wait for machineconfig finishing updating")
+	itms := NewImageTagMirrorSet().WithName(e2e.ITMSName).Build()
+	err = client.Delete(ctx, itms)
+	Expect(err).NotTo(HaveOccurred())
+	framework.WaitForMCPComplete(ctx, client)
 })
 
 // updateGlobalPullSecret patches the global pull secret to onboard the
@@ -137,4 +174,20 @@ func deleteCertificatesConfigmap(ctx context.Context, client runtimeclient.Clien
 		err = client.Delete(ctx, &configmap)
 		Expect(err).NotTo(HaveOccurred())
 	}
+}
+
+func getImageRepository(image string) string {
+	colonIndex := strings.LastIndex(image, ":")
+	if colonIndex != -1 {
+		image = image[:colonIndex]
+	}
+	return image
+}
+
+func getReplacedImageURI(image, replacedRegistry string) string {
+	colonIndex := strings.Index(image, "/")
+	if colonIndex == -1 {
+		return image
+	}
+	return replacedRegistry + image[colonIndex:]
 }

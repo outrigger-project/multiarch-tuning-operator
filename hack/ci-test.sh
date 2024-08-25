@@ -23,7 +23,7 @@ REPO_ROOT=$(dirname "${BASH_SOURCE}")/..
 OPENSHIFT_CI=${OPENSHIFT_CI:-""}
 ARTIFACT_DIR=${ARTIFACT_DIR:-""}
 GINKGO=${GINKGO:-"go run ${REPO_ROOT}/vendor/github.com/onsi/ginkgo/v2/ginkgo"}
-GINKGO_ARGS=${GINKGO_ARGS:-"-vv --randomize-all --randomize-suites -race -trace --keep-going --timeout=60m "}
+GINKGO_ARGS=${GINKGO_ARGS:-"-vv --randomize-all --randomize-suites -race -trace --keep-going --timeout=80m "}
 TEST_LABEL=${TEST_LABEL:-"integration"}
 GINKGO_ARGS="${GINKGO_ARGS} --label-filter ${TEST_LABEL}"
 GINKGO_EXTRA_ARGS=${GINKGO_EXTRA_ARGS:-""}
