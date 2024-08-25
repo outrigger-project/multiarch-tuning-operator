@@ -1,6 +1,8 @@
 package operator_test
 
 import (
+	"os"
+
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
@@ -28,6 +30,12 @@ var _ = Describe("The Multiarch Tuning Operator", func() {
 		schedulingGateLabel = map[string]string{utils.SchedulingGateLabel: utils.SchedulingGateLabelValueRemoved}
 	)
 	AfterEach(func() {
+		if CurrentSpecReport().Failed() {
+			By("The test case failed, get the PPC and PPWH logs for debug")
+			// ignore err
+			_ = framework.GetPodsLogToFile(ctx, clientset, client, utils.Namespace(), "controller", utils.PodPlacementControllerName, os.Getenv("ARTIFACT_DIR"))
+			_ = framework.GetPodsLogToFile(ctx, clientset, client, utils.Namespace(), "controller", utils.PodPlacementWebhookName, os.Getenv("ARTIFACT_DIR"))
+		}
 		err := client.Delete(ctx, &v1beta1.ClusterPodPlacementConfig{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: "cluster",

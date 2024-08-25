@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"os"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -51,6 +52,12 @@ var _ = Describe("The Pod Placement Operand", func() {
 		By("Operand ready. Executing the case")
 	})
 	AfterEach(func() {
+		if CurrentSpecReport().Failed() {
+			By("The test case failed, get the PPC and PPWH logs for debug")
+			// ignore err
+			_ = framework.GetPodsLogToFile(ctx, clientset, client, utils.Namespace(), "controller", utils.PodPlacementControllerName, os.Getenv("ARTIFACT_DIR"))
+			_ = framework.GetPodsLogToFile(ctx, clientset, client, utils.Namespace(), "controller", utils.PodPlacementWebhookName, os.Getenv("ARTIFACT_DIR"))
+		}
 		By("Verify the operand is still ready after the case ran")
 		Eventually(framework.ValidateCreation(client, ctx)).Should(Succeed(), "operand not ready after the test case execution")
 		By("Operand ready after the case execution. Continuing")
@@ -946,6 +953,12 @@ var _ = Describe("The Pod Placement Operand", func() {
 		})
 	})
 	Context("When deploying workloads running images in registries that have mirrors configuration", func() {
+		AfterEach(func() {
+			if CurrentSpecReport().Failed() {
+				By("The registry mirrors related test case failed, get registries.conf from ppc pod for debug")
+				_ = framework.GetRegistriesConfFromPPCPodToFile(ctx, clientset, client, cfg, os.Getenv("ARTIFACT_DIR"))
+			}
+		})
 		It("Should set node affinity for images from a fake registry with working mirrors configured in ImageTagMirrorSet and AllowContactingSource enabled", func() {
 			var err error
 			By("Create an ephemeral namespace")

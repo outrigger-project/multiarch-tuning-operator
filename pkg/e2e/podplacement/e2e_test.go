@@ -15,6 +15,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 
 	ocpappsv1 "github.com/openshift/api/apps/v1"
 	ocpbuildv1 "github.com/openshift/api/build/v1"
@@ -24,6 +25,7 @@ import (
 	"k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
 	runtimeclient "sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/config"
 
 	"github.com/openshift/multiarch-tuning-operator/apis/multiarch/v1beta1"
 	"github.com/openshift/multiarch-tuning-operator/pkg/e2e"
@@ -33,6 +35,7 @@ import (
 )
 
 var (
+	cfg       *rest.Config
 	client    runtimeclient.Client
 	clientset *kubernetes.Clientset
 	ctx       context.Context
@@ -61,6 +64,9 @@ var _ = BeforeSuite(func() {
 	Expect(err).NotTo(HaveOccurred())
 
 	err = ocpmachineconfigurationv1.Install(scheme.Scheme)
+	Expect(err).NotTo(HaveOccurred())
+
+	cfg, err = config.GetConfig()
 	Expect(err).NotTo(HaveOccurred())
 
 	err = client.Create(ctx, &v1beta1.ClusterPodPlacementConfig{
