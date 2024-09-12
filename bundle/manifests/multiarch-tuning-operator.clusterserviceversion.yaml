@@ -57,6 +57,8 @@ metadata:
   namespace: openshift-multiarch-tuning-operator
 spec:
   apiservicedefinitions: {}
+  cleanup:
+    enabled: true
   customresourcedefinitions:
     owned:
     - description: ClusterPodPlacementConfig defines the configuration for the architecture
