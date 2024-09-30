@@ -44,9 +44,9 @@ if [ "${USE_OLM:-}" == "true" ]; then
   # as the bundle image in a multi-arch cluster, allowing the extraction pod to be scheduled on arm64 as well.
   # The following is a workaround for this issue until https://issues.redhat.com/browse/DPTP-4143 is resolved.
   set -x
-  oc image info --show-multiarch "${OO_BUNDLE}"
+  oc image info --show-multiarch "${OO_BUNDLE}" | tee "$ARTIFACT_DIR/oo_bundle.txt"
   echo "Bundle: ${OO_BUNDLE}"
-  if oc image info --show-multiarch "${OO_BUNDLE}" | grep -q "Manifest List:"; then
+  if grep -q "Manifest List:" "$ARTIFACT_DIR/oo_bundle.txt"; then
     echo "The bundle is a manifest-list image, extracting the first single-arch manifest."
     MANIFEST_DIGEST=$(oc image info --show-multiarch "${OO_BUNDLE}" | grep "Digest: " | awk '{print $2}' | head -n1)
     OO_BUNDLE=${OO_BUNDLE%%:*}
