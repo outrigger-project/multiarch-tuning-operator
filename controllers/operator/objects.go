@@ -312,11 +312,6 @@ func buildDeployment(clusterPodPlacementConfig *v1beta1.ClusterPodPlacementConfi
 									ReadOnly:  true,
 								},
 								{
-									Name:      "ca-projected-volume",
-									MountPath: "/etc/ssl/certs",
-									ReadOnly:  true,
-								},
-								{
 									Name:      "trusted-ca",
 									MountPath: "/etc/pki/ca-trust/extracted/pem",
 									ReadOnly:  true,
@@ -362,20 +357,6 @@ func buildDeployment(clusterPodPlacementConfig *v1beta1.ClusterPodPlacementConfi
 								Projected: &corev1.ProjectedVolumeSource{
 									DefaultMode: utils.NewPtr(int32(420)),
 									Sources: []corev1.VolumeProjection{
-										{
-											ConfigMap: &corev1.ConfigMapProjection{
-												LocalObjectReference: corev1.LocalObjectReference{
-													Name: "openshift-service-ca.crt",
-												},
-												Items: []corev1.KeyToPath{
-													{
-														Key:  "service-ca.crt",
-														Path: "openshift-ca.crt",
-													},
-												},
-												Optional: utils.NewPtr(true), // Account for the case where the ConfigMap does not exist (non openshift clusters)
-											},
-										},
 										{
 											ConfigMap: &corev1.ConfigMapProjection{
 												LocalObjectReference: corev1.LocalObjectReference{

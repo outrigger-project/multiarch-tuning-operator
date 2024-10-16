@@ -27,7 +27,7 @@ metadata:
     categories: OpenShift Optional, Other
     console.openshift.io/disable-operand-delete: "false"
     containerImage: registry.ci.openshift.org/origin/multiarch-tuning-operator:main
-    createdAt: "2024-09-30T12:29:39Z"
+    createdAt: "2024-10-16T20:07:51Z"
     features.operators.openshift.io/cnf: "false"
     features.operators.openshift.io/cni: "false"
     features.operators.openshift.io/csi: "false"
@@ -432,12 +432,6 @@ spec:
               - name: ca-projected-volume
                 projected:
                   sources:
-                  - configMap:
-                      items:
-                      - key: service-ca.crt
-                        path: openshift-ca.crt
-                      name: openshift-service-ca.crt
-                      optional: true
                   - configMap:
                       items:
                       - key: ca.crt
