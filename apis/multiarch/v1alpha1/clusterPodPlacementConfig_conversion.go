@@ -1,5 +1,5 @@
 /*
-Copyright 2023 Red Hat, Inc.
+Copyright 2025 Red Hat, Inc.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -32,6 +32,7 @@ func (src *ClusterPodPlacementConfig) ConvertTo(dstRaw conversion.Hub) error {
 	// Spec
 	dst.Spec.LogVerbosity = src.Spec.LogVerbosity
 	dst.Spec.NamespaceSelector = src.Spec.NamespaceSelector
+	dst.Spec.Plugins = src.Spec.Plugins
 
 	// Status
 	dst.Status.Conditions = src.Status.Conditions
@@ -50,17 +51,18 @@ func (dst *ClusterPodPlacementConfig) ConvertFrom(srcRaw conversion.Hub) error {
 	src := srcRaw.(*multiarchv1beta1.ClusterPodPlacementConfig)
 
 	// ObjectMeta
-	dst.ObjectMeta = src.ObjectMeta
+	src.ObjectMeta = dst.ObjectMeta
 
 	// Spec
-	dst.Spec.LogVerbosity = src.Spec.LogVerbosity
-	dst.Spec.NamespaceSelector = src.Spec.NamespaceSelector
+	src.Spec.LogVerbosity = dst.Spec.LogVerbosity
+	src.Spec.NamespaceSelector = dst.Spec.NamespaceSelector
+	src.Spec.Plugins = dst.Spec.Plugins
 
 	// Status
-	dst.Status.Conditions = src.Status.Conditions
+	src.Status.Conditions = dst.Status.Conditions
 
-	if dst.ObjectMeta.Annotations == nil {
-		dst.ObjectMeta.Annotations = make(map[string]string)
+	if src.ObjectMeta.Annotations == nil {
+		src.ObjectMeta.Annotations = make(map[string]string)
 	}
 
 	return nil
