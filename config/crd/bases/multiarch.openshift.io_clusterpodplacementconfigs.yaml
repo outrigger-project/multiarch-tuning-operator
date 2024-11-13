@@ -105,6 +105,52 @@ spec:
                     type: object
                 type: object
                 x-kubernetes-map-type: atomic
+              plugins:
+                description: |-
+                  Plugins selects the namespaces where the pod placement operand can process the nodeAffinityScoring
+                  of the pods. If left empty, all the namespaces are considered.
+                  The default sample allows to exclude all the namespaces where the
+                properties:
+                  nodeAffinityScoring:
+                    description: NodeAffinityScoring is the plugin that implements
+                      the ScorePlugin interface.
+                    properties:
+                      enabled:
+                        description: Enabled indicates whether the plugin is enabled.
+                        type: boolean
+                      platforms:
+                        description: Platforms is a required field and must contain
+                          at least one entry.
+                        items:
+                          description: PlatformConfig holds configuration for specific
+                            platforms, with required fields validated.
+                          properties:
+                            architecture:
+                              description: Architecture must be a list of non-empty
+                                string of arch names.
+                              enum:
+                              - arm64
+                              - amd64
+                              - ppc64le
+                              - s390x
+                              type: string
+                            weight:
+                              description: |-
+                                weight associated with matching the corresponding NodeAffinityScoringPlatformTerm,
+                                in the range 0-100.
+                              format: int32
+                              minimum: 0
+                              type: integer
+                          required:
+                          - architecture
+                          - weight
+                          type: object
+                        type: array
+                    required:
+                    - enabled
+                    - platforms
+                    type: object
+                type: object
             type: object
           status:
             description: ClusterPodPlacementConfigStatus defines the observed state
@@ -281,6 +327,51 @@ spec:
                     type: object
                 type: object
                 x-kubernetes-map-type: atomic
+              plugins:
+                description: |-
+                  Plugins defines the configurable plugins for this component.
+                  This field is optional and will be omitted from the output if not set.
+                properties:
+                  nodeAffinityScoring:
+                    description: NodeAffinityScoring is the plugin that implements
+                      the ScorePlugin interface.
+                    properties:
+                      enabled:
+                        description: Enabled indicates whether the plugin is enabled.
+                        type: boolean
+                      platforms:
+                        description: Platforms is a required field and must contain
+                          at least one entry.
+                        items:
+                          description: PlatformConfig holds configuration for specific
+                            platforms, with required fields validated.
+                          properties:
+                            architecture:
+                              description: Architecture must be a list of non-empty
+                                string of arch names.
+                              enum:
+                              - arm64
+                              - amd64
+                              - ppc64le
+                              - s390x
+                              type: string
+                            weight:
+                              description: |-
+                                weight associated with matching the corresponding NodeAffinityScoringPlatformTerm,
+                                in the range 0-100.
+                              format: int32
+                              minimum: 0
+                              type: integer
+                          required:
+                          - architecture
+                          - weight
+                          type: object
+                        type: array
+                    required:
+                    - enabled
+                    - platforms
+                    type: object
+                type: object
             type: object
           status:
             description: ClusterPodPlacementConfigStatus defines the observed state
