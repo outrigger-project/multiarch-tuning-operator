@@ -1,5 +1,5 @@
 /*
-Copyright 2023 Red Hat, Inc.
+Copyright 2025 Red Hat, Inc.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -20,6 +20,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/openshift/multiarch-tuning-operator/apis/multiarch/common"
+	"github.com/openshift/multiarch-tuning-operator/apis/multiarch/common/plugins"
 )
 
 // ClusterPodPlacementConfigSpec defines the desired state of ClusterPodPlacementConfig
@@ -37,6 +38,12 @@ type ClusterPodPlacementConfigSpec struct {
 	// label "multiarch.openshift.io/exclude-pod-placement" exists.
 	// +optional
 	NamespaceSelector *metav1.LabelSelector `json:"namespaceSelector,omitempty"`
+
+	// Plugins selects the namespaces where the pod placement operand can process the nodeAffinityScoring
+	// of the pods. If left empty, all the namespaces are considered.
+	// The default sample allows to exclude all the namespaces where the
+	// +optional
+	Plugins plugins.Plugins `json:"plugins,omitempty"`
 }
 
 // ClusterPodPlacementConfigStatus defines the observed state of ClusterPodPlacementConfig

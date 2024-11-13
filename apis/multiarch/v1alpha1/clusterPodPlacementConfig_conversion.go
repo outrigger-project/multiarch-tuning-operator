@@ -1,5 +1,5 @@
 /*
-Copyright 2023 Red Hat, Inc.
+Copyright 2025 Red Hat, Inc.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -32,6 +32,7 @@ func (src *ClusterPodPlacementConfig) ConvertTo(dstRaw conversion.Hub) error {
 	// Spec
 	dst.Spec.LogVerbosity = src.Spec.LogVerbosity
 	dst.Spec.NamespaceSelector = src.Spec.NamespaceSelector
+	dst.Spec.Plugins = src.Spec.Plugins
 
 	// Status
 	dst.Status.Conditions = src.Status.Conditions
@@ -55,6 +56,7 @@ func (dst *ClusterPodPlacementConfig) ConvertFrom(srcRaw conversion.Hub) error {
 	// Spec
 	dst.Spec.LogVerbosity = src.Spec.LogVerbosity
 	dst.Spec.NamespaceSelector = src.Spec.NamespaceSelector
+	dst.Spec.Plugins = src.Spec.Plugins
 
 	// Status
 	dst.Status.Conditions = src.Status.Conditions

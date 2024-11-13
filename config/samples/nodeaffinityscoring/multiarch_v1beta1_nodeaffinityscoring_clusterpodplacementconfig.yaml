@@ -8,3 +8,10 @@ spec:
     matchExpressions:
     - key: multiarch.openshift.io/exclude-pod-placement
       operator: DoesNotExist
+  plugins:
+    nodeAffinityScoring:
+      enabled: true
+      platforms:
+      - architecture: amd64
+        # os: linux
+        weight: 100
