@@ -13,7 +13,7 @@ namePrefix: multiarch-tuning-operator-
 #commonLabels:
 #  someName: someValue
 
-bases:
+resources:
 - ../crd
 - ../rbac
 - ../manager
@@ -34,7 +34,7 @@ bases:
 # 'CERTMANAGER' needs to be enabled to use ca injection
 
 # the following config is for teaching kustomize how to do var substitution
-vars:
+#vars:
 # [CERTMANAGER] To enable cert-manager, uncomment all sections with 'CERTMANAGER' prefix.
 #- name: CERTIFICATE_NAMESPACE # namespace of the certificate CR
 #  objref:

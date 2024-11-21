@@ -6,14 +6,13 @@ resources:
 #+kubebuilder:scaffold:crdkustomizeresource
 
 patches:
-  - path: patches/validation_injection_in_multiarch_clusterpodplacementconfigs.yaml
-    target:
-      kind: CustomResourceDefinition
+- path: patches/validation_injection_in_multiarch_clusterpodplacementconfigs.yaml
+  target:
+    kind: CustomResourceDefinition
+- path: patches/webhook_in_multiarch_clusterpodplacementconfigs.yaml
 
-patchesStrategicMerge:
 # [WEBHOOK] To enable webhook, uncomment all the sections with [WEBHOOK] prefix.
 # patches here are for enabling the conversion webhook for each CRD
-- patches/webhook_in_multiarch_clusterpodplacementconfigs.yaml
 #+kubebuilder:scaffold:crdkustomizewebhookpatch
 
 # [CERTMANAGER] To enable cert-manager, uncomment all the sections with [CERTMANAGER] prefix.
@@ -24,3 +23,5 @@ patchesStrategicMerge:
 # the following config is for teaching kustomize how to do kustomization for CRDs.
 configurations:
 - kustomizeconfig.yaml
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
