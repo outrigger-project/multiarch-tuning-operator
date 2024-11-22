@@ -5,6 +5,24 @@ metadata:
     alm-examples: |-
       [
         {
+          "apiVersion": "multiarch.openshift.io/v1alpha1",
+          "kind": "ClusterPodPlacementConfig",
+          "metadata": {
+            "name": "cluster"
+          },
+          "spec": {
+            "logVerbosity": "Normal",
+            "namespaceSelector": {
+              "matchExpressions": [
+                {
+                  "key": "multiarch.openshift.io/exclude-pod-placement",
+                  "operator": "DoesNotExist"
+                }
+              ]
+            }
+          }
+        },
+        {
           "apiVersion": "multiarch.openshift.io/v1beta1",
           "kind": "ClusterPodPlacementConfig",
           "metadata": {
@@ -27,7 +45,7 @@ metadata:
     categories: OpenShift Optional, Other
     console.openshift.io/disable-operand-delete: "false"
     containerImage: registry.ci.openshift.org/origin/multiarch-tuning-operator:main
-    createdAt: "2024-10-16T20:07:51Z"
+    createdAt: "2024-11-22T00:27:45Z"
     features.operators.openshift.io/cnf: "false"
     features.operators.openshift.io/cni: "false"
     features.operators.openshift.io/csi: "false"
