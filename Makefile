@@ -82,7 +82,8 @@ ENVTEST_K8S_VERSION = 1.29.3
 GOLINT_VERSION = v1.60.1
 
 # TODO: We'd need an upstream builder image that includes gpgme-devel (libgpgme-dev)
-BUILD_IMAGE ?= registry.ci.openshift.org/ocp/builder:rhel-9-golang-1.22-builder-multi-openshift-4.17
+#BUILD_IMAGE ?= registry.ci.openshift.org/ocp/builder:rhel-9-golang-1.22-builder-multi-openshift-4.17
+BUILD_IMAGE ?=  registry.ci.openshift.org/ocp/builder:rhel-9-golang-1.23-openshift-4.19
 RUNTIME_IMAGE ?= quay.io/centos/centos:stream9-minimal
 
 NO_DOCKER ?= 0
