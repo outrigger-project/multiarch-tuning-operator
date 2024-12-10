@@ -22,6 +22,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"k8s.io/utils/clock"
 	"os"
 	"time"
 
@@ -199,7 +200,9 @@ func RunOperator(mgr ctrl.Manager) {
 			Name:       common.SingletonResourceObjectName,
 			Namespace:  utils.Namespace(),
 			APIVersion: gvk.GroupVersion().String(),
-		}),
+		},
+			clock.RealClock{},
+		),
 	}).SetupWithManager(mgr), unableToCreateController, controllerKey, "ClusterPodPlacementConfig")
 	must((&multiarchv1beta1.ClusterPodPlacementConfig{}).SetupWebhookWithManager(mgr), unableToCreateController,
 		controllerKey, "ClusterPodPlacementConfigConversionWebhook")

@@ -18,6 +18,7 @@ package operator
 
 import (
 	"context"
+	"k8s.io/utils/clock"
 	"net/http"
 	"path/filepath"
 	"testing"
@@ -215,7 +216,7 @@ func runManager() {
 		Scheme:        mgr.GetScheme(),
 		ClientSet:     clientset,
 		DynamicClient: dynamic.NewForConfigOrDie(cfg),
-		Recorder:      events.NewKubeRecorder(clientset.CoreV1().Events(utils.Namespace()), utils.OperatorName, ctrlref),
+		Recorder:      events.NewKubeRecorder(clientset.CoreV1().Events(utils.Namespace()), utils.OperatorName, ctrlref, clock.RealClock{}),
 	}).SetupWithManager(mgr)).NotTo(HaveOccurred())
 
 	err = mgr.AddReadyzCheck("readyz", healthz.Ping)
