@@ -133,9 +133,6 @@ spec:
                       enabled:
                         description: Enabled indicates whether the plugin is enabled.
                         type: boolean
-                      name:
-                        description: Name indicates the plugin is names.
-                        type: string
                       platforms:
                         description: Platforms is a required field and must contain
                           at least one entry.
@@ -166,7 +163,6 @@ spec:
                         type: array
                     required:
                     - enabled
-                    - name
                     - platforms
                     type: object
                 type: object
@@ -363,9 +359,6 @@ spec:
                       enabled:
                         description: Enabled indicates whether the plugin is enabled.
                         type: boolean
-                      name:
-                        description: Name indicates the plugin is names.
-                        type: string
                       platforms:
                         description: Platforms is a required field and must contain
                           at least one entry.
@@ -396,7 +389,6 @@ spec:
                         type: array
                     required:
                     - enabled
-                    - name
                     - platforms
                     type: object
                 type: object
