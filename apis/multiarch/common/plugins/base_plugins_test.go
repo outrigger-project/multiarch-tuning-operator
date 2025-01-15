@@ -282,18 +282,18 @@ func TestV1Alpha1WithEmptyNodeAffinityScoringPlatforms(t *testing.T) {
 	}
 
 	// Convert back to v1beta1cone
-	v1beta1Clone := &v1beta1.ClusterPodPlacementConfig{}
-	err = v1alpha1Obj.ConvertFrom(v1beta1Clone)
+	v1alpha1Clone := &v1alpha1.ClusterPodPlacementConfig{}
+	err = v1alpha1Clone.ConvertFrom(v1beta1Obj)
 	if err != nil {
 		t.Fatalf("Failed to convert v1alpha1 to v1beta1: %v", err)
 	}
 
 	// Validate the conversion back to v1beta1
-	if v1beta1Clone.Spec.Plugins.NodeAffinityScoring == nil {
+	if v1alpha1Clone.Spec.Plugins.NodeAffinityScoring == nil {
 		t.Fatalf("NodeAffinityScoring plugin should not be nil in v1beta1")
 	}
-	if len(v1beta1Clone.Spec.Plugins.NodeAffinityScoring.Platforms) != 0 {
-		t.Errorf("Expected empty Platforms in v1beta1, but got %v", v1beta1Clone.Spec.Plugins.NodeAffinityScoring.Platforms)
+	if len(v1alpha1Clone.Spec.Plugins.NodeAffinityScoring.Platforms) != 0 {
+		t.Errorf("Expected empty Platforms in v1beta1, but got %v", v1alpha1Clone.Spec.Plugins.NodeAffinityScoring.Platforms)
 	}
 }
 

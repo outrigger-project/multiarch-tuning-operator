@@ -51,18 +51,18 @@ func (dst *ClusterPodPlacementConfig) ConvertFrom(srcRaw conversion.Hub) error {
 	src := srcRaw.(*multiarchv1beta1.ClusterPodPlacementConfig)
 
 	// ObjectMeta
-	src.ObjectMeta = dst.ObjectMeta
+	dst.ObjectMeta = src.ObjectMeta
 
 	// Spec
-	src.Spec.LogVerbosity = dst.Spec.LogVerbosity
-	src.Spec.NamespaceSelector = dst.Spec.NamespaceSelector
-	src.Spec.Plugins = dst.Spec.Plugins
+	dst.Spec.LogVerbosity = src.Spec.LogVerbosity
+	dst.Spec.NamespaceSelector = src.Spec.NamespaceSelector
+	dst.Spec.Plugins = src.Spec.Plugins
 
 	// Status
-	src.Status.Conditions = dst.Status.Conditions
+	dst.Status.Conditions = src.Status.Conditions
 
-	if src.ObjectMeta.Annotations == nil {
-		src.ObjectMeta.Annotations = make(map[string]string)
+	if dst.ObjectMeta.Annotations == nil {
+		dst.ObjectMeta.Annotations = make(map[string]string)
 	}
 
 	return nil
