@@ -2,9 +2,9 @@ package podplacement
 
 import (
 	"fmt"
+	base_plugins2 "github.com/openshift/multiarch-tuning-operator/apis/multiarch/common/plugins/base_plugin"
+	"github.com/openshift/multiarch-tuning-operator/apis/multiarch/common/plugins/nodeaffinityscoring"
 	"testing"
-
-	"github.com/openshift/multiarch-tuning-operator/apis/multiarch/common/plugins"
 )
 
 func TestBasePlugin_IsEnabled(t *testing.T) {
@@ -19,7 +19,7 @@ func TestBasePlugin_IsEnabled(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			plugin := &plugins.BasePlugin{Enabled: tt.enabled}
+			plugin := &base_plugins2.BasePlugin{Enabled: tt.enabled}
 			if plugin.IsEnabled() != tt.expected {
 				t.Errorf("Expected IsEnabled() to be %v, got %v", tt.expected, plugin.IsEnabled())
 			}
@@ -28,7 +28,7 @@ func TestBasePlugin_IsEnabled(t *testing.T) {
 }
 
 func TestBasePlugin_Name(t *testing.T) {
-	plugin := &plugins.BasePlugin{}
+	plugin := &base_plugins2.BasePlugin{}
 	if plugin.Name() != "BasePlugin" {
 		t.Errorf("Expected Name() to return 'BasePlugin', got %s", plugin.Name())
 	}
@@ -37,12 +37,12 @@ func TestBasePlugin_Name(t *testing.T) {
 func TestNodeAffinityScoring_Validation(t *testing.T) {
 	tests := []struct {
 		name       string
-		platforms  []plugins.NodeAffinityScoringPlatformTerm
+		platforms  []nodeaffinityscoring.NodeAffinityScoringPlatformTerm
 		shouldFail bool
 	}{
 		{
 			name: "Valid Platforms",
-			platforms: []plugins.NodeAffinityScoringPlatformTerm{
+			platforms: []nodeaffinityscoring.NodeAffinityScoringPlatformTerm{
 				{Architecture: "ppc64le", Weight: 50},
 				{Architecture: "amd64", Weight: 30},
 			},
@@ -50,14 +50,14 @@ func TestNodeAffinityScoring_Validation(t *testing.T) {
 		},
 		{
 			name: "Invalid Architecture",
-			platforms: []plugins.NodeAffinityScoringPlatformTerm{
+			platforms: []nodeaffinityscoring.NodeAffinityScoringPlatformTerm{
 				{Architecture: "invalid_arch", Weight: 20},
 			},
 			shouldFail: true,
 		},
 		{
 			name: "Invalid Weight",
-			platforms: []plugins.NodeAffinityScoringPlatformTerm{
+			platforms: []nodeaffinityscoring.NodeAffinityScoringPlatformTerm{
 				{Architecture: "amd64", Weight: -10},
 			},
 			shouldFail: true,
@@ -66,8 +66,8 @@ func TestNodeAffinityScoring_Validation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			scoring := &plugins.NodeAffinityScoring{
-				BasePlugin: plugins.BasePlugin{Enabled: true},
+			scoring := &nodeaffinityscoring.NodeAffinityScoring{
+				BasePlugin: base_plugins2.BasePlugin{Enabled: true},
 				Platforms:  tt.platforms,
 			}
 
@@ -79,7 +79,7 @@ func TestNodeAffinityScoring_Validation(t *testing.T) {
 	}
 }
 
-func validateNodeAffinityScoring(scoring *plugins.NodeAffinityScoring) error {
+func validateNodeAffinityScoring(scoring *nodeaffinityscoring.NodeAffinityScoring) error {
 	for _, platform := range scoring.Platforms {
 		// Check if Architecture is non-empty.
 		if len(platform.Architecture) == 0 {

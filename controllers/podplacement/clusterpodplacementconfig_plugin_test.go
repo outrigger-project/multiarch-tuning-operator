@@ -2,12 +2,14 @@ package podplacement
 
 import (
 	"context"
+	operatorplugins "github.com/openshift/multiarch-tuning-operator/apis/multiarch/common/plugins"
+	baseplugins2 "github.com/openshift/multiarch-tuning-operator/apis/multiarch/common/plugins/base_plugin"
+	"github.com/openshift/multiarch-tuning-operator/apis/multiarch/common/plugins/nodeaffinityscoring"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/openshift/multiarch-tuning-operator/apis/multiarch/common"
-	"github.com/openshift/multiarch-tuning-operator/apis/multiarch/common/plugins"
 	v1alpha1 "github.com/openshift/multiarch-tuning-operator/apis/multiarch/v1alpha1"
 	v1beta1 "github.com/openshift/multiarch-tuning-operator/apis/multiarch/v1beta1"
 	"github.com/openshift/multiarch-tuning-operator/pkg/testing/builder"
@@ -88,12 +90,12 @@ var _ = Describe("ClusterPodPlacementConfig Conversion Tests", func() {
 					NamespaceSelector: &metav1.LabelSelector{
 						MatchLabels: map[string]string{"env": "test"},
 					},
-					Plugins: plugins.Plugins{
-						NodeAffinityScoring: &plugins.NodeAffinityScoring{
-							BasePlugin: plugins.BasePlugin{
+					Plugins: operatorplugins.OperatorPlugins{
+						NodeAffinityScoring: &nodeaffinityscoring.NodeAffinityScoring{
+							BasePlugin: baseplugins2.BasePlugin{
 								Enabled: true,
 							},
-							Platforms: []plugins.NodeAffinityScoringPlatformTerm{
+							Platforms: []nodeaffinityscoring.NodeAffinityScoringPlatformTerm{
 								{Architecture: "ppc64le", Weight: 50},
 							},
 						},
@@ -121,7 +123,7 @@ var _ = Describe("ClusterPodPlacementConfig Conversion Tests", func() {
 				g.Expect(v1beta1Obj.Spec.Plugins.NodeAffinityScoring).NotTo(BeNil())
 				g.Expect(v1beta1Obj.Spec.Plugins.NodeAffinityScoring.Enabled).To(BeTrue())
 				g.Expect(v1beta1Obj.Spec.Plugins.NodeAffinityScoring.Platforms).To(ConsistOf(
-					plugins.NodeAffinityScoringPlatformTerm{Architecture: "ppc64le", Weight: 50},
+					nodeaffinityscoring.NodeAffinityScoringPlatformTerm{Architecture: "ppc64le", Weight: 50},
 				))
 			}, time.Second*10, time.Millisecond*250).Should(Succeed())
 		})

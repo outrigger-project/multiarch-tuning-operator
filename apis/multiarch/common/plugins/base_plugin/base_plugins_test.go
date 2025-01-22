@@ -1,9 +1,11 @@
-package plugins_test
+package base_plugin_test
 
 import (
+	operatorplugins "github.com/openshift/multiarch-tuning-operator/apis/multiarch/common/plugins"
+	baseplugins2 "github.com/openshift/multiarch-tuning-operator/apis/multiarch/common/plugins/base_plugin"
+	"github.com/openshift/multiarch-tuning-operator/apis/multiarch/common/plugins/nodeaffinityscoring"
 	"testing"
 
-	"github.com/openshift/multiarch-tuning-operator/apis/multiarch/common/plugins"
 	"github.com/openshift/multiarch-tuning-operator/apis/multiarch/v1alpha1"
 	"github.com/openshift/multiarch-tuning-operator/apis/multiarch/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -19,12 +21,12 @@ func TestV1Alpha1ToV1Beta1Conversion(t *testing.T) {
 		Spec: v1alpha1.ClusterPodPlacementConfigSpec{
 			LogVerbosity:      "Normal",
 			NamespaceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"env": "test"}},
-			Plugins: plugins.Plugins{
-				NodeAffinityScoring: &plugins.NodeAffinityScoring{
-					BasePlugin: plugins.BasePlugin{
+			Plugins: operatorplugins.OperatorPlugins{
+				NodeAffinityScoring: &nodeaffinityscoring.NodeAffinityScoring{
+					BasePlugin: baseplugins2.BasePlugin{
 						Enabled: true,
 					},
-					Platforms: []plugins.NodeAffinityScoringPlatformTerm{
+					Platforms: []nodeaffinityscoring.NodeAffinityScoringPlatformTerm{
 						{Architecture: "ppc64le", Weight: 50},
 					},
 				},
@@ -56,10 +58,10 @@ func TestV1Alpha1ToV1Beta1Conversion(t *testing.T) {
 }
 
 func TestV1Alpha1WithNoPluginsField(t *testing.T) {
-	// Create a v1alpha1 object with no plugins field
+	// Create a v1alpha1 object with no base_plugins field
 	v1alpha1Obj := &v1alpha1.ClusterPodPlacementConfig{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "test-cppc-no-plugins",
+			Name:      "test-cppc-no-base_plugins",
 			Namespace: "default",
 		},
 		Spec: v1alpha1.ClusterPodPlacementConfigSpec{
@@ -88,7 +90,7 @@ func TestV1Alpha1WithNoPluginsField(t *testing.T) {
 	}
 
 	if v1beta1ObjClone.Spec.Plugins != v1beta1Obj.Spec.Plugins {
-		t.Errorf("Expected nil plugins in v1beta1, got %v", v1beta1ObjClone.Spec.Plugins)
+		t.Errorf("Expected nil base_plugins in v1beta1, got %v", v1beta1ObjClone.Spec.Plugins)
 	}
 }
 
@@ -101,9 +103,9 @@ func TestV1Alpha1WithNodeAffinityScoringPluginDisabled(t *testing.T) {
 		},
 		Spec: v1alpha1.ClusterPodPlacementConfigSpec{
 			LogVerbosity: "Normal",
-			Plugins: plugins.Plugins{
-				NodeAffinityScoring: &plugins.NodeAffinityScoring{
-					BasePlugin: plugins.BasePlugin{
+			Plugins: operatorplugins.OperatorPlugins{
+				NodeAffinityScoring: &nodeaffinityscoring.NodeAffinityScoring{
+					BasePlugin: baseplugins2.BasePlugin{
 						Enabled: false,
 					},
 					Platforms: nil, // No additional configuration
@@ -158,12 +160,12 @@ func TestV1Alpha1WithEmptyNodeAffinityScoringPlatforms(t *testing.T) {
 		},
 		Spec: v1alpha1.ClusterPodPlacementConfigSpec{
 			LogVerbosity: "Normal",
-			Plugins: plugins.Plugins{
-				NodeAffinityScoring: &plugins.NodeAffinityScoring{
-					BasePlugin: plugins.BasePlugin{
+			Plugins: operatorplugins.OperatorPlugins{
+				NodeAffinityScoring: &nodeaffinityscoring.NodeAffinityScoring{
+					BasePlugin: baseplugins2.BasePlugin{
 						Enabled: true,
 					},
-					Platforms: []plugins.NodeAffinityScoringPlatformTerm{},
+					Platforms: []nodeaffinityscoring.NodeAffinityScoringPlatformTerm{},
 				},
 			},
 		},
@@ -209,12 +211,12 @@ func TestV1Alpha1WithNonEmptyNodeAffinityScoringPlatforms(t *testing.T) {
 		},
 		Spec: v1alpha1.ClusterPodPlacementConfigSpec{
 			LogVerbosity: "Normal",
-			Plugins: plugins.Plugins{
-				NodeAffinityScoring: &plugins.NodeAffinityScoring{
-					BasePlugin: plugins.BasePlugin{
+			Plugins: operatorplugins.OperatorPlugins{
+				NodeAffinityScoring: &nodeaffinityscoring.NodeAffinityScoring{
+					BasePlugin: baseplugins2.BasePlugin{
 						Enabled: true,
 					},
-					Platforms: []plugins.NodeAffinityScoringPlatformTerm{
+					Platforms: []nodeaffinityscoring.NodeAffinityScoringPlatformTerm{
 						{
 							Architecture: "ppc64le",
 							Weight:       10,

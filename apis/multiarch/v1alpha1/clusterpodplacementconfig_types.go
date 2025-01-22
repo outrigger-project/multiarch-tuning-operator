@@ -17,10 +17,10 @@ limitations under the License.
 package v1alpha1
 
 import (
+	"github.com/openshift/multiarch-tuning-operator/apis/multiarch/common/plugins"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/openshift/multiarch-tuning-operator/apis/multiarch/common"
-	"github.com/openshift/multiarch-tuning-operator/apis/multiarch/common/plugins"
 )
 
 // ClusterPodPlacementConfigSpec defines the desired state of ClusterPodPlacementConfig
@@ -43,7 +43,7 @@ type ClusterPodPlacementConfigSpec struct {
 	// of the pods. If left empty, all the namespaces are considered.
 	// The default sample allows to exclude all the namespaces where the
 	// +optional
-	Plugins plugins.Plugins `json:"plugins,omitempty"`
+	Plugins plugins.OperatorPlugins `json:"plugins,omitempty"`
 }
 
 // ClusterPodPlacementConfigStatus defines the observed state of ClusterPodPlacementConfig

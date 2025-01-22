@@ -18,6 +18,7 @@ package v1beta1
 
 import (
 	"fmt"
+	"github.com/openshift/multiarch-tuning-operator/apis/multiarch/common/plugins"
 	"strings"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -25,7 +26,6 @@ import (
 	"github.com/openshift/library-go/pkg/operator/v1helpers"
 
 	"github.com/openshift/multiarch-tuning-operator/apis/multiarch/common"
-	"github.com/openshift/multiarch-tuning-operator/apis/multiarch/common/plugins"
 )
 
 // ClusterPodPlacementConfigSpec defines the desired state of ClusterPodPlacementConfig
@@ -44,10 +44,10 @@ type ClusterPodPlacementConfigSpec struct {
 	// +optional
 	NamespaceSelector *metav1.LabelSelector `json:"namespaceSelector,omitempty"`
 
-	// Plugins defines the configurable plugins for this component.
+	// Plugins defines the configurable base_plugins for this component.
 	// This field is optional and will be omitted from the output if not set.
 	// +optional
-	Plugins plugins.Plugins `json:"plugins,omitempty"`
+	Plugins plugins.OperatorPlugins `json:"plugins,omitempty"`
 }
 
 // ClusterPodPlacementConfigStatus defines the observed state of ClusterPodPlacementConfig

@@ -14,18 +14,9 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package plugins
+package base_plugin
 
-// +k8s:deepcopy-gen=package
-
-// Plugins represents the plugins configuration.
-type Plugins struct {
-	NodeAffinityScoring *NodeAffinityScoring `json:"nodeAffinityScoring,omitempty"`
-	// Future plugins can be added here.
-}
-
-// IBasePlugin defines a basic interface for plugins.
-// +k8s:deepcopy-gen=false
+// IBasePlugin defines a basic interface for base_plugins.
 type IBasePlugin interface {
 	// Enabled is a required boolean field.
 	IsEnabled() bool
@@ -34,9 +25,9 @@ type IBasePlugin interface {
 }
 
 // BasePlugin
+// +k8s:deepcopy-gen=true
 type BasePlugin struct {
 	// Enabled indicates whether the plugin is enabled.
-	// +kubebuilder:"validation:Required"
 	Enabled bool `json:"enabled" protobuf:"varint,1,opt,name=enabled" kubebuilder:"validation:Required"`
 }
 
@@ -45,7 +36,7 @@ func (b *BasePlugin) Name() string {
 	return "BasePlugin"
 }
 
-// Enabled returns the value of the Enabled field.
+// IsEnabled returns the value of the Enabled field.
 func (b *BasePlugin) IsEnabled() bool {
 	return b.Enabled
 }

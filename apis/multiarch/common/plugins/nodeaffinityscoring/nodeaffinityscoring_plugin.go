@@ -14,7 +14,11 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package plugins
+package nodeaffinityscoring
+
+import (
+	"github.com/openshift/multiarch-tuning-operator/apis/multiarch/common/plugins/base_plugin"
+)
 
 const (
 	// PluginName for NodeAffinityScoring.
@@ -22,8 +26,9 @@ const (
 )
 
 // NodeAffinityScoring is the plugin that implements the ScorePlugin interface.
+// +k8s:deepcopy-gen=true
 type NodeAffinityScoring struct {
-	BasePlugin `json:",inline"`
+	base_plugin.BasePlugin `json:",inline"`
 
 	// Platforms is a required field and must contain at least one entry.
 	// +kubebuilder:"validation:Required"
@@ -41,14 +46,20 @@ type NodeAffinityScoringPlatformTerm struct {
 	// +optional"
 	// Os string `json:"os,omitempty" protobuf:"bytes,2,rep,name=os"`
 
-	// weight associated with matching the corresponding NodeAffinityScoringPlatformTerm,
+	// Weight is associated with matching the corresponding NodeAffinityScoringPlatformTerm,
 	// in the range 0-100.
-	// +kubebuilder:"validation:Required
-	// +kubebuilder:validation:Minimum:=0
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=100
 	Weight int32 `json:"weight" protobuf:"bytes,3,rep,name=weight" kubebuilder:"validation:Required,validation:Minimum:=0"`
 }
 
-// Name returns the name of the NodeAffinityScoringPluginName.
-func (b *NodeAffinityScoring) Name() string {
+// Name overrides the Name method of BasePlugin to return a custom name for the plugin.
+func (n *NodeAffinityScoring) Name() string {
 	return NodeAffinityScoringPluginName
+}
+
+// IsEnabled overrides the IsEnabled method of BasePlugin if custom logic is needed.
+func (n *NodeAffinityScoring) IsEnabled() bool {
+	return n.Enabled
 }
