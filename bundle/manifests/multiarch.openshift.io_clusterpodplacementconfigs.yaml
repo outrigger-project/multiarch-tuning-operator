@@ -151,9 +151,10 @@ spec:
                               type: string
                             weight:
                               description: |-
-                                weight associated with matching the corresponding NodeAffinityScoringPlatformTerm,
+                                Weight is associated with matching the corresponding NodeAffinityScoringPlatformTerm,
                                 in the range 0-100.
                               format: int32
+                              maximum: 100
                               minimum: 0
                               type: integer
                           required:
@@ -349,7 +350,7 @@ spec:
                 x-kubernetes-map-type: atomic
               plugins:
                 description: |-
-                  Plugins defines the configurable plugins for this component.
+                  Plugins defines the configurable base_plugins for this component.
                   This field is optional and will be omitted from the output if not set.
                 properties:
                   nodeAffinityScoring:
@@ -377,9 +378,10 @@ spec:
                               type: string
                             weight:
                               description: |-
-                                weight associated with matching the corresponding NodeAffinityScoringPlatformTerm,
+                                Weight is associated with matching the corresponding NodeAffinityScoringPlatformTerm,
                                 in the range 0-100.
                               format: int32
+                              maximum: 100
                               minimum: 0
                               type: integer
                           required:
