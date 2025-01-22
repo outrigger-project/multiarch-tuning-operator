@@ -1,10 +1,11 @@
 package base_plugin_test
 
 import (
+	"testing"
+
 	operatorplugins "github.com/openshift/multiarch-tuning-operator/apis/multiarch/common/plugins"
 	baseplugins2 "github.com/openshift/multiarch-tuning-operator/apis/multiarch/common/plugins/base_plugin"
 	"github.com/openshift/multiarch-tuning-operator/apis/multiarch/common/plugins/nodeaffinityscoring"
-	"testing"
 
 	"github.com/openshift/multiarch-tuning-operator/apis/multiarch/v1alpha1"
 	"github.com/openshift/multiarch-tuning-operator/apis/multiarch/v1beta1"

@@ -2,16 +2,17 @@ package podplacement
 
 import (
 	"context"
-	operatorplugins "github.com/openshift/multiarch-tuning-operator/apis/multiarch/common/plugins"
-	baseplugins2 "github.com/openshift/multiarch-tuning-operator/apis/multiarch/common/plugins/base_plugin"
-	"github.com/openshift/multiarch-tuning-operator/apis/multiarch/common/plugins/nodeaffinityscoring"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/openshift/multiarch-tuning-operator/apis/multiarch/common"
-	v1alpha1 "github.com/openshift/multiarch-tuning-operator/apis/multiarch/v1alpha1"
-	v1beta1 "github.com/openshift/multiarch-tuning-operator/apis/multiarch/v1beta1"
+	operatorplugins "github.com/openshift/multiarch-tuning-operator/apis/multiarch/common/plugins"
+	baseplugins2 "github.com/openshift/multiarch-tuning-operator/apis/multiarch/common/plugins/base_plugin"
+
+	"github.com/openshift/multiarch-tuning-operator/apis/multiarch/common/plugins/nodeaffinityscoring"
+	"github.com/openshift/multiarch-tuning-operator/apis/multiarch/v1alpha1"
+	"github.com/openshift/multiarch-tuning-operator/apis/multiarch/v1beta1"
 	"github.com/openshift/multiarch-tuning-operator/pkg/testing/builder"
 	"github.com/openshift/multiarch-tuning-operator/pkg/testing/framework"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"

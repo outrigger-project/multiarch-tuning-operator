@@ -2,9 +2,10 @@ package podplacement
 
 import (
 	"fmt"
-	base_plugins2 "github.com/openshift/multiarch-tuning-operator/apis/multiarch/common/plugins/base_plugin"
-	"github.com/openshift/multiarch-tuning-operator/apis/multiarch/common/plugins/nodeaffinityscoring"
 	"testing"
+
+	baseplugins2 "github.com/openshift/multiarch-tuning-operator/apis/multiarch/common/plugins/base_plugin"
+	"github.com/openshift/multiarch-tuning-operator/apis/multiarch/common/plugins/nodeaffinityscoring"
 )
 
 func TestBasePlugin_IsEnabled(t *testing.T) {
@@ -19,7 +20,7 @@ func TestBasePlugin_IsEnabled(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			plugin := &base_plugins2.BasePlugin{Enabled: tt.enabled}
+			plugin := &baseplugins2.BasePlugin{Enabled: tt.enabled}
 			if plugin.IsEnabled() != tt.expected {
 				t.Errorf("Expected IsEnabled() to be %v, got %v", tt.expected, plugin.IsEnabled())
 			}
@@ -28,7 +29,7 @@ func TestBasePlugin_IsEnabled(t *testing.T) {
 }
 
 func TestBasePlugin_Name(t *testing.T) {
-	plugin := &base_plugins2.BasePlugin{}
+	plugin := &baseplugins2.BasePlugin{}
 	if plugin.Name() != "BasePlugin" {
 		t.Errorf("Expected Name() to return 'BasePlugin', got %s", plugin.Name())
 	}
@@ -67,7 +68,7 @@ func TestNodeAffinityScoring_Validation(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			scoring := &nodeaffinityscoring.NodeAffinityScoring{
-				BasePlugin: base_plugins2.BasePlugin{Enabled: true},
+				BasePlugin: baseplugins2.BasePlugin{Enabled: true},
 				Platforms:  tt.platforms,
 			}
 

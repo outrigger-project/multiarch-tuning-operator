@@ -18,7 +18,6 @@ package v1beta1
 
 import (
 	"fmt"
-	"github.com/openshift/multiarch-tuning-operator/apis/multiarch/common/plugins"
 	"strings"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -26,6 +25,7 @@ import (
 	"github.com/openshift/library-go/pkg/operator/v1helpers"
 
 	"github.com/openshift/multiarch-tuning-operator/apis/multiarch/common"
+	"github.com/openshift/multiarch-tuning-operator/apis/multiarch/common/plugins"
 )
 
 // ClusterPodPlacementConfigSpec defines the desired state of ClusterPodPlacementConfig
