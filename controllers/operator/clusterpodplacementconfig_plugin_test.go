@@ -1,4 +1,4 @@
-package podplacement
+package operator
 
 import (
 	"context"
@@ -28,6 +28,7 @@ var _ = Describe("ClusterPodPlacementConfig Conversion Tests", func() {
 		By("Creating the ClusterPodPlacementConfig")
 		err := k8sClient.Create(ctx, builder.NewClusterPodPlacementConfig().WithName(common.SingletonResourceObjectName).Build())
 		Expect(err).NotTo(HaveOccurred(), "failed to create ClusterPodPlacementConfig", err)
+		validateReconcile()
 	})
 	AfterEach(func() {
 		By("Deleting the ClusterPodPlacementConfig")
