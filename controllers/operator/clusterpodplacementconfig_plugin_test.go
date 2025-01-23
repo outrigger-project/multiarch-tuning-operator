@@ -1,7 +1,6 @@
 package operator
 
 import (
-	"context"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -20,16 +19,12 @@ import (
 )
 
 var _ = Describe("ClusterPodPlacementConfig Conversion Tests", func() {
-	var (
-		ctx    context.Context
-		client runtimeclient.Client
-	)
-	BeforeEach(func() {
-		By("Creating the ClusterPodPlacementConfig")
-		err := k8sClient.Create(ctx, builder.NewClusterPodPlacementConfig().WithName(common.SingletonResourceObjectName).Build())
-		Expect(err).NotTo(HaveOccurred(), "failed to create ClusterPodPlacementConfig", err)
-		validateReconcile()
-	})
+	//BeforeEach(func() {
+	//	By("Creating the ClusterPodPlacementConfig")
+	//	err := k8sClient.Create(ctx, builder.NewClusterPodPlacementConfig().WithName(common.SingletonResourceObjectName).Build())
+	//	Expect(err).NotTo(HaveOccurred(), "failed to create ClusterPodPlacementConfig", err)
+	//	validateReconcile()
+	//})
 	AfterEach(func() {
 		By("Deleting the ClusterPodPlacementConfig")
 		err := k8sClient.Delete(ctx, builder.NewClusterPodPlacementConfig().WithName(common.SingletonResourceObjectName).Build())
@@ -39,20 +34,21 @@ var _ = Describe("ClusterPodPlacementConfig Conversion Tests", func() {
 	Context("When the operator is running and a pod placement config is created", func() {
 		It("should create a v1beta1 CR and successfully convert it to v1alpha1", func() {
 			By("Creating a v1beta1 ClusterPodPlacementConfig")
-			err := client.Create(ctx, &v1beta1.ClusterPodPlacementConfig{
+			err := k8sClient.Create(ctx, &v1beta1.ClusterPodPlacementConfig{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-cppc",
+					Name:      common.SingletonResourceObjectName,
 					Namespace: "default",
 				},
 				Spec: v1beta1.ClusterPodPlacementConfigSpec{
 					LogVerbosity: "Normal",
 				},
 			})
-			Expect(err).NotTo(HaveOccurred())
+			Expect(err).NotTo(HaveOccurred(), "failed to create ClusterPodPlacementConfig", err)
+			validateReconcile()
 
 			Eventually(func(g Gomega) {
 				c := &v1alpha1.ClusterPodPlacementConfig{}
-				err := client.Get(ctx, runtimeclient.ObjectKey{Name: "test-cppc", Namespace: "default"}, c)
+				err := k8sClient.Get(ctx, runtimeclient.ObjectKey{Name: common.SingletonResourceObjectName, Namespace: "default"}, c)
 				g.Expect(err).NotTo(HaveOccurred())
 				g.Expect(c.Spec.LogVerbosity).To(Equal("Normal"))
 			}, time.Second*10, time.Millisecond*250).Should(Succeed())
@@ -60,9 +56,9 @@ var _ = Describe("ClusterPodPlacementConfig Conversion Tests", func() {
 
 		It("should create a v1alpha1 CR and successfully convert it to v1beta1", func() {
 			By("Creating a v1alpha1 ClusterPodPlacementConfig")
-			err := client.Create(ctx, &v1alpha1.ClusterPodPlacementConfig{
+			err := k8sClient.Create(ctx, &v1alpha1.ClusterPodPlacementConfig{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-cppc",
+					Name:      common.SingletonResourceObjectName,
 					Namespace: "default",
 				},
 				Spec: v1alpha1.ClusterPodPlacementConfigSpec{
@@ -73,7 +69,7 @@ var _ = Describe("ClusterPodPlacementConfig Conversion Tests", func() {
 
 			Eventually(func(g Gomega) {
 				c := &v1beta1.ClusterPodPlacementConfig{}
-				err := client.Get(ctx, runtimeclient.ObjectKey{Name: "test-cppc", Namespace: "default"}, c)
+				err := k8sClient.Get(ctx, runtimeclient.ObjectKey{Name: common.SingletonResourceObjectName, Namespace: "default"}, c)
 				g.Expect(err).NotTo(HaveOccurred())
 				g.Expect(c.Spec.LogVerbosity).To(Equal("Normal"))
 			}, time.Second*10, time.Millisecond*250).Should(Succeed())
@@ -84,7 +80,7 @@ var _ = Describe("ClusterPodPlacementConfig Conversion Tests", func() {
 			// Step 1: Create a v1alpha1 ClusterPodPlacementConfig object
 			v1alpha1Obj := &v1alpha1.ClusterPodPlacementConfig{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-cppc-with-specs",
+					Name:      common.SingletonResourceObjectName,
 					Namespace: "default",
 				},
 				Spec: v1alpha1.ClusterPodPlacementConfigSpec{
@@ -106,13 +102,13 @@ var _ = Describe("ClusterPodPlacementConfig Conversion Tests", func() {
 			}
 
 			By("Creating the v1alpha1 ClusterPodPlacementConfig")
-			err := client.Create(ctx, v1alpha1Obj)
+			err := k8sClient.Create(ctx, v1alpha1Obj)
 			Expect(err).NotTo(HaveOccurred())
 
 			// Step 2: Validate the conversion to v1beta1
 			Eventually(func(g Gomega) {
 				v1beta1Obj := &v1beta1.ClusterPodPlacementConfig{}
-				err := client.Get(ctx, runtimeclient.ObjectKey{Name: "test-cppc-with-specs", Namespace: "default"}, v1beta1Obj)
+				err := k8sClient.Get(ctx, runtimeclient.ObjectKey{Name: common.SingletonResourceObjectName, Namespace: "default"}, v1beta1Obj)
 				g.Expect(err).NotTo(HaveOccurred())
 
 				// Verify the LogVerbosity field
