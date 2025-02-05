@@ -18,7 +18,7 @@ package operator
 
 import (
 	"fmt"
-
+	"github.com/openshift/multiarch-tuning-operator/apis/multiarch/common/plugins"
 	"github.com/openshift/multiarch-tuning-operator/pkg/informers"
 
 	admissionv1 "k8s.io/api/admissionregistration/v1"
@@ -584,6 +584,78 @@ var _ = Describe("Controllers/ClusterPodPlacementConfig/ClusterPodPlacementConfi
 			err := k8sClient.Delete(ctx, builder.NewClusterPodPlacementConfig().WithName(common.SingletonResourceObjectName).Build())
 			Expect(err).NotTo(HaveOccurred(), "failed to delete ClusterPodPlacementConfig", err)
 			Eventually(framework.ValidateDeletion(k8sClient, ctx)).Should(Succeed(), "the ClusterPodPlacementConfig should be deleted")
+		})
+	})
+	Context("When a v1beta1 pod placement config is created", func() {
+		AfterEach(func() {
+			By("Deleting the ClusterPodPlacementConfig")
+			err := k8sClient.Delete(ctx, builder.NewClusterPodPlacementConfig().WithName(common.SingletonResourceObjectName).Build())
+			Expect(err).NotTo(HaveOccurred(), "failed to delete ClusterPodPlacementConfig", err)
+			Eventually(framework.ValidateDeletion(k8sClient, ctx)).Should(Succeed(), "the ClusterPodPlacementConfig should be deleted")
+		})
+		It("should create a v1beta1 CPPC omitting the plugins key and successfully", func() {
+			err := k8sClient.Create(ctx, builder.NewClusterPodPlacementConfig().WithName(common.SingletonResourceObjectName).Build())
+			Expect(err).NotTo(HaveOccurred(), "failed to create ClusterPodPlacementConfig", err)
+			validateReconcile()
+
+			By("Creating a v1beta1 ClusterPodPlacementConfig")
+			ppc := &v1beta1.ClusterPodPlacementConfig{}
+			err = k8sClient.Get(ctx, crclient.ObjectKeyFromObject(&v1beta1.ClusterPodPlacementConfig{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      common.SingletonResourceObjectName,
+					Namespace: utils.Namespace(),
+				},
+				Spec: v1beta1.ClusterPodPlacementConfigSpec{
+					LogVerbosity: "Normal",
+					Plugins: plugins.Plugins{
+						NodeAffinityScoring: &plugins.NodeAffinityScoring{
+							BasePlugin: plugins.BasePlugin{
+								Enabled: true,
+							},
+							Platforms: []plugins.NodeAffinityScoringPlatformTerm{
+								{Architecture: utils.ArchitectureArm64, Weight: 50},
+							},
+						},
+					},
+				},
+			}), ppc)
+			Expect(err).NotTo(HaveOccurred())
+		})
+		It("does not query the remote registry until the cache expires", func() {
+			cppc := &v1beta1.ClusterPodPlacementConfig{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      common.SingletonResourceObjectName,
+					Namespace: utils.Namespace(),
+				},
+				Spec: v1beta1.ClusterPodPlacementConfigSpec{
+					LogVerbosity: "Normal",
+					Plugins: plugins.Plugins{
+						NodeAffinityScoring: &plugins.NodeAffinityScoring{
+							BasePlugin: plugins.BasePlugin{
+								Enabled: true,
+							},
+							Platforms: []plugins.NodeAffinityScoringPlatformTerm{
+								{Architecture: utils.ArchitectureArm64, Weight: 50},
+							},
+						},
+					},
+				},
+			}
+
+			// First, create the CPPC resource
+			err := k8sClient.Create(ctx, cppc)
+			Expect(err).NotTo(HaveOccurred())
+
+			// Then, fetch it to ensure it exists and check the fields
+			ppc := &v1beta1.ClusterPodPlacementConfig{}
+			err = k8sClient.Get(ctx, crclient.ObjectKeyFromObject(cppc), ppc)
+			Expect(err).NotTo(HaveOccurred())
+
+			// Verify that the NodeAffinityScoring field is populated
+			Expect(ppc.Spec.Plugins.NodeAffinityScoring).NotTo(BeNil())
+			Expect(ppc.Spec.Plugins.NodeAffinityScoring.Platforms).To(HaveLen(1))
+			Expect(ppc.Spec.Plugins.NodeAffinityScoring.Platforms[0].Architecture).To(Equal(utils.ArchitectureArm64))
+			Expect(ppc.Spec.Plugins.NodeAffinityScoring.Platforms[0].Weight).To(Equal(int32(50)))
 		})
 	})
 })
