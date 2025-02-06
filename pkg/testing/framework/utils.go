@@ -19,6 +19,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/errors"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd/api"
@@ -113,6 +114,14 @@ func LoadClientset() (*kubernetes.Clientset, error) {
 	}
 
 	return kubernetes.NewForConfig(cfg)
+}
+
+func LoadDynamicClient() (*dynamic.DynamicClient, error) {
+	cfg, err := config.GetConfig()
+	if err != nil {
+		return nil, err
+	}
+	return dynamic.NewForConfig(cfg)
 }
 
 func RegisterScheme(s *runtime.Scheme) error {

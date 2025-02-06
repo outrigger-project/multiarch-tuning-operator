@@ -68,6 +68,7 @@ rules:
   - namespaces
   verbs:
   - get
+  - list
   - update
 - apiGroups:
   - ""

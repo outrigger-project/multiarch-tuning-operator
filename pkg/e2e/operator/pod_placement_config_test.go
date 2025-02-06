@@ -3,6 +3,10 @@ package operator_test
 import (
 	"os"
 
+	v1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/types"
+
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
@@ -246,6 +250,62 @@ var _ = Describe("The Multiarch Tuning Operator", Serial, func() {
 			By("The pod should have been set node affinity of arch info.")
 			Eventually(framework.VerifyPodNodeAffinity(ctx, client, ns, "app", "test", *expectedNSTs), e2e.WaitShort).Should(Succeed())
 		})
+	})
+	It("should reconcile the monitoring stack objects based on the namespace labels", func() {
+		By("Creating the ClusterPodPlacementConfig")
+		err := client.Create(ctx, NewClusterPodPlacementConfig().WithName("cluster").Build())
+		Expect(err).NotTo(HaveOccurred())
+		Eventually(framework.ValidateCreation(client, ctx)).Should(Succeed())
+		By("Getting the namespace")
+		ns := &corev1.Namespace{}
+		err = client.Get(ctx, types.NamespacedName{
+			Name: utils.Namespace(),
+		}, ns)
+		Expect(err).NotTo(HaveOccurred(), "failed to get namespace", err)
+		Expect(ns.Labels).NotTo(HaveKey(utils.MonitoringLabelKey(ctx, dClient)),
+			"the namespace should not have the cluster-monitoring label")
+		sm := &v1.ServiceMonitor{}
+		By("Getting the ServiceMonitor")
+		err = client.Get(ctx, types.NamespacedName{
+			Name:      utils.PodPlacementControllerName,
+			Namespace: utils.Namespace(),
+		}, sm)
+		Expect(err).To(HaveOccurred(), "the ServiceMonitor should not be available", err)
+		Expect(errors.IsNotFound(err)).To(BeTrue(), "the ServiceMonitor should not be available", err)
+		By("Labeling the namespace")
+		if ns.Labels == nil {
+			ns.Labels = make(map[string]string)
+		}
+		ns.Labels[utils.MonitoringLabelKey(ctx, dClient)] = "true"
+		err = client.Update(ctx, ns)
+		Expect(err).NotTo(HaveOccurred(), "failed to update namespace", err)
+		By("Verifying the service monitor is created")
+		Eventually(func(g Gomega) {
+			sm := &v1.ServiceMonitor{}
+			err := client.Get(ctx, types.NamespacedName{
+				Name:      utils.PodPlacementControllerName,
+				Namespace: utils.Namespace(),
+			}, sm)
+			g.Expect(err).NotTo(HaveOccurred(), "failed to get ServiceMonitor", err)
+		}).Should(Succeed(), "the ServiceMonitor should be created")
+		By("Removing the label from the namespace")
+		err = client.Get(ctx, types.NamespacedName{
+			Name: utils.Namespace(),
+		}, ns)
+		Expect(err).NotTo(HaveOccurred(), "failed to get namespace", err)
+		delete(ns.Labels, utils.MonitoringLabelKey(ctx, dClient))
+		err = client.Update(ctx, ns)
+		Expect(err).NotTo(HaveOccurred(), "failed to update namespace", err)
+		By("Verifying the service monitor is deleted")
+		Eventually(func(g Gomega) {
+			sm := &v1.ServiceMonitor{}
+			err := client.Get(ctx, types.NamespacedName{
+				Name:      utils.PodPlacementControllerName,
+				Namespace: utils.Namespace(),
+			}, sm)
+			g.Expect(err).To(HaveOccurred(), "the ServiceMonitor should not be available", err)
+			g.Expect(errors.IsNotFound(err)).To(BeTrue(), "the ServiceMonitor should not be available", err)
+		}, e2e.WaitMedium).Should(Succeed(), "the ServiceMonitor should be deleted")
 	})
 	Context("The webhook should not gate pods with node selectors that pin them to the control plane", func() {
 		BeforeEach(func() {

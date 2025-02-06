@@ -55,3 +55,18 @@ func IsResourceAvailable(ctx context.Context, client *dynamic.DynamicClient, res
 	availableResourcesMap[resource] = err == nil
 	return availableResourcesMap[resource]
 }
+
+func IsOpenshift(ctx context.Context, client *dynamic.DynamicClient) bool {
+	return IsResourceAvailable(ctx, client, schema.GroupVersionResource{
+		Group:    "config.openshift.io",
+		Version:  "v1",
+		Resource: "clusterversions",
+	})
+}
+
+func MonitoringLabelKey(ctx context.Context, client *dynamic.DynamicClient) string {
+	if !IsOpenshift(ctx, client) {
+		return "k8s.io/cluster-monitoring"
+	}
+	return "openshift.io/cluster-monitoring"
+}

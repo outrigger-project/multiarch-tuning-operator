@@ -34,13 +34,16 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	ctrllog "sigs.k8s.io/controller-runtime/pkg/log"
-
-	"github.com/openshift/library-go/pkg/operator/events"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	monitoringv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
 	"go.uber.org/zap/zapcore"
 
+	"github.com/openshift/library-go/pkg/operator/events"
+
+	"github.com/openshift/multiarch-tuning-operator/apis/multiarch/common"
 	multiarchv1beta1 "github.com/openshift/multiarch-tuning-operator/apis/multiarch/v1beta1"
 	"github.com/openshift/multiarch-tuning-operator/pkg/utils"
 )
@@ -71,7 +74,7 @@ const (
 //+kubebuilder:rbac:groups=admissionregistration.k8s.io,resources=mutatingwebhookconfigurations,verbs=get;update;patch;create;delete;list;watch
 //+kubebuilder:rbac:groups=admissionregistration.k8s.io,resources=mutatingwebhookconfigurations/status,verbs=get
 
-//+kubebuilder:rbac:groups=core,resources=namespaces,verbs=get;update
+//+kubebuilder:rbac:groups=core,resources=namespaces,verbs=get;update;list
 //+kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;update;patch;create;delete
 //+kubebuilder:rbac:groups=apps,resources=deployments/status,verbs=get
 //+kubebuilder:rbac:groups=apps,resources=deployments/finalizers,verbs=update
@@ -131,7 +134,8 @@ func (r *ClusterPodPlacementConfigReconciler) Reconcile(ctx context.Context, req
 	return ctrl.Result{}, r.reconcile(ctx, clusterPodPlacementConfig)
 }
 
-func (r *ClusterPodPlacementConfigReconciler) ensureNamespaceLabels(ctx context.Context) error {
+func (r *ClusterPodPlacementConfigReconciler) ensureNamespaceLabels(ctx context.Context,
+	clusterPodPlacementConfig *multiarchv1beta1.ClusterPodPlacementConfig) error {
 	// https://kubernetes.io/docs/concepts/security/pod-security-standards/
 	// https://kubernetes.io/docs/concepts/security/pod-security-admission/
 	// https://kubernetes.io/docs/tasks/configure-pod-container/enforce-standards-namespace-labels/
@@ -152,6 +156,7 @@ func (r *ClusterPodPlacementConfigReconciler) ensureNamespaceLabels(ctx context.
 	ns.Labels["pod-security.kubernetes.io/enforce-version"] = "v1.29"
 	ns.Labels["pod-security.kubernetes.io/warn"] = "privileged"
 	ns.Labels["pod-security.kubernetes.io/warn-version"] = "v1.29"
+
 	// See https://github.com/openshift/enhancements/blob/c5b9aea25e/enhancements/workload-partitioning/management-workload-partitioning.md
 	ns.Labels["workload.openshift.io/allowed"] = "management"
 	log.V(2).Info("Updating the namespace labels", "labels", ns.Labels)
@@ -335,16 +340,7 @@ func (r *ClusterPodPlacementConfigReconciler) handleDelete(ctx context.Context,
 	}
 
 	if utils.IsResourceAvailable(ctx, r.DynamicClient, monitoringv1.SchemeGroupVersion.WithResource("servicemonitors")) {
-		objsToDelete = append(objsToDelete, utils.ToDeleteRef{
-			NamespacedTypedClient: utils.NewDynamicDeleter(r.DynamicClient.Resource(schema.GroupVersionResource{Group: "monitoring.coreos.com", Version: "v1", Resource: "servicemonitors"}).Namespace(utils.Namespace())),
-			ObjName:               utils.PodPlacementWebhookName,
-		}, utils.ToDeleteRef{
-			NamespacedTypedClient: utils.NewDynamicDeleter(r.DynamicClient.Resource(schema.GroupVersionResource{Group: "monitoring.coreos.com", Version: "v1", Resource: "servicemonitors"}).Namespace(utils.Namespace())),
-			ObjName:               utils.PodPlacementControllerName,
-		}, utils.ToDeleteRef{
-			NamespacedTypedClient: utils.NewDynamicDeleter(r.DynamicClient.Resource(schema.GroupVersionResource{Group: "monitoring.coreos.com", Version: "v1", Resource: "prometheusrules"}).Namespace(utils.Namespace())),
-			ObjName:               utils.OperatorName,
-		})
+		objsToDelete = append(objsToDelete, r.monitoringObjects()...)
 	}
 
 	log.Info("Deleting the remaining resources after cleanup")
@@ -356,6 +352,23 @@ func (r *ClusterPodPlacementConfigReconciler) handleDelete(ctx context.Context,
 	return err
 }
 
+func (r *ClusterPodPlacementConfigReconciler) monitoringObjects() []utils.ToDeleteRef {
+	return []utils.ToDeleteRef{
+		{
+			NamespacedTypedClient: utils.NewDynamicDeleter(r.DynamicClient.Resource(schema.GroupVersionResource{Group: "monitoring.coreos.com", Version: "v1", Resource: "servicemonitors"}).Namespace(utils.Namespace())),
+			ObjName:               utils.PodPlacementWebhookName,
+		},
+		{
+			NamespacedTypedClient: utils.NewDynamicDeleter(r.DynamicClient.Resource(schema.GroupVersionResource{Group: "monitoring.coreos.com", Version: "v1", Resource: "servicemonitors"}).Namespace(utils.Namespace())),
+			ObjName:               utils.PodPlacementControllerName,
+		},
+		{
+			NamespacedTypedClient: utils.NewDynamicDeleter(r.DynamicClient.Resource(schema.GroupVersionResource{Group: "monitoring.coreos.com", Version: "v1", Resource: "prometheusrules"}).Namespace(utils.Namespace())),
+			ObjName:               utils.OperatorName,
+		},
+	}
+}
+
 // reconcile reconciles the ClusterPodPlacementConfig operand's resources.
 func (r *ClusterPodPlacementConfigReconciler) reconcile(ctx context.Context, clusterPodPlacementConfig *multiarchv1beta1.ClusterPodPlacementConfig) error {
 	log := ctrllog.FromContext(ctx)
@@ -363,7 +376,7 @@ func (r *ClusterPodPlacementConfigReconciler) reconcile(ctx context.Context, clu
 		log.Info("Setting log level", "level", -clusterPodPlacementConfig.Spec.LogVerbosity.ToZapLevelInt())
 		utils.AtomicLevel.SetLevel(zapcore.Level(-clusterPodPlacementConfig.Spec.LogVerbosity.ToZapLevelInt()))
 	}
-	if err := r.ensureNamespaceLabels(ctx); err != nil {
+	if err := r.ensureNamespaceLabels(ctx, clusterPodPlacementConfig); err != nil {
 		log.Error(err, "Unable to ensure namespace labels")
 		return errorutils.NewAggregate([]error{err, r.updateStatus(ctx, clusterPodPlacementConfig)})
 	}
@@ -419,19 +432,33 @@ func (r *ClusterPodPlacementConfigReconciler) reconcile(ctx context.Context, clu
 		log.Info("Deleting the mutating webhook configuration as the operand is not ready to serve the admission request or remove the scheduling gate")
 		_ = r.ClientSet.AdmissionregistrationV1().MutatingWebhookConfigurations().Delete(ctx, utils.PodMutatingWebhookConfigurationName, metav1.DeleteOptions{})
 	}
+	errs := make([]error, 0)
 
 	// If the servicemonitors.monitoring.coreos.com CRD is available, we create the ServiceMonitor objects
 	if utils.IsResourceAvailable(ctx, r.DynamicClient, monitoringv1.SchemeGroupVersion.WithResource("servicemonitors")) {
-		log.V(1).Info("Creating ServiceMonitors")
-		objects = append(objects,
-			buildServiceMonitor(utils.PodPlacementControllerName),
-			buildServiceMonitor(utils.PodPlacementWebhookName),
-			buildAvailabilityAlertRule(),
-		)
+		n, err := r.ClientSet.CoreV1().Namespaces().Get(ctx, utils.Namespace(), metav1.GetOptions{})
+		if err != nil {
+			log.Error(err, "Unable to get the namespace")
+			return errorutils.NewAggregate([]error{err, r.updateStatus(ctx, clusterPodPlacementConfig)})
+		}
+		if n.Labels != nil && n.Labels[utils.MonitoringLabelKey(ctx, r.DynamicClient)] == "true" {
+			log.V(1).Info("Creating ServiceMonitors")
+			objects = append(objects,
+				buildServiceMonitor(utils.PodPlacementControllerName),
+				buildServiceMonitor(utils.PodPlacementWebhookName),
+				buildAvailabilityAlertRule(),
+			)
+		} else {
+			log.V(1).Info("The namespace is not monitored by the cluster monitoring stack. Ensure no monitoring stack objects are present")
+			// NOTE: err aggregates non-nil errors, excluding NotFound errors
+			if err = utils.DeleteResources(ctx, r.monitoringObjects()); err != nil {
+				log.Error(err, "Unable to delete monitoring objects")
+				errs = append(errs, err)
+			}
+		}
 	} else {
 		log.V(1).Info("servicemonitoring.monitoring.coreos.com is not available. Skipping the creation of the ServiceMonitors")
 	}
-	errs := make([]error, 0)
 	for _, o := range objects {
 		if err := ctrl.SetControllerReference(clusterPodPlacementConfig, o, r.Scheme); err != nil {
 			log.Error(err, "Unable to set controller reference", "name", o.GetName())
@@ -521,7 +548,16 @@ func (r *ClusterPodPlacementConfigReconciler) SetupWithManager(mgr ctrl.Manager)
 		Owns(&rbacv1.Role{}).
 		Owns(&rbacv1.RoleBinding{}).
 		Owns(&corev1.ServiceAccount{}).
-		Owns(&admissionv1.MutatingWebhookConfiguration{})
+		Owns(&admissionv1.MutatingWebhookConfiguration{}).
+		Watches(&corev1.Namespace{}, handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, obj client.Object) []reconcile.Request {
+			_, ok := obj.(*corev1.Namespace)
+			if !ok || obj.GetName() != utils.Namespace() {
+				return nil
+			}
+			mgr.GetLogger().Info("Enqueueing ClusterPodPlacementConfig reconciliation for the namespace",
+				"namespace", obj.GetName())
+			return []reconcile.Request{{NamespacedName: client.ObjectKey{Name: common.SingletonResourceObjectName}}}
+		}))
 	if utils.IsResourceAvailable(context.Background(), r.DynamicClient,
 		monitoringv1.SchemeGroupVersion.WithResource("servicemonitors")) {
 		c = c.Owns(&monitoringv1.ServiceMonitor{}).Owns(&monitoringv1.PrometheusRule{})

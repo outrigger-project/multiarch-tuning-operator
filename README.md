@@ -37,6 +37,11 @@ described in the [Openshift EP](https://github.com/openshift/enhancements/blob/6
 The aim of this operator will be to run on any Kubernetes cluster, although the main focus of development and testing
 will be carried out on Openshift clusters.
 
+## Enable metrics
+
+The operator can expose metrics for the prometheus operator. To enable the deployment of the metrics objects (`monitoring.coreos.com/(servicemonitors|prometheusrules)`), you can label the namespace where the operator runs with `k8s.io/cluster-monitoring: "true"`. 
+
+Use `openshift.io/cluster-monitoring: "true"` for Openshift clusters.
 
 ### Development
 
