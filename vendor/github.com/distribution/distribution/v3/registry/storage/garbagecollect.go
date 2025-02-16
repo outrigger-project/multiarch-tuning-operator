@@ -9,6 +9,7 @@ import (
 	"github.com/distribution/distribution/v3/registry/storage/driver"
 	"github.com/distribution/reference"
 	"github.com/opencontainers/go-digest"
+	v1 "github.com/opencontainers/image-spec/specs-go/v1"
 )
 
 func emit(format string, a ...interface{}) {
@@ -65,7 +66,7 @@ func MarkAndSweep(ctx context.Context, storageDriver driver.StorageDriver, regis
 		err = manifestEnumerator.Enumerate(ctx, func(dgst digest.Digest) error {
 			if opts.RemoveUntagged {
 				// fetch all tags where this manifest is the latest one
-				tags, err := repository.Tags(ctx).Lookup(ctx, distribution.Descriptor{Digest: dgst})
+				tags, err := repository.Tags(ctx).Lookup(ctx, v1.Descriptor{Digest: dgst})
 				if err != nil {
 					return fmt.Errorf("failed to retrieve tags for digest %v: %v", dgst, err)
 				}
@@ -169,6 +170,10 @@ func MarkAndSweep(ctx context.Context, storageDriver driver.StorageDriver, regis
 
 	for repo, dgsts := range deleteLayerSet {
 		for _, dgst := range dgsts {
+			emit("%s: layer link eligible for deletion: %s", repo, dgst)
+			if opts.DryRun {
+				continue
+			}
 			err = vacuum.RemoveLayer(repo, dgst)
 			if err != nil {
 				return fmt.Errorf("failed to delete layer link %s of repo %s: %v", dgst, repo, err)

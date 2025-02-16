@@ -8,54 +8,59 @@ import (
 	"github.com/distribution/distribution/v3"
 	"github.com/distribution/distribution/v3/manifest"
 	"github.com/opencontainers/go-digest"
+	"github.com/opencontainers/image-spec/specs-go"
 	v1 "github.com/opencontainers/image-spec/specs-go/v1"
 )
 
 // IndexSchemaVersion provides a pre-initialized version structure for OCI Image
 // Indices.
+//
+// Deprecated: use [specs.Versioned] and set MediaType on the manifest
+// to [v1.MediaTypeImageIndex].
+//
+//nolint:staticcheck // ignore SA1019: manifest.Versioned is deprecated:
 var IndexSchemaVersion = manifest.Versioned{
 	SchemaVersion: 2,
 	MediaType:     v1.MediaTypeImageIndex,
 }
 
 func init() {
-	imageIndexFunc := func(b []byte) (distribution.Manifest, distribution.Descriptor, error) {
-		if err := validateIndex(b); err != nil {
-			return nil, distribution.Descriptor{}, err
-		}
-		m := new(DeserializedImageIndex)
-		err := m.UnmarshalJSON(b)
-		if err != nil {
-			return nil, distribution.Descriptor{}, err
-		}
-
-		if m.MediaType != "" && m.MediaType != v1.MediaTypeImageIndex {
-			err = fmt.Errorf("if present, mediaType in image index should be '%s' not '%s'",
-				v1.MediaTypeImageIndex, m.MediaType)
-
-			return nil, distribution.Descriptor{}, err
-		}
-
-		dgst := digest.FromBytes(b)
-		return m, distribution.Descriptor{
-			MediaType:   v1.MediaTypeImageIndex,
-			Digest:      dgst,
-			Size:        int64(len(b)),
-			Annotations: m.Annotations,
-		}, err
-	}
-	err := distribution.RegisterManifestSchema(v1.MediaTypeImageIndex, imageIndexFunc)
-	if err != nil {
+	if err := distribution.RegisterManifestSchema(v1.MediaTypeImageIndex, unmarshalImageIndex); err != nil {
 		panic(fmt.Sprintf("Unable to register OCI Image Index: %s", err))
 	}
 }
 
+func unmarshalImageIndex(b []byte) (distribution.Manifest, v1.Descriptor, error) {
+	if err := validateIndex(b); err != nil {
+		return nil, v1.Descriptor{}, err
+	}
+
+	m := &DeserializedImageIndex{}
+	if err := m.UnmarshalJSON(b); err != nil {
+		return nil, v1.Descriptor{}, err
+	}
+
+	if m.MediaType != "" && m.MediaType != v1.MediaTypeImageIndex {
+		return nil, v1.Descriptor{}, fmt.Errorf("if present, mediaType in image index should be '%s' not '%s'", v1.MediaTypeImageIndex, m.MediaType)
+	}
+
+	return m, v1.Descriptor{
+		MediaType:   v1.MediaTypeImageIndex,
+		Digest:      digest.FromBytes(b),
+		Size:        int64(len(b)),
+		Annotations: m.Annotations,
+	}, nil
+}
+
 // ImageIndex references manifests for various platforms.
 type ImageIndex struct {
-	manifest.Versioned
+	specs.Versioned
+
+	// MediaType is the media type of this schema.
+	MediaType string `json:"mediaType,omitempty"`
 
 	// Manifests references a list of manifests
-	Manifests []distribution.Descriptor `json:"manifests"`
+	Manifests []v1.Descriptor `json:"manifests"`
 
 	// Annotations is an optional field that contains arbitrary metadata for the
 	// image index
@@ -64,7 +69,7 @@ type ImageIndex struct {
 
 // References returns the distribution descriptors for the referenced image
 // manifests.
-func (ii ImageIndex) References() []distribution.Descriptor {
+func (ii ImageIndex) References() []v1.Descriptor {
 	return ii.Manifests
 }
 
@@ -81,21 +86,19 @@ type DeserializedImageIndex struct {
 // returns a DeserializedManifestList which contains the resulting manifest list
 // and its JSON representation. If annotations is nil or empty then the
 // annotations property will be omitted from the JSON representation.
-func FromDescriptors(descriptors []distribution.Descriptor, annotations map[string]string) (*DeserializedImageIndex, error) {
+func FromDescriptors(descriptors []v1.Descriptor, annotations map[string]string) (*DeserializedImageIndex, error) {
 	return fromDescriptorsWithMediaType(descriptors, annotations, v1.MediaTypeImageIndex)
 }
 
 // fromDescriptorsWithMediaType is for testing purposes, it's useful to be able to specify the media type explicitly
-func fromDescriptorsWithMediaType(descriptors []distribution.Descriptor, annotations map[string]string, mediaType string) (_ *DeserializedImageIndex, err error) {
+func fromDescriptorsWithMediaType(descriptors []v1.Descriptor, annotations map[string]string, mediaType string) (_ *DeserializedImageIndex, err error) {
 	m := ImageIndex{
-		Versioned: manifest.Versioned{
-			SchemaVersion: IndexSchemaVersion.SchemaVersion,
-			MediaType:     mediaType,
-		},
+		Versioned:   specs.Versioned{SchemaVersion: 2},
+		MediaType:   mediaType,
 		Annotations: annotations,
 	}
 
-	m.Manifests = make([]distribution.Descriptor, len(descriptors))
+	m.Manifests = make([]v1.Descriptor, len(descriptors))
 	copy(m.Manifests, descriptors)
 
 	deserialized := DeserializedImageIndex{
