@@ -241,7 +241,7 @@ func RunClusterPodPlacementConfigOperandWebHook(mgr ctrl.Manager) {
 	clientset := kubernetes.NewForConfigOrDie(config)
 	pool, err := ants.NewMultiPool(16, 16, ants.LeastTasks,
 		ants.WithPreAlloc(true))
-	must(err, "unable to create multi pool for the webhook's event messages")
+	must(err, "unable to create multi pool for the webhook's event messages ")
 	postFuncs = append(postFuncs, func() {
 		err = pool.ReleaseTimeout(30 * time.Second)
 		if err != nil {
