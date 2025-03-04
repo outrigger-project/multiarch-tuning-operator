@@ -66,7 +66,7 @@ ifeq ($(USE_IMAGE_DIGESTS), true)
 endif
 
 # Image URL to use all building/pushing image targets
-IMG ?= registry.ci.openshift.org/origin/multiarch-tuning-operator:main
+IMG ?= registry.ci.openshift.org/origin/multiarch-tuning-operator:v1.0
 
 #### Tool Versions ####
 ### TODO: NOTE: Update these values to match the versions of the K8S API when pivoting to a new version of K8S.

@@ -6,6 +6,6 @@ kind: Kustomization
 images:
 - name: controller
   newName: registry.ci.openshift.org/origin/multiarch-tuning-operator
-  newTag: main
+  newTag: v1.0
 commonAnnotations:
-  multiarch.openshift.io/image: registry.ci.openshift.org/origin/multiarch-tuning-operator:main
+  multiarch.openshift.io/image: registry.ci.openshift.org/origin/multiarch-tuning-operator:v1.0
