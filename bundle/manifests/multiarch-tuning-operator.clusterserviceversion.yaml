@@ -316,7 +316,7 @@ spec:
             metadata:
               annotations:
                 kubectl.kubernetes.io/default-container: manager
-                multiarch.openshift.io/image: registry.ci.openshift.org/origin/multiarch-tuning-operator:main
+                multiarch.openshift.io/image: registry.ci.openshift.org/origin/multiarch-tuning-operator:v1.0
                 openshift.io/required-scc: restricted-v2
                 target.workload.openshift.io/management: |
                   {"effect": "PreferredDuringScheduling"}
@@ -357,7 +357,7 @@ spec:
                   valueFrom:
                     fieldRef:
                       fieldPath: metadata.annotations['multiarch.openshift.io/image']
-                image: registry.ci.openshift.org/origin/multiarch-tuning-operator:main
+                image: registry.ci.openshift.org/origin/multiarch-tuning-operator:v1.0
                 imagePullPolicy: Always
                 livenessProbe:
                   httpGet:
