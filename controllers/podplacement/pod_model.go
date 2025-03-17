@@ -172,7 +172,6 @@ func (pod *Pod) setRequiredArchNodeAffinity(requirement corev1.NodeSelectorRequi
 }
 
 // SetPreferredArchNodeAffinity sets the node affinity for the pod to the preferences given in the ClusterPodPlacementConfig.
-// TODO[Tori]: Missing unit tests for this method.
 func (pod *Pod) SetPreferredArchNodeAffinity(cppc *v1beta1.ClusterPodPlacementConfig) {
 	// Prevent overriding of user-provided kubernetes.io/arch preferred affinities
 	if pod.isPreferredAffinityConfiguredForArchitecture() {
@@ -384,8 +383,8 @@ func (pod *Pod) hasControlPlaneNodeSelector() bool {
 // - the pod has a node name set
 // - the pod has a node selector that matches the control plane nodes
 // - the pod is owned by a DaemonSet
-// - both the nodeSelector/nodeAffinity and the preferredAffinity are set for the kubernetes.io/arch label. TODO[Tori]: Missing unit test
-// - only the nodeSelector/nodeAffinity is set for the kubernetes.io/arch label and the NodeAffinityScoring plugin is disabled. TODO[Tori]: Missing unit test
+// - both the nodeSelector/nodeAffinity and the preferredAffinity are set for the kubernetes.io/arch label.
+// - only the nodeSelector/nodeAffinity is set for the kubernetes.io/arch label and the NodeAffinityScoring plugin is disabled.
 func (pod *Pod) shouldIgnorePod(cppc *v1beta1.ClusterPodPlacementConfig) bool {
 	return utils.Namespace() == pod.Namespace || strings.HasPrefix(pod.Namespace, "kube-") ||
 		pod.Spec.NodeName != "" || pod.hasControlPlaneNodeSelector() || pod.isFromDaemonSet() ||
@@ -484,8 +483,8 @@ func (pod *Pod) handleError(err error, s string) {
 	log.Error(err, s)
 }
 
-// TODO[Tori] Missing godoc
-// TODO[Tori] Missing unit tests
+// isPreferredAffinityConfiguredForArchitecture returns true if the pod has a MatchExpression in the PreferredDuringSchedulingIgnoredDuringExecution
+// that matches kubernetes.io/arch
 func (pod *Pod) isPreferredAffinityConfiguredForArchitecture() bool {
 	if pod.Spec.Affinity == nil ||
 		pod.Spec.Affinity.NodeAffinity == nil ||
