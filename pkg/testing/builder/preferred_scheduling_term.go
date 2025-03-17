@@ -34,6 +34,17 @@ func (p *PreferredSchedulingTermBuilder) WithArchitecture(architecture string) *
 	return p
 }
 
+func (p *PreferredSchedulingTermBuilder) WithCustomKeyValue(key string, value string) *PreferredSchedulingTermBuilder {
+	p.preferredSchedulingTerm.Preference.MatchExpressions = []v1.NodeSelectorRequirement{
+		{
+			Key:      key,
+			Operator: v1.NodeSelectorOpIn,
+			Values:   []string{value},
+		},
+	}
+	return p
+}
+
 func (p *PreferredSchedulingTermBuilder) WithWeight(weight int32) *PreferredSchedulingTermBuilder {
 	p.preferredSchedulingTerm.Weight = weight
 	return p

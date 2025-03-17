@@ -224,11 +224,131 @@ var _ = Describe("The Pod Placement Operand", func() {
 			Eventually(framework.VerifyPodPreferredNodeAffinity(ctx, client, ns, "app", "test",
 				defaultExpectedAffinityTerms()), e2e.WaitShort).Should(Succeed())
 		})
-		// TODO[tori]
-		// It("should append the preferred affinities in the ClusterPodPlacementConfig when user provided non-arch-releated preferred affinities", func() {
-		// It("should set the required node affinity when users provide only arch-related preferred affinities", func() {
-		// It("should set the preferred node affinity when users provide only arch-related required affinities", func() {
-		// ^ Indirectly tested by the other cases
+		It("should append the preferred affinities in the ClusterPodPlacementConfig when user provided non-arch-related preferred affinities", func() {
+			var err error
+			By("Create an ephemeral namespace")
+			ns := framework.NewEphemeralNamespace()
+			err = client.Create(ctx, ns)
+			Expect(err).NotTo(HaveOccurred())
+			//nolint:errcheck
+			defer client.Delete(ctx, ns)
+			By("Create a deployment using the container with conflicting node affinity")
+			archLabelPST := NewPreferredSchedulingTerm().WithCustomKeyValue("foo", "bar").WithWeight(64).Build()
+			ps := NewPodSpec().
+				WithContainersImages(helloOpenshiftPublicMultiarchImage).
+				WithPreferredNodeAffinities(
+					*archLabelPST,
+				).Build()
+			d := NewDeployment().
+				WithSelectorAndPodLabels(podLabel).
+				WithPodSpec(ps).
+				WithReplicas(utils.NewPtr(int32(1))).
+				WithName("test-deployment").
+				WithNamespace(ns.Name).
+				Build()
+			err = client.Create(ctx, d)
+			Expect(err).NotTo(HaveOccurred())
+			archLabelNSR := NewNodeSelectorRequirement().
+				WithKeyAndValues(utils.ArchLabel, corev1.NodeSelectorOpIn, utils.ArchitectureAmd64,
+					utils.ArchitectureArm64, utils.ArchitectureS390x, utils.ArchitecturePpc64le).
+				Build()
+			expectedNSTs := NewNodeSelectorTerm().WithMatchExpressions(archLabelNSR).Build()
+			By("The pod should have been processed by the webhook and the scheduling gate label should be added")
+			Eventually(framework.VerifyPodLabels(ctx, client, ns, "app", "test", e2e.Present, schedulingGateLabel), e2e.WaitShort).Should(Succeed())
+			By("Verify arch label are set")
+			Eventually(framework.VerifyPodLabelsAreSet(ctx, client, ns, "app", "test",
+				utils.MultiArchLabel, "",
+				utils.ArchLabelValue(utils.ArchitectureAmd64), "",
+				utils.ArchLabelValue(utils.ArchitectureArm64), "",
+				utils.ArchLabelValue(utils.ArchitectureS390x), "",
+				utils.ArchLabelValue(utils.ArchitecturePpc64le), "",
+			), e2e.WaitShort).Should(Succeed())
+			By("The pod should have been set node affinity of arch info.")
+			Eventually(framework.VerifyPodNodeAffinity(ctx, client, ns, "app", "test", *expectedNSTs), e2e.WaitShort).Should(Succeed())
+			expectedPSTs := defaultExpectedAffinityTerms()
+			expectedPSTs = append(expectedPSTs, *archLabelPST)
+			By("The pod should  have the preferred affinities provided by the CPPC and users")
+			Eventually(framework.VerifyPodPreferredNodeAffinity(ctx, client, ns, "app", "test",
+				expectedPSTs), e2e.WaitShort).Should(Succeed())
+		})
+		It("should set the required node affinity when users provide only arch-related preferred affinities", func() {
+			var err error
+			By("Create an ephemeral namespace")
+			ns := framework.NewEphemeralNamespace()
+			err = client.Create(ctx, ns)
+			Expect(err).NotTo(HaveOccurred())
+			//nolint:errcheck
+			defer client.Delete(ctx, ns)
+			By("Create a deployment using the container with conflicting node affinity")
+			archLabelPST := NewPreferredSchedulingTerm().WithArchitecture(utils.ArchitectureAmd64).WithWeight(1).Build()
+			ps := NewPodSpec().
+				WithContainersImages(helloOpenshiftPublicMultiarchImage).
+				WithPreferredNodeAffinities(
+					*archLabelPST,
+				).Build()
+			d := NewDeployment().
+				WithSelectorAndPodLabels(podLabel).
+				WithPodSpec(ps).
+				WithReplicas(utils.NewPtr(int32(1))).
+				WithName("test-deployment").
+				WithNamespace(ns.Name).
+				Build()
+			err = client.Create(ctx, d)
+			Expect(err).NotTo(HaveOccurred())
+			archLabelNSR := NewNodeSelectorRequirement().
+				WithKeyAndValues(utils.ArchLabel, corev1.NodeSelectorOpIn, utils.ArchitectureAmd64,
+					utils.ArchitectureArm64, utils.ArchitectureS390x, utils.ArchitecturePpc64le).
+				Build()
+			expectedNSTs := NewNodeSelectorTerm().WithMatchExpressions(archLabelNSR).Build()
+			By("The pod should have been processed by the webhook and the scheduling gate label should be added")
+			Eventually(framework.VerifyPodLabels(ctx, client, ns, "app", "test", e2e.Present, schedulingGateLabel), e2e.WaitShort).Should(Succeed())
+			By("Verify arch label are set")
+			Eventually(framework.VerifyPodLabelsAreSet(ctx, client, ns, "app", "test",
+				utils.MultiArchLabel, "",
+				utils.ArchLabelValue(utils.ArchitectureAmd64), "",
+				utils.ArchLabelValue(utils.ArchitectureArm64), "",
+				utils.ArchLabelValue(utils.ArchitectureS390x), "",
+				utils.ArchLabelValue(utils.ArchitecturePpc64le), "",
+			), e2e.WaitShort).Should(Succeed())
+			By("The pod should have been set node affinity of arch info.")
+			Eventually(framework.VerifyPodNodeAffinity(ctx, client, ns, "app", "test", *expectedNSTs), e2e.WaitShort).Should(Succeed())
+			By("The pod should have the preferred affinities set in the ClusterPodPlacementConfig")
+			Eventually(framework.VerifyPodPreferredNodeAffinity(ctx, client, ns, "app", "test",
+				NewPreferredSchedulingTerms().WithPreferredSchedulingTerm(archLabelPST).Build()), e2e.WaitShort).Should(Succeed())
+		})
+		It("should set the preferred node affinity when users provide only arch-related required affinities", func() {
+			var err error
+			By("Create an ephemeral namespace")
+			ns := framework.NewEphemeralNamespace()
+			err = client.Create(ctx, ns)
+			Expect(err).NotTo(HaveOccurred())
+			//nolint:errcheck
+			defer client.Delete(ctx, ns)
+			By("Create a deployment using the container with conflicting node affinity")
+			archLabelNSR := NewNodeSelectorRequirement().
+				WithKeyAndValues(utils.ArchLabel, corev1.NodeSelectorOpIn, utils.ArchitectureArm64).
+				Build()
+			archLabelNSTs := NewNodeSelectorTerm().WithMatchExpressions(archLabelNSR).Build()
+			ps := NewPodSpec().
+				WithContainersImages(helloOpenshiftPublicMultiarchImage).
+				WithNodeSelectorTerms(*archLabelNSTs).Build()
+			d := NewDeployment().
+				WithSelectorAndPodLabels(podLabel).
+				WithPodSpec(ps).
+				WithReplicas(utils.NewPtr(int32(1))).
+				WithName("test-deployment").
+				WithNamespace(ns.Name).
+				Build()
+			err = client.Create(ctx, d)
+			Expect(err).NotTo(HaveOccurred())
+			By("The pod should have been processed by the webhook and the scheduling gate label should be added")
+			Eventually(framework.VerifyPodLabels(ctx, client, ns, "app", "test", e2e.Present, schedulingGateLabel), e2e.WaitShort).Should(Succeed())
+			By("The pod should keep the same node affinity provided by the users. No node affinity is added by the controller.")
+			Eventually(framework.VerifyPodNodeAffinity(ctx, client, ns, "app", "test", *archLabelNSTs), e2e.WaitShort).Should(Succeed())
+			By("The pod should have the preferred affinities provided by the CPPC")
+			Eventually(framework.VerifyPodPreferredNodeAffinity(ctx, client, ns, "app", "test",
+				defaultExpectedAffinityTerms()), e2e.WaitShort).Should(Succeed())
+		})
 		It("should not set the node affinities when users have already provided both required and preferred node affinities for architecture", func() {
 			var err error
 			By("Create an ephemeral namespace")
