@@ -5,12 +5,43 @@ metadata:
 spec:
   description: >-
     Run a parameterized prowjob using gangway.
+  params:
+    - name: GANGWAY_TOKEN
+      type: string
+      description: Token to authenticate with gangway
+      default: gangway-token
+    - description: 'Snapshot of the application'
+      name: SNAPSHOT
+      default: '{"components": [{"name":"test-app", "containerImage": "quay.io/example/repo:latest"}]}'
+      type: string
   tasks:
-    - name: hello-world
-      taskSpec:
-        steps:
-          - name: hello
-            image: brew.registry.redhat.io/rh-osbs/openshift-golang-builder:rhel_9_1.23
-            script: |
-              #!/bin/bash
-              echo "Hello, world!"
+    - name: run-prowjob
+      displayName: "Running prowjob $(params.PROWJOB_NAME)"
+      taskRef:
+        resolver: git
+        params:
+        - name: url
+          value: https://github.com/Prucek/GNU_go_sort.git
+        - name: revision
+          value: master
+        - name: pathInRepo
+          value: task/run-prowjob.yaml
+      params:
+        - name: SNAPSHOT
+          value: $(params.SNAPSHOT)
+        - name: CLOUD_PROVIDER
+          value: "aws"
+        - name: DEPLOY_TEST_COMMAND
+          value: "make e2e"
+        - name: OPENSHIFT_VERSION
+          value: "4.17"
+        - name: ARCHITECTURE
+          value: "arm64"
+        - name: ARTIFACTS_BUILD_ROOT
+          value: "quay-proxy.ci.openshift.org/openshift/ci:ocp_builder_rhel-9-golang-1.23-openshift-4.19"
+        - name: DOCKERFILE_ADDITIONS
+          value: "RUN make build"
+        - name: BUNDLE_NS
+          value: openshift-multiarch-tuning-operator
+        - name: PRE_TEST_COMMAND
+          value: "oc apply -k ./deploy/envs/prow-konflux-bundle"
