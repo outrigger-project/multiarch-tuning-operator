@@ -49,7 +49,7 @@ spec:
       - name: name
         value: docker-build-multi-platform-oci-ta
       - name: bundle
-        value: quay.io/konflux-ci/tekton-catalog/pipeline-docker-build-multi-platform-oci-ta@sha256:69c76df5defab8760d431c23635cc6033975fb92d5ca1f9e00a37942a16cb9db
+        value: quay.io/konflux-ci/tekton-catalog/pipeline-docker-build-multi-platform-oci-ta@sha256:14eda1bf868f76f6290cc160da5c4d178aa52fe0aebe0db0b33c09b579f24495
       - name: kind
         value: pipeline
   workspaces:
