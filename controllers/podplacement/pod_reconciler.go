@@ -142,7 +142,7 @@ func (r *PodReconciler) processPod(ctx context.Context, pod *Pod) {
 	}
 	// If the pod has been processed successfully or the max retries have been reached, remove the scheduling gate.
 	if err == nil || pod.maxRetries() {
-		if status := pod.Labels[utils.PreferredNodeAffinityLabel]; status == utils.LabelValueNotSet {
+		if pod.Labels[utils.PreferredNodeAffinityLabel] == utils.LabelValueNotSet {
 			pod.publishEvent(corev1.EventTypeNormal, ArchitectureAwareNodeAffinitySet,
 				ArchitecturePreferredPredicateSkippedMsg)
 		}
