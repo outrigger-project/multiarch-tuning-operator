@@ -20,7 +20,6 @@ package plugins
 
 // Plugins represents the plugins configuration.
 type Plugins struct {
-	// +kubebuilder:"validation:Required
 	NodeAffinityScoring *NodeAffinityScoring `json:"nodeAffinityScoring,omitempty"`
 	// Future plugins can be added here.
 }
