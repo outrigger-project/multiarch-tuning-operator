@@ -70,6 +70,13 @@ func (c *cacheProxy) GetRegistryInspector() IRegistryInspector {
 	return c.registryInspector
 }
 
+func (c *cacheProxy) clearCache() {
+	// Purge clears the cache completely.
+	// onEvict is called for each evicted key.
+	c.imageRefsCache.Purge()
+	// TBD: Reset the metrics?
+}
+
 func newCacheProxy() *cacheProxy {
 	return &cacheProxy{
 		registryInspector: newRegistryInspector(),
