@@ -27,11 +27,37 @@ type ENoExecEventSpec struct {
 
 // ENoExecEventStatus defines the observed state of ENoExecEvent
 type ENoExecEventStatus struct {
-	NodeName     string `json:"nodeName,omitempty"`
-	PodName      string `json:"podName,omitempty"`
+	// NodeName must follow the RFC 1123 DNS label format:
+	// - Max length: 63 characters
+	// - Characters: lowercase letters, digits, and hyphens (`-`)
+	// - Must start and end with an alphanumeric character
+	// Ref: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#dns-label-names
+	// +kubebuilder:validation:MaxLength=63
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
+	NodeName string `json:"nodeName,omitempty"`
+
+	// PodName must follow the RFC 1123 DNS subdomain format:
+	// - Max length: 253 characters
+	// - Characters: lowercase letters, digits, hyphens (`-`), and dots (`.`)
+	// - Must start and end with an alphanumeric character
+	// Ref: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#dns-subdomain-names
+	// +kubebuilder:validation:MaxLength=253
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$`
+	PodName string `json:"podName,omitempty"`
+
+	// PodNamespace must follow the RFC 1123 DNS subdomain format (same as PodName)
+	// - Max length: 253 characters
+	// - Characters: lowercase letters, digits, hyphens (`-`), and dots (`.`)
+	// - Must start and end with an alphanumeric character
+	// +kubebuilder:validation:MaxLength=253
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$`
 	PodNamespace string `json:"podNamespace,omitempty"`
-	ContainerID  string `json:"containerID,omitempty"`
-	Command      string `json:"command,omitempty"`
+
+	// ContainerID must be a runtime-prefixed 64-character hexadecimal string.
+	// Example: containerd://<64-hex-chars>
+	// +kubebuilder:validation:Pattern=`^.+://[a-f0-9]{64}$`
+	ContainerID string `json:"containerID,omitempty"`
+	Command     string `json:"command,omitempty"`
 }
 
 //+kubebuilder:object:root=true
