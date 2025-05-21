@@ -70,9 +70,8 @@ func (c *cacheProxy) GetRegistryInspector() IRegistryInspector {
 	return c.registryInspector
 }
 
+// clearCache purges the image metadata cache
 func (c *cacheProxy) clearCache() {
-	// Purge clears the cache completely.
-	// onEvict is called for each evicted key.
 	c.imageRefsCache.Purge()
 	// TBD: Reset the metrics?
 }
