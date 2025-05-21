@@ -26,6 +26,7 @@ const (
 	helloOpenshiftPrivateMultiarchImageGlobal = "quay.io/multi-arch/tuning-test-global:1.1.0"
 	helloOpenshiftPrivateArmImageGlobal       = "quay.io/multi-arch/tuning-test-global:arm-1.1.0"
 	helloOpenshiftPrivateArmPpcImageGlobal    = "quay.io/multi-arch/tuning-test-global:arm-ppc64le-1.1.0"
+	helloOpenshiftPrivateArmPpcImageGlobal2   = "quay.io/multi-arch/tuning-test-global-2:arm-ppc64le-1.1.0"
 	helloOpenshiftPrivateMultiarchImageLocal  = "quay.io/multi-arch/tuning-test-local:1.1.0"
 	helloOpenshiftPrivateArmImageLocal        = "quay.io/multi-arch/tuning-test-local:arm-1.1.0"
 	helloOpenshiftPrivateArmPpcImageLocal     = "quay.io/multi-arch/tuning-test-local:arm-ppc64le-1.1.0"
@@ -37,6 +38,7 @@ const (
 var _ = Describe("The Pod Placement Operand", func() {
 	var (
 		podLabel                  = map[string]string{"app": "test"}
+		podLabelPullSecretUpdate  = map[string]string{"app": "test-post-update"}
 		schedulingGateLabel       = map[string]string{utils.SchedulingGateLabel: utils.SchedulingGateLabelValueRemoved}
 		schedulingGateNotSetLabel = map[string]string{utils.SchedulingGateLabel: utils.LabelValueNotSet}
 	)
@@ -1012,6 +1014,84 @@ var _ = Describe("The Pod Placement Operand", func() {
 			Eventually(framework.VerifyPodNodeAffinity(ctx, client, ns, "app", "test", *expectedNSTs), e2e.WaitShort).Should(Succeed())
 			By("The pod should have the preferred affinities set in the ClusterPodPlacementConfig")
 			Eventually(framework.VerifyPodPreferredNodeAffinity(ctx, client, ns, "app", "test",
+				defaultExpectedAffinityTerms()), e2e.WaitShort).Should(Succeed())
+		})
+		It("should set the node affinity in pods with images requiring credentials set in the global pull secret. When the credentials are removed, the node affinity should not be set", func() {
+			if len(masterNodes.Items) == 0 {
+				Skip("The current cluster is a hosted cluster, skipping global pull secret tests")
+			}
+			// delete the pullsecret from the global pull secret
+			By("Update the global pull secret to add the credentials for the private image tuning-test-global-2")
+			updateGlobalPullSecret("quay.io/multi-arch/tuning-test-global-2")
+			var err error
+			By("Create an ephemeral namespace")
+			ns := framework.NewEphemeralNamespace()
+			err = client.Create(ctx, ns)
+			Expect(err).NotTo(HaveOccurred())
+			//nolint:errcheck
+			defer client.Delete(ctx, ns)
+			By("Create a deployment using the container with private images requiring credentials set in the global pull secret")
+			ps := NewPodSpec().
+				WithContainersImages(helloOpenshiftPrivateArmPpcImageGlobal2).
+				Build()
+			d := NewDeployment().
+				WithSelectorAndPodLabels(podLabel).
+				WithPodSpec(ps).
+				WithReplicas(utils.NewPtr(int32(1))).
+				WithName("test-deployment").
+				WithNamespace(ns.Name).
+				Build()
+			err = client.Create(ctx, d)
+			Expect(err).NotTo(HaveOccurred())
+			archLabelNSR := NewNodeSelectorRequirement().
+				WithKeyAndValues(utils.ArchLabel, corev1.NodeSelectorOpIn, utils.ArchitectureArm64, utils.ArchitecturePpc64le).
+				Build()
+			expectedNSTs := NewNodeSelectorTerm().WithMatchExpressions(archLabelNSR).Build()
+			By("The pod should have been processed by the webhook and the scheduling gate label should be added")
+			Eventually(framework.VerifyPodLabels(ctx, client, ns, "app", "test", e2e.Present, schedulingGateLabel), e2e.WaitShort).Should(Succeed())
+			By("Verify arch label are set")
+			Eventually(framework.VerifyPodLabelsAreSet(ctx, client, ns, "app", "test",
+				utils.MultiArchLabel, "",
+				utils.ArchLabelValue(utils.ArchitectureArm64), "",
+				utils.ArchLabelValue(utils.ArchitecturePpc64le), "",
+			), e2e.WaitShort).Should(Succeed())
+			By("Verify node affinity label are set correct")
+			Eventually(framework.VerifyPodLabelsAreSet(ctx, client, ns, "app", "test",
+				utils.NodeAffinityLabel, utils.NodeAffinityLabelValueSet,
+				utils.PreferredNodeAffinityLabel, utils.NodeAffinityLabelValueSet,
+			), e2e.WaitShort).Should(Succeed())
+			By("The pod should have been set node affinity of arch info.")
+			Eventually(framework.VerifyPodNodeAffinity(ctx, client, ns, "app", "test", *expectedNSTs), e2e.WaitShort).Should(Succeed())
+			By("The pod should have the preferred affinities set in the ClusterPodPlacementConfig")
+			Eventually(framework.VerifyPodPreferredNodeAffinity(ctx, client, ns, "app", "test",
+				defaultExpectedAffinityTerms()), e2e.WaitShort).Should(Succeed())
+			// delete the pullsecret from the global pull secret
+			By("Update the global pull secret to remove the credentials for the private image tuning-test-global-2")
+			updateGlobalPullSecret("quay.io/multi-arch/tuning-test-global-2", true)
+			By("Create a second deployment using the container with private images requiring credentials set in the global pull secret")
+			ps = NewPodSpec().
+				WithContainersImages(helloOpenshiftPrivateArmPpcImageGlobal2).
+				Build()
+			d = NewDeployment().
+				WithSelectorAndPodLabels(podLabelPullSecretUpdate).
+				WithPodSpec(ps).
+				WithReplicas(utils.NewPtr(int32(1))).
+				WithName("test-deployment-post-update").
+				WithNamespace(ns.Name).
+				Build()
+			err = client.Create(ctx, d)
+			Expect(err).NotTo(HaveOccurred())
+			By("The pod should have been processed by the webhook and the scheduling gate label should be added")
+			Eventually(framework.VerifyPodLabels(ctx, client, ns, "app", "test-post-update", e2e.Present, schedulingGateLabel), e2e.WaitShort).Should(Succeed())
+			By("Verify node affinity label is set to not-set")
+			Eventually(framework.VerifyPodLabelsAreSet(ctx, client, ns, "app", "test-post-update",
+				utils.NodeAffinityLabel, utils.LabelValueNotSet,
+				utils.PreferredNodeAffinityLabel, utils.NodeAffinityLabelValueSet,
+			), e2e.WaitShort).Should(Succeed())
+			By("The pod should not get node affinity of arch info because the cache should be cleared and auth should fail.")
+			Eventually(framework.VerifyPodNodeAffinity(ctx, client, ns, "app", "test-post-update"), e2e.WaitShort).Should(Succeed())
+			By("The pod should have the preferred affinities set in the ClusterPodPlacementConfig")
+			Eventually(framework.VerifyPodPreferredNodeAffinity(ctx, client, ns, "app", "test-post-update",
 				defaultExpectedAffinityTerms()), e2e.WaitShort).Should(Succeed())
 		})
 		It("should set the node affinity in pods with images requiring credentials set in pods imagePullSecrets", func() {
