@@ -2,8 +2,10 @@ reviewers:
   - aleskandro
   - AnnaZivkovic 
   - Prashanth684
+  - lwan-wanglin
 approvers:
   - aleskandro
   - AnnaZivkovic 
   - Prashanth684
+  - lwan-wanglin
 components: multiarch-tuning-operator

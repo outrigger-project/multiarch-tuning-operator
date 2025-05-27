@@ -61,7 +61,7 @@ func (i *registryInspector) GetCompatibleArchitecturesSet(ctx context.Context, i
 	i.mutex.RLock()
 	globalPullSecret := i.globalPullSecret
 	i.mutex.RUnlock()
-	authFile, err := i.createAuthFile(append([][]byte{globalPullSecret}, secrets...)...)
+	authFile, err := i.createAuthFile(imageReference, append([][]byte{globalPullSecret}, secrets...)...)
 	if err != nil {
 		log.Error(err, "Couldn't write auth file")
 		return nil, err
@@ -182,8 +182,8 @@ func (i *registryInspector) GetCompatibleArchitecturesSet(ctx context.Context, i
 	return supportedArchitectures, nil
 }
 
-func (i *registryInspector) createAuthFile(secrets ...[]byte) (*os.File, error) {
-	authJSON, err := marshaledImagePullSecrets(secrets)
+func (i *registryInspector) createAuthFile(imageReference string, secrets ...[]byte) (*os.File, error) {
+	authJSON, err := marshaledImagePullSecrets(imageReference, secrets)
 	if err != nil {
 		return nil, err
 	}
@@ -196,7 +196,7 @@ func (i *registryInspector) createAuthFile(secrets ...[]byte) (*os.File, error) 
 	return os.NewFile(uintptr(fd), fp), nil
 }
 
-func marshaledImagePullSecrets(secrets [][]byte) ([]byte, error) {
+func marshaledImagePullSecrets(imageReference string, secrets [][]byte) ([]byte, error) {
 	log := ctrllog.Log.WithName("registryInspector")
 
 	// Create the auth file
@@ -210,7 +210,7 @@ func marshaledImagePullSecrets(secrets [][]byte) ([]byte, error) {
 			continue
 		}
 	}
-	authJSON, err := authCfgContent.marshallAuths()
+	authJSON, err := authCfgContent.expandGlobs(imageReference).marshallAuths()
 	if err != nil {
 		log.Error(err, "Error marshalling pull secrets")
 		return nil, err

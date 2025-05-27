@@ -42,6 +42,7 @@ The current approach is that for every new OCP release, we will have to:
 1. Update go version in base images 
    - Update the Dockerfiles to use a base image with the desired Golang version (it should be the one used by k8s.io/api
    or openshift/api)
+   - The function `getCorrectHostmountAnyUIDSCC` relies on the Kubernetes version to determine which SCC is used for the `podplacementconfig` pod's hostPath mounts. Please double-check the code to ensure that the Kubernetes version aligns with the corresponding OpenShift version and has not been inadvertently upgraded or downgraded.
    - Update the Makefile to use the new Golang version base image (BUILD_IMAGE variable)
    - Check if updated references are needed in .tekton for konflux 
    - Commit the changes to the Golang version

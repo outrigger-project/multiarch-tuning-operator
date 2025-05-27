@@ -7,8 +7,10 @@ spec:
     - source: registry.redhat.io/multiarch-tuning/multiarch-tuning-operator-bundle
       mirrors:
         - quay.io/redhat-user-workloads/multiarch-tuning-ope-tenant/multiarch-tuning-operator-1-0/multiarch-tuning-operator-bundle-1-0
+        - quay.io/redhat-user-workloads/multiarch-tuning-ope-tenant/multiarch-tuning-operator-v1-x/multiarch-tuning-operator-bundle-v1-x
         - quay.io/redhat-user-workloads/multiarch-tuning-ope-tenant/multiarch-tuning-operator/multiarch-tuning-operator-bundle
     - source: registry.redhat.io/multiarch-tuning/multiarch-tuning-rhel9-operator
       mirrors:
         - quay.io/redhat-user-workloads/multiarch-tuning-ope-tenant/multiarch-tuning-operator-1-0/multiarch-tuning-operator-1-0
+        - quay.io/redhat-user-workloads/multiarch-tuning-ope-tenant/multiarch-tuning-operator-v1-x/multiarch-tuning-operator-v1-x
         - quay.io/redhat-user-workloads/multiarch-tuning-ope-tenant/multiarch-tuning-operator/multiarch-tuning-operator

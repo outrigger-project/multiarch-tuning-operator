@@ -42,6 +42,7 @@ import (
 	"go.uber.org/zap/zapcore"
 
 	multiarchv1beta1 "github.com/openshift/multiarch-tuning-operator/apis/multiarch/v1beta1"
+	"github.com/openshift/multiarch-tuning-operator/pkg/testing/framework"
 	"github.com/openshift/multiarch-tuning-operator/pkg/utils"
 )
 
@@ -157,6 +158,35 @@ func (r *ClusterPodPlacementConfigReconciler) ensureNamespaceLabels(ctx context.
 	log.V(2).Info("Updating the namespace labels", "labels", ns.Labels)
 	_, err = r.ClientSet.CoreV1().Namespaces().Update(ctx, ns, metav1.UpdateOptions{})
 	return err
+}
+
+// getCorrectHostmountAnyUIDSCC computes the SCC to use for the operator's wokrloads requiring hostPath mounts.
+// OpenShift 4.19 introduced a new SCC `hostmount-anyuid-v2` with elevated privileges
+// compared to `hostmount-anyuid`, allowing pods to mount specific hostPath volumes
+// that may otherwise be restricted. For more details, see following bugs:
+// https://issues.redhat.com/browse/OCPBUGS-55013
+// https://issues.redhat.com/browse/MULTIARCH-5405
+func (r *ClusterPodPlacementConfigReconciler) getCorrectHostmountAnyUIDSCC(ctx context.Context) (string, *corev1.SELinuxOptions, error) {
+	log := ctrllog.FromContext(ctx)
+	log.V(1).Info("Ensuring using the correct hostmount scc for podplacementconfig")
+
+	minor, err := framework.GetClusterMinorVersion(r.ClientSet)
+	if err != nil {
+		return "", nil, err
+	}
+	// OpenShift version to Kubernetes version mapping assumption:
+	// - OpenShift 4.18 maps to Kubernetes 1.31.x
+	// - OpenShift 4.19 maps to Kubernetes 1.32.x and so on
+	// - Assume this mapping will remain stable after GA (Generally Available) release
+	// We use this check to decide which SCC (SecurityContextConstraint) to use
+	if minor < 32 {
+		// logic for Kubernetes < 1.32 (OpenShift < 4.19)
+		return "hostmount-anyuid", nil, nil
+	}
+	// logic for default set for Kubernetes >= 1.32 (OpenShift >= 4.19)
+	return "hostmount-anyuid-v2", &corev1.SELinuxOptions{
+		Type: "spc_t",
+	}, nil
 }
 
 // dependentsStatusToClusterPodPlacementConfig gathers the status of the dependents of the ClusterPodPlacementConfig object.
@@ -367,6 +397,11 @@ func (r *ClusterPodPlacementConfigReconciler) reconcile(ctx context.Context, clu
 		log.Error(err, "Unable to ensure namespace labels")
 		return errorutils.NewAggregate([]error{err, r.updateStatus(ctx, clusterPodPlacementConfig)})
 	}
+	requiredSCCHostmountAnyUID, seLinuxOptionsType, err := r.getCorrectHostmountAnyUIDSCC(ctx)
+	if err != nil {
+		log.Error(err, "Unable to set correct hostmount SCC", "requiredSCCHostmoundAnyUID", requiredSCCHostmountAnyUID)
+		return errorutils.NewAggregate([]error{err, r.updateStatus(ctx, clusterPodPlacementConfig)})
+	}
 	objects := []client.Object{
 		// The finalizer will not affect the reconciliation of ReplicaSets and Pods
 		// when updates to the ClusterPodPlacementConfig are made.
@@ -406,7 +441,7 @@ func (r *ClusterPodPlacementConfigReconciler) reconcile(ctx context.Context, clu
 				Namespace: utils.Namespace(),
 			},
 		}),
-		buildControllerDeployment(clusterPodPlacementConfig),
+		buildControllerDeployment(clusterPodPlacementConfig, requiredSCCHostmountAnyUID, seLinuxOptionsType),
 		buildWebhookDeployment(clusterPodPlacementConfig),
 	}
 	// We ensure the MutatingWebHookConfiguration is created and present only if the operand is ready to serve the admission request and add/remove the scheduling gate.

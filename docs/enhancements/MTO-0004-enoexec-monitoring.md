@@ -20,6 +20,14 @@ see-also: []
 
 # Introducing an eBPF-based monitoring solution for ENOEXEC (aka Exec Format Error)
 
+## Release Signoff Checklist
+
+- [x] Enhancement is `implementable`
+- [x] Design details are appropriately documented from clear requirements
+- [x] Test plan is defined
+- [x] Graduation criteria for dev preview, tech preview, GA
+- [ ] User-facing documentation is created in [openshift-docs](https://github.com/openshift/openshift-docs/)
+
 ## Summary
 
 The Multiarch Tuning Operator automatically configures pod node affinities to ensure workloads are scheduled on nodes with compatible CPU architectures based on the architectures supported by the images they use.
@@ -282,6 +290,15 @@ A new section will be added to the Multiarch Tuning Operator documentation to ex
 
 ## Implementation History
 
+In progress:
+  - ENoExecEvent CRD definition: https://github.com/openshift/multiarch-tuning-operator/pull/612, MULTIARCH-5416[^7]
+  - Exec Format Error plugin: https://github.com/openshift/multiarch-tuning-operator/pull/602, MULTIARCH-5420[^8]
+Not Started:
+  - Core controller and implementation logic: MULTIARCH-5417[^9], MULTIARCH-5419[^10], MULTIARCH-5421[^11]
+  - Metrics for ENoExecEvent: MULTIARCH-5418[^12]
+  - Integration and e2e tests: MULTIARCH-5422[^13]
+  - Documentation of feature: MULTIARCH-5423[^14]
+
 ## Infrastructure Needed
 
 ## Alternatives
@@ -296,3 +313,11 @@ A new section will be added to the Multiarch Tuning Operator documentation to ex
 [^4]: https://github.com/kubernetes/kubernetes/issues/20572
 [^5]: https://docs.ebpf.io/linux/helper-function/bpf_get_current_comm/
 [^6]: https://man7.org/linux/man-pages/man2/perf_event_open.2.html
+[^7]: https://issues.redhat.com/browse/MULTIARCH-5416
+[^8]: https://issues.redhat.com/browse/MULTIARCH-5420
+[^9]: https://issues.redhat.com/browse/MULTIARCH-5417
+[^10]: https://issues.redhat.com/browse/MULTIARCH-5419
+[^11]: https://issues.redhat.com/browse/MULTIARCH-5421
+[^12]: https://issues.redhat.com/browse/MULTIARCH-5418
+[^13]: https://issues.redhat.com/browse/MULTIARCH-5422
+[^14]: https://issues.redhat.com/browse/MULTIARCH-5423

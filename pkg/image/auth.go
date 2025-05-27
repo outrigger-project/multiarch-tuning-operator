@@ -16,7 +16,11 @@ limitations under the License.
 
 package image
 
-import "k8s.io/apimachinery/pkg/util/json"
+import (
+	"strings"
+
+	"k8s.io/apimachinery/pkg/util/json"
+)
 
 type authData struct {
 	Auth string `json:"auth"`
@@ -90,4 +94,49 @@ func (ac authCfg) unmarshallAuthsDataAndStore(authsBytes []byte) error {
 //	}
 func (ac authCfg) marshallAuths() ([]byte, error) {
 	return json.Marshal(ac)
+}
+
+// expandGlobs takes an image reference and expands the registry globs in the authCfg's Auths field
+func (ac authCfg) expandGlobs(imageReference string) *authCfg {
+	// From Kubernetes documentation:
+	// *.kubernetes.io will not match kubernetes.io, but abc.kubernetes.io
+	// *.*.kubernetes.io will not match abc.kubernetes.io, but abc.def.kubernetes.io
+	// prefix.*.io will match prefix.kubernetes.io
+	// *-good.kubernetes.io will match prefix-good.kubernetes.io
+	// also see https://github.com/kubernetes/kubelet/blob/8419bc34b9162d136ddcb9e9846f299962a3ef3f/config/v1alpha1/types.go#L48-L71
+	// https://github.com/kubernetes/kubernetes/blob/7cb2bd78b22c4ac8d9a401920fbcf7e2b240522d/pkg/credentialprovider/plugin/plugin_test.go#L194-L507
+	for registry, auth := range ac.Auths {
+		if regURL, ok := matchAndExpandGlob(registry, imageReference); ok && len(regURL) > 0 {
+			// check if the registry is already in the authCfg's Auths field
+			if _, ok := ac.Auths[regURL]; !ok {
+				ac.addAuth(regURL, auth)
+			}
+		}
+	}
+	return &ac
+}
+
+// matchAndExpandGlob takes a registry glob and an image reference and checks if they match according to the Kubernetes
+// globbing rules. If they match, it returns the expanded registry URL with the image reference's host part replaced.
+func matchAndExpandGlob(registryGlob, imageReference string) (string, bool) {
+	if !strings.ContainsAny(registryGlob, "*?]") {
+		return "", false
+	}
+	imageReference = strings.TrimPrefix(imageReference, "//")
+	m, e := URLsMatchStr(registryGlob, imageReference)
+	if e != nil || !m {
+		return "", false
+	}
+
+	// Swap the registry glob in the host part with the image reference's host part
+	irURL, e := ParseSchemelessURL(imageReference)
+	if e != nil {
+		return "", false
+	}
+	regURL, e := ParseSchemelessURL(registryGlob)
+	if e != nil {
+		return "", false
+	}
+	regURL.Host = irURL.Host
+	return strings.TrimPrefix(regURL.String(), "//"), true
 }
