@@ -21,28 +21,13 @@ metadata:
               ]
             }
           }
-        },
-        {
-          "apiVersion": "multiarch.openshift.io/v1beta1",
-          "kind": "ENoExecEvent",
-          "metadata": {
-            "labels": {
-              "app.kubernetes.io/created-by": "multiarch-tuning-operator",
-              "app.kubernetes.io/instance": "enoexecevent-sample",
-              "app.kubernetes.io/managed-by": "kustomize",
-              "app.kubernetes.io/name": "enoexecevent",
-              "app.kubernetes.io/part-of": "multiarch-tuning-operator"
-            },
-            "name": "enoexecevent-sample"
-          },
-          "spec": null
         }
       ]
     capabilities: Seamless Upgrades
     categories: OpenShift Optional, Other
     console.openshift.io/disable-operand-delete: "false"
     containerImage: registry.ci.openshift.org/origin/multiarch-tuning-operator:main
-    createdAt: "2025-05-10T00:41:44Z"
+    createdAt: "2025-05-27T23:50:18Z"
     features.operators.openshift.io/cnf: "false"
     features.operators.openshift.io/cni: "false"
     features.operators.openshift.io/csi: "false"
