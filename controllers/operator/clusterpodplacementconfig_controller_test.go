@@ -398,6 +398,18 @@ var _ = Describe("Controllers/ClusterPodPlacementConfig/ClusterPodPlacementConfi
 				Eventually(framework.ValidateDeletion(k8sClient, ctx)).Should(Succeed(), "the ClusterPodPlacementConfig should be deleted")
 			})
 		})
+		Context("the ClusterPodPlacementConfig is deleted within 1s after creation", func() {
+			It("Should cleanup all finalizers", func() {
+				By("Creating the ClusterPodPlacementConfig")
+				err := k8sClient.Create(ctx, builder.NewClusterPodPlacementConfig().WithName(common.SingletonResourceObjectName).Build())
+				Expect(err).NotTo(HaveOccurred(), "failed to create ClusterPodPlacementConfig", err)
+				By("imeditately deleting it after creation")
+				err = k8sClient.Delete(ctx, builder.NewClusterPodPlacementConfig().WithName(common.SingletonResourceObjectName).Build())
+				Expect(err).NotTo(HaveOccurred(), "failed to delete ClusterPodPlacementConfig", err)
+				By("Verify all corresponding resources are deleted")
+				Eventually(framework.ValidateDeletion(k8sClient, ctx)).Should(Succeed(), "the ClusterPodPlacementConfig should be deleted")
+			})
+		})
 	})
 	Context("the operand is deployed", func() {
 		BeforeAll(func() {

@@ -421,4 +421,23 @@ var _ = Describe("The Multiarch Tuning Operator", Serial, func() {
 			Eventually(framework.VerifyPodPreferredNodeAffinity(ctx, client, ns, "app", "test", nil), e2e.WaitShort).Should(Succeed())
 		})
 	})
+	Context("the ClusterPodPlacementConfig is deleted within 1s after creation", func() {
+		It("Should cleanup all finalizers", func() {
+			err := client.Create(ctx, &v1beta1.ClusterPodPlacementConfig{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "cluster",
+				},
+			})
+			Expect(err).NotTo(HaveOccurred())
+			By("imeditately deleting the clusterpodplacementconfig after creation")
+			err = client.Delete(ctx, &v1beta1.ClusterPodPlacementConfig{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "cluster",
+				},
+			})
+			Expect(err).NotTo(HaveOccurred())
+			By("Verify all corresponding resources are deleted")
+			Eventually(framework.ValidateDeletion(client, ctx)).Should(Succeed())
+		})
+	})
 })

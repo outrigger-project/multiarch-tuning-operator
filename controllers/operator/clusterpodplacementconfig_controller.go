@@ -116,11 +116,6 @@ func (r *ClusterPodPlacementConfigReconciler) Reconcile(ctx context.Context, req
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 	log.V(1).Info("ClusterPodPlacementConfig fetched...", "name", clusterPodPlacementConfig.Name)
-	err = r.dependentsStatusToClusterPodPlacementConfig(ctx, clusterPodPlacementConfig)
-	if err != nil {
-		log.Error(err, "Unable to retrieve the status of the PodPlacementConfig dependencies")
-		return ctrl.Result{}, err
-	}
 	switch {
 	case !clusterPodPlacementConfig.DeletionTimestamp.IsZero() && !controllerutil.ContainsFinalizer(clusterPodPlacementConfig, utils.PodPlacementFinalizerName):
 		log.V(2).Info("the ClusterPodPlacementConfig object is being deleted, and the finalizer has already been removed successfully.")
@@ -129,6 +124,25 @@ func (r *ClusterPodPlacementConfigReconciler) Reconcile(ctx context.Context, req
 		// Only execute deletion if the object is being deleted and the finalizer is present
 		return ctrl.Result{}, r.handleDelete(ctx, clusterPodPlacementConfig)
 	}
+	// Move the finalizer block before applying the corresponding resources
+	// to ensure that finalizers are properly added and can be cleaned up
+	// even if the clusterPodPlacementConfig CR is deleted shortly after creation.
+	if !controllerutil.ContainsFinalizer(clusterPodPlacementConfig, utils.PodPlacementFinalizerName) {
+		// Add the finalizer to the object
+		log.V(1).Info("Adding finalizer to the ClusterPodPlacementConfig")
+		controllerutil.AddFinalizer(clusterPodPlacementConfig, utils.PodPlacementFinalizerName)
+		if err := r.Update(ctx, clusterPodPlacementConfig); err != nil {
+			log.Error(err, "Unable to update finalizers in the ClusterPodPlacementConfig")
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{Requeue: true}, nil
+	}
+	err = r.dependentsStatusToClusterPodPlacementConfig(ctx, clusterPodPlacementConfig)
+	if err != nil {
+		log.Error(err, "Unable to retrieve the status of the PodPlacementConfig dependencies")
+		return ctrl.Result{}, err
+	}
+
 	return ctrl.Result{}, r.reconcile(ctx, clusterPodPlacementConfig)
 }
 
@@ -483,15 +497,6 @@ func (r *ClusterPodPlacementConfigReconciler) reconcile(ctx context.Context, clu
 		return errorutils.NewAggregate([]error{err, r.updateStatus(ctx, clusterPodPlacementConfig)})
 	}
 
-	if !controllerutil.ContainsFinalizer(clusterPodPlacementConfig, utils.PodPlacementFinalizerName) {
-		// Add the finalizer to the object
-		log.Info("Adding finalizer to the ClusterPodPlacementConfig")
-		controllerutil.AddFinalizer(clusterPodPlacementConfig, utils.PodPlacementFinalizerName)
-		if err := r.Update(ctx, clusterPodPlacementConfig); err != nil {
-			log.Error(err, "Unable to update finalizers in the ClusterPodPlacementConfig")
-			return errorutils.NewAggregate([]error{err, r.updateStatus(ctx, clusterPodPlacementConfig)})
-		}
-	}
 	return r.updateStatus(ctx, clusterPodPlacementConfig)
 }
 
