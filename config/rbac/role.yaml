@@ -30,6 +30,13 @@ rules:
 - apiGroups:
   - ""
   resources:
+  - nodes
+  verbs:
+  - get
+  - list
+- apiGroups:
+  - ""
+  resources:
   - pods
   verbs:
   - get
@@ -130,6 +137,7 @@ rules:
   - multiarch.openshift.io
   resources:
   - clusterpodplacementconfigs
+  - enoexecevents
   verbs:
   - create
   - delete
@@ -142,12 +150,14 @@ rules:
   - multiarch.openshift.io
   resources:
   - clusterpodplacementconfigs/finalizers
+  - enoexecevents/finalizers
   verbs:
   - update
 - apiGroups:
   - multiarch.openshift.io
   resources:
   - clusterpodplacementconfigs/status
+  - enoexecevents/status
   verbs:
   - get
   - patch

@@ -3,6 +3,7 @@ package framework
 import (
 	"context"
 	"fmt"
+	"github.com/google/uuid"
 	"log"
 	"os"
 	"path/filepath"
@@ -195,4 +196,9 @@ func GetImageRepository(image string) string {
 		image = image[:colonIndex]
 	}
 	return image
+}
+
+func GenerateName() string {
+	// Generate a random name using UUID
+	return NormalizeNameString("t-" + uuid.NewString())
 }

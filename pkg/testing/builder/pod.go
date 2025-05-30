@@ -20,6 +20,11 @@ func NewPod() *PodBuilder {
 	}
 }
 
+func (p *PodBuilder) WithName(name string) *PodBuilder {
+	p.pod.Name = name
+	return p
+}
+
 func (p *PodBuilder) WithImagePullSecrets(imagePullSecrets ...string) *PodBuilder {
 	p.pod.Spec.ImagePullSecrets = make([]v1.LocalObjectReference, len(imagePullSecrets))
 	for i, secret := range imagePullSecrets {
@@ -172,6 +177,16 @@ func (p *PodBuilder) WithNodeName(nodeName string) *PodBuilder {
 	return p
 }
 
+func (p *PodBuilder) WithAnnotations(annotations map[string]string) *PodBuilder {
+	if p.pod.Annotations == nil {
+		p.pod.Annotations = make(map[string]string)
+	}
+	for key, value := range annotations {
+		p.pod.Annotations[key] = value
+	}
+	return p
+}
+
 func (p *PodBuilder) WithLabels(labelsKeyValuesPair ...string) *PodBuilder {
 	if p.pod.Labels == nil {
 		p.pod.Labels = make(map[string]string)
@@ -183,6 +198,16 @@ func (p *PodBuilder) WithLabels(labelsKeyValuesPair ...string) *PodBuilder {
 	for i := 0; i < len(labelsKeyValuesPair); i += 2 {
 		p.pod.Labels[labelsKeyValuesPair[i]] = labelsKeyValuesPair[i+1]
 	}
+	return p
+}
+
+func (p *PodBuilder) WithOwnerReference(or metav1.OwnerReference) *PodBuilder {
+	p.pod.OwnerReferences = append(p.pod.OwnerReferences, or)
+	return p
+}
+
+func (p *PodBuilder) WithContainerStatuses(statuses ...v1.ContainerStatus) *PodBuilder {
+	p.pod.Status.ContainerStatuses = statuses
 	return p
 }
 
