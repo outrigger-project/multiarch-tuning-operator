@@ -3,7 +3,9 @@ package models
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strconv"
+	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/tools/record"
@@ -152,4 +154,25 @@ func (pod *Pod) IsFromDaemonSet() bool {
 		}
 	}
 	return false
+}
+
+func (pod *Pod) ContainerNameFor(containerID string) (string, error) {
+	// The containerID is in the format: "runtime://<64-hex-chars>"
+	matched, err := regexp.MatchString(`^.+://[a-f0-9]{64}$`, containerID)
+	if err != nil || !matched {
+		return "", fmt.Errorf("invalid container ID format: %s", containerID)
+	}
+	// Extract the 64-hex-chars part from the containerID
+	parts := strings.SplitN(containerID, "://", 2)
+	if len(parts) != 2 || len(parts[1]) != 64 {
+		return "", fmt.Errorf("failed to extract container ID from: %s", containerID)
+	}
+	containerID = parts[1]
+
+	for _, container := range pod.PodObject().Status.ContainerStatuses {
+		if container.ContainerID == containerID {
+			return container.Name, nil
+		}
+	}
+	return "", fmt.Errorf("container with ID %s not found in pod %s", containerID, pod.Name)
 }
