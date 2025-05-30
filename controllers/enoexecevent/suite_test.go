@@ -24,45 +24,56 @@ import (
 	"testing"
 	"time"
 
-	"github.com/openshift/multiarch-tuning-operator/pkg/e2e"
-
-	"sigs.k8s.io/kustomize/api/resmap"
-
 	"k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/klog/v2"
-
-	"sigs.k8s.io/kustomize/api/krusty"
-	"sigs.k8s.io/kustomize/kyaml/filesys"
-
-	. "github.com/onsi/ginkgo/v2"
-	. "github.com/onsi/gomega"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/tools/clientcmd/api"
+	"k8s.io/klog/v2"
+
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
+	"sigs.k8s.io/kustomize/api/krusty"
+	"sigs.k8s.io/kustomize/api/resmap"
+	"sigs.k8s.io/kustomize/kyaml/filesys"
 
 	"go.uber.org/zap/zapcore"
 
+	"github.com/openshift/multiarch-tuning-operator/pkg/e2e"
+	"github.com/openshift/multiarch-tuning-operator/pkg/testing/builder"
 	testingutils "github.com/openshift/multiarch-tuning-operator/pkg/testing/framework"
+	"github.com/openshift/multiarch-tuning-operator/pkg/utils"
+
 	//+kubebuilder:scaffold:imports
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 )
 
 // These tests use Ginkgo (BDD-style Go testing framework). Refer to
 // http://onsi.github.io/ginkgo/ to learn more about Ginkgo.
 
 var (
-	cfg       *rest.Config
-	k8sClient client.Client
-	stopMgr   context.CancelFunc
-	testEnv   *envtest.Environment
-	ctx       context.Context
-	suiteLog  = ctrl.Log.WithName("setup")
+	cfg          *rest.Config
+	k8sClient    client.Client
+	k8sClientSet *kubernetes.Clientset
+	stopMgr      context.CancelFunc
+	testEnv      *envtest.Environment
+	ctx          context.Context
+	suiteLog     = ctrl.Log.WithName("setup")
+)
+
+const (
+	testNamespace     = "test-namespace"
+	testContainerName = "test-container"
+	testContainerID   = "cri-o://1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"
+	testNodeName      = "test-node"
+	testNodeArch      = utils.ArchitecturePpc64le
+	testCommand       = "foo-binary"
 )
 
 func init() {
@@ -83,7 +94,10 @@ var _ = SynchronizedBeforeSuite(func() []byte {
 	SetDefaultEventuallyPollingInterval(5 * time.Millisecond)
 	SetDefaultEventuallyTimeout(5 * time.Second)
 	startTestEnv()
-	testingutils.EnsureNamespaces(ctx, k8sClient, "test-namespace")
+	testingutils.EnsureNamespaces(ctx, k8sClient, testNamespace)
+	node := builder.NewNodeBuilder().WithName(testNodeName).WithLabel(utils.ArchLabel, testNodeArch).Build()
+	Expect(k8sClient.Create(ctx, node)).To(Succeed(), "failed to create test node")
+
 	runManager()
 	kc := testingutils.FromEnvTestConfig(cfg)
 	data, err := json.Marshal(kc)
@@ -108,6 +122,10 @@ var _ = SynchronizedBeforeSuite(func() []byte {
 	k8sClient, err = client.New(cfg, client.Options{Scheme: scheme.Scheme})
 	Expect(err).NotTo(HaveOccurred())
 	Expect(k8sClient).NotTo(BeNil())
+
+	k8sClientSet, err = kubernetes.NewForConfig(cfg)
+	Expect(err).NotTo(HaveOccurred())
+	Expect(k8sClientSet).NotTo(BeNil())
 })
 
 var _ = SynchronizedAfterSuite(func() {}, func() {
@@ -135,6 +153,10 @@ func startTestEnv() {
 	Expect(err).NotTo(HaveOccurred())
 	Expect(k8sClient).NotTo(BeNil())
 	//+kubebuilder:scaffold:scheme
+
+	k8sClientSet, err = kubernetes.NewForConfig(cfg)
+	Expect(err).NotTo(HaveOccurred())
+	Expect(k8sClientSet).NotTo(BeNil())
 
 	klog.Info("Applying CRDs to the test environment")
 	kustomizer := krusty.MakeKustomizer(krusty.MakeDefaultOptions())
@@ -206,6 +228,10 @@ func runManager() {
 	err = mgr.AddReadyzCheck("readyz", healthz.Ping)
 	Expect(err).NotTo(HaveOccurred())
 
+	reconciler := NewReconciler(mgr.GetClient(), k8sClientSet, mgr.GetScheme(), mgr.GetEventRecorderFor("enoexecevent-controller"))
+	if err = reconciler.SetupWithManager(mgr); err != nil {
+		suiteLog.Error(err, "unable to create controller", "controller", "ENoExecEvent")
+	}
 	By("Starting the manager")
 	go func() {
 		var mgrCtx context.Context

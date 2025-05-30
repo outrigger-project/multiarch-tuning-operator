@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"regexp"
 	"strconv"
-	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/tools/record"
@@ -162,13 +161,6 @@ func (pod *Pod) ContainerNameFor(containerID string) (string, error) {
 	if err != nil || !matched {
 		return "", fmt.Errorf("invalid container ID format: %s", containerID)
 	}
-	// Extract the 64-hex-chars part from the containerID
-	parts := strings.SplitN(containerID, "://", 2)
-	if len(parts) != 2 || len(parts[1]) != 64 {
-		return "", fmt.Errorf("failed to extract container ID from: %s", containerID)
-	}
-	containerID = parts[1]
-
 	for _, container := range pod.PodObject().Status.ContainerStatuses {
 		if container.ContainerID == containerID {
 			return container.Name, nil
