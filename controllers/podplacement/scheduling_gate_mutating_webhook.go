@@ -71,10 +71,8 @@ func (a *PodSchedulingGateMutatingWebHook) Handle(ctx context.Context, req admis
 	a.once.Do(func() {
 		a.decoder = admission.NewDecoder(a.scheme)
 	})
-	pod := &Pod{
-		ctx:      ctx,
-		recorder: nil, // do we want to publish events if the pod is ignored?
-	}
+	pod := newPod(&corev1.Pod{}, ctx, a.recorder)
+
 	err := a.decoder.Decode(req, &pod.Pod)
 	if err != nil {
 		return admission.Errored(http.StatusBadRequest, err)
@@ -83,14 +81,14 @@ func (a *PodSchedulingGateMutatingWebHook) Handle(ctx context.Context, req admis
 
 	cppc := clusterpodplacementconfig.GetClusterPodPlacementConfig()
 	if cppc != nil && cppc.Spec.Plugins != nil && cppc.Spec.Plugins.NodeAffinityScoring.IsEnabled() {
-		pod.ensureLabel(utils.PreferredNodeAffinityLabel, utils.LabelValueNotSet)
+		pod.EnsureLabel(utils.PreferredNodeAffinityLabel, utils.LabelValueNotSet)
 	}
-	pod.ensureLabel(utils.NodeAffinityLabel, utils.LabelValueNotSet)
-	pod.ensureLabel(utils.SchedulingGateLabel, utils.LabelValueNotSet)
+	pod.EnsureLabel(utils.NodeAffinityLabel, utils.LabelValueNotSet)
+	pod.EnsureLabel(utils.SchedulingGateLabel, utils.LabelValueNotSet)
 
 	if pod.shouldIgnorePod(cppc) {
 		log.V(3).Info("Ignoring the pod")
-		return a.patchedPodResponse(&pod.Pod, req)
+		return a.patchedPodResponse(pod.PodObject(), req)
 	}
 
 	pod.ensureSchedulingGate()
@@ -107,7 +105,7 @@ func (a *PodSchedulingGateMutatingWebHook) Handle(ctx context.Context, req admis
 	metrics.GatedPods.Inc()
 	metrics.GatedPodsGauge.Inc()
 	log.V(2).Info("Accepting pod")
-	return a.patchedPodResponse(&pod.Pod, req)
+	return a.patchedPodResponse(pod.PodObject(), req)
 }
 
 func (a *PodSchedulingGateMutatingWebHook) delayedSchedulingGatedEvent(ctx context.Context, pod *corev1.Pod) {

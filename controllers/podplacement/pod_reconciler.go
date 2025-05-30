@@ -70,12 +70,9 @@ func (r *PodReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 	defer utils.HistogramObserve(now, metrics.TimeToProcessPod)
 	log := ctrllog.FromContext(ctx)
 
-	pod := &Pod{
-		ctx:      ctx,
-		recorder: r.Recorder,
-	}
+	pod := newPod(&corev1.Pod{}, ctx, r.Recorder)
 
-	if err := r.Get(ctx, req.NamespacedName, &pod.Pod); err != nil {
+	if err := r.Get(ctx, req.NamespacedName, pod.PodObject()); err != nil {
 		log.V(2).Info("Unable to fetch pod", "error", err)
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
@@ -87,15 +84,15 @@ func (r *PodReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 	metrics.ProcessedPodsCtrl.Inc()
 	defer utils.HistogramObserve(now, metrics.TimeToProcessGatedPod)
 	r.processPod(ctx, pod)
-	err := r.Update(ctx, &pod.Pod)
+	err := r.Update(ctx, pod.PodObject())
 	if err != nil {
 		log.Error(err, "Unable to update the pod")
-		pod.publishEvent(corev1.EventTypeWarning, ArchitectureAwareSchedulingGateRemovalFailure, SchedulingGateRemovalFailureMsg)
+		pod.PublishEvent(corev1.EventTypeWarning, ArchitectureAwareSchedulingGateRemovalFailure, SchedulingGateRemovalFailureMsg)
 		return ctrl.Result{}, err
 	}
 	if !pod.HasSchedulingGate() {
 		// Only publish the event if the scheduling gate has been removed and the pod has been updated successfully.
-		pod.publishEvent(corev1.EventTypeNormal, ArchitectureAwareSchedulingGateRemovalSuccess, SchedulingGateRemovalSuccessMsg)
+		pod.PublishEvent(corev1.EventTypeNormal, ArchitectureAwareSchedulingGateRemovalSuccess, SchedulingGateRemovalSuccessMsg)
 		metrics.GatedPodsGauge.Dec()
 	}
 	return ctrl.Result{}, nil
@@ -115,7 +112,7 @@ func (r *PodReconciler) processPod(ctx context.Context, pod *Pod) {
 		// In both cases, we should just remove the scheduling gate.
 		log.V(1).Info("Removing the scheduling gate from pod.")
 		pod.RemoveSchedulingGate()
-		pod.publishEvent(corev1.EventTypeWarning, ArchitectureAwareGatedPodIgnored, ArchitectureAwareGatedPodIgnoredMsg)
+		pod.PublishEvent(corev1.EventTypeWarning, ArchitectureAwareGatedPodIgnored, ArchitectureAwareGatedPodIgnoredMsg)
 		return
 	}
 
@@ -138,12 +135,12 @@ func (r *PodReconciler) processPod(ctx context.Context, pod *Pod) {
 		// the counter is equal to the maxRetries value and the pod should not be processed again.
 		// Publish this event and remove the scheduling gate.
 		log.Info("Max retries Reached. The pod will not have the nodeAffinity set.")
-		pod.publishEvent(corev1.EventTypeWarning, ImageArchitectureInspectionError, fmt.Sprintf("%s: %s", ImageInspectionErrorMaxRetriesMsg, err.Error()))
+		pod.PublishEvent(corev1.EventTypeWarning, ImageArchitectureInspectionError, fmt.Sprintf("%s: %s", ImageInspectionErrorMaxRetriesMsg, err.Error()))
 	}
 	// If the pod has been processed successfully or the max retries have been reached, remove the scheduling gate.
 	if err == nil || pod.maxRetries() {
 		if pod.Labels[utils.PreferredNodeAffinityLabel] == utils.LabelValueNotSet {
-			pod.publishEvent(corev1.EventTypeNormal, ArchitectureAwareNodeAffinitySet,
+			pod.PublishEvent(corev1.EventTypeNormal, ArchitectureAwareNodeAffinitySet,
 				ArchitecturePreferredPredicateSkippedMsg)
 		}
 
@@ -156,7 +153,7 @@ func (r *PodReconciler) processPod(ctx context.Context, pod *Pod) {
 func (r *PodReconciler) pullSecretDataList(ctx context.Context, pod *Pod) ([][]byte, error) {
 	log := ctrllog.FromContext(ctx)
 	secretAuths := make([][]byte, 0)
-	secretList := pod.GetPodImagePullSecrets()
+	secretList := pod.getPodImagePullSecrets()
 	for _, pullsecret := range secretList {
 		secret, err := r.ClientSet.CoreV1().Secrets(pod.Namespace).Get(ctx, pullsecret, metav1.GetOptions{})
 		if err != nil {
