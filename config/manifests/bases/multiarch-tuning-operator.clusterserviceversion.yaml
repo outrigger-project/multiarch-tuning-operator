@@ -23,6 +23,7 @@ metadata:
     operatorframework.io/suggested-namespace: openshift-multiarch-tuning-operator
     operators.openshift.io/valid-subscription: '["OpenShift Kubernetes Engine", "OpenShift
       Container Platform", "OpenShift Platform Plus"]'
+    operators.operatorframework.io/internal-objects: '["enoexecevents.multiarch.openshift.io"]'
     repository: https://github.com/openshift/multiarch-tuning-operator
     support: Red Hat
   labels:
@@ -50,6 +51,11 @@ spec:
       kind: ClusterPodPlacementConfig
       name: clusterpodplacementconfigs.multiarch.openshift.io
       version: v1alpha1
+    - description: ENoExecEvent is the Schema for the enoexecevents API
+      displayName: ENo Exec Event
+      kind: ENoExecEvent
+      name: enoexecevents.multiarch.openshift.io
+      version: v1beta1
   description: |
     The Multiarch Tuning Operator optimizes workload management within multi-architecture clusters and in
     single-architecture clusters transitioning to multi-architecture environments.
