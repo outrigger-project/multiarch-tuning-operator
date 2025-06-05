@@ -1,0 +1,16 @@
+apiVersion: tekton.dev/v1beta1
+kind: Pipeline
+metadata:
+  name: run-prowjob
+spec:
+  description: >-
+    Run a parameterized prowjob using gangway.
+  tasks:
+    - name: hello-world
+      taskSpec:
+        steps:
+          - name: hello
+            image: brew.registry.redhat.io/rh-osbs/openshift-golang-builder:rhel_9_1.23
+            script: |
+              #!/bin/bash
+              echo "Hello, world!"

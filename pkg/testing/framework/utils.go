@@ -6,8 +6,10 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
+	"unicode"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -93,6 +95,24 @@ func FromEnvTestConfig(cfg *rest.Config) api.Config {
 	}
 
 	return c
+}
+
+// GetClusterMinorVersion returns Kubernetes server minor version (only digits)
+func GetClusterMinorVersion(kc kubernetes.Interface) (int, error) {
+	info, err := kc.Discovery().ServerVersion()
+	if err != nil {
+		return 0, err
+	}
+	minor := info.Minor
+	if i := strings.IndexFunc(minor, func(r rune) bool { return !unicode.IsDigit(r) }); i != -1 {
+		minor = minor[:i]
+	}
+	minorInt, err := strconv.Atoi(minor)
+	if err != nil {
+		return 0, err
+	}
+	log.Printf("Kubernetes server minor version detected, Minor version: %d", minorInt)
+	return minorInt, nil
 }
 
 // LoadClient returns a new controller-runtime client.

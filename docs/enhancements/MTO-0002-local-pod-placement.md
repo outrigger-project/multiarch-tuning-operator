@@ -19,6 +19,14 @@ see-also: []
 
 # Introducing the namespace-scoped `PodPlacementConfig`
 
+## Release Signoff Checklist
+
+- [x] Enhancement is `implementable`
+- [x] Design details are appropriately documented from clear requirements
+- [x] Test plan is defined
+- [x] Graduation criteria for dev preview, tech preview, GA
+- [ ] User-facing documentation is created in [openshift-docs](https://github.com/openshift/openshift-docs/)
+
 ## Summary
 Currently, the Multiarch Tuning Operator exposes a cluster-scoped Custom Resource Definition (CRD) that allows users to
 (a) enable the pod placement controller, (b) define a namespace selector to filter the namespaces whose pods should be
@@ -332,6 +340,14 @@ A new section will be added to the Multiarch Tuning Operator documentation to ex
 
 ## Implementation History
 
+In Progress:
+  - API implementation: https://github.com/openshift/multiarch-tuning-operator/pull/625, MULTIARCH-5365[^1]
+Not Started:
+  - Validating webhook for CPPC/PPC: MULTIARCH-5366[^2], MULTIARCH-5367[^3], MULTIARCH-5368[^4]
+  - Core controller and implementation logic: MULTIARCH-5369[^5], MULTIARCH-5370[^6]
+  - Integration and e2e tests: MULTIARCH-5424[^7]
+  - Documentation: MULTIARCH-5425[^8]
+
 ## Alternatives
 - As an alternative to `phase 2`, we may consider sharding the pods reconciliation among different instances of the cluster-wide pod placement controller. In fact, the current implementation of the pod placement controller is inherently stateless and ca be easily scaled horizontally. Howver, Kubernetes, KubeBuilder and OperatorSDK do not currently support deployments of parallel reconcilers in a active-active replicas configuration. This would require a custom implementation of the operator to handle the sharding of the pods reconciliation among different instances of the pod placement controller, leveraging some shared state to assign the pods to different instances (and ignore their processing in others). This might be a more complex solution and would require more development effort, but would allow for a more scalable and fault-tolerant solution. It would be better to consider this alternative if such sharding implementation can be implemented upstream in the OperatorSDK or KubeBuilder projects. It would have value as the cluster scoped resource still needs to be able to access pods in all namespaces, hence no reduction of the RBAC rules is possible in any case.
 
@@ -346,3 +362,14 @@ In phase2, is it necessary to let the pods go through two scheduling gates? Does
 	 - The scheduling gate of the namespace-scoped `PodPlacementConfig` will be used for tuning the preferences (and possibly other fields handled by future plugins) first
 	 - Then, the scheduling gate of the ClusterPodPlacementConfig will mainly be used by the cluster-wide controller to handle the required affinity, and the global preferences if no PodPlacementConfig handles it already.
      - The controllers of the namespace-scoped `PodPlacementConfig` will not handle the strong predicates, as (a) we want the users willing to tune their architecture-aware pod placement preferences only after the strong predicates are guarateed, and (b) we would need to allow the service accounts in the user namespace to access secrets like the global pull secret, which we might rather prefer to allow only in the core namespace running the cluster-wide controller and operator.
+
+## References
+
+[^1]: https://issues.redhat.com/browse/MULTIARCH-5365
+[^2]: https://issues.redhat.com/browse/MULTIARCH-5366
+[^3]: https://issues.redhat.com/browse/MULTIARCH-5367
+[^4]: https://issues.redhat.com/browse/MULTIARCH-5368
+[^5]: https://issues.redhat.com/browse/MULTIARCH-5369
+[^6]: https://issues.redhat.com/browse/MULTIARCH-5370
+[^7]: https://issues.redhat.com/browse/MULTIARCH-5424
+[^8]: https://issues.redhat.com/browse/MULTIARCH-5425

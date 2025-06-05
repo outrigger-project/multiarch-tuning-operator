@@ -35,8 +35,8 @@ FROM ${RUNTIME_IMAGE}
 LABEL com.redhat.component="Multiarch Tuning Operator"
 LABEL distribution-scope="public"
 LABEL name="multiarch-tuning-operator-bundle"
-LABEL release="1.1.0"
-LABEL version="1.0.0"
+LABEL release="1.1.1"
+LABEL version="1.1.1"
 LABEL url="https://github.com/openshift/multiarch-tuning-operator"
 LABEL vendor="Red Hat, Inc."
 LABEL description="The Multiarch Tuning Operator enhances the user experience for administrators of Openshift \

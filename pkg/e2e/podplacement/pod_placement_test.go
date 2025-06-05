@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"os"
+	"strings"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -1025,6 +1026,69 @@ var _ = Describe("The Pod Placement Operand", func() {
 			secretData := map[string][]byte{
 				".dockerconfigjson": []byte(fmt.Sprintf(`{"auths":{"%s":{"auth":"%s"}}}`,
 					registryAddress, base64.StdEncoding.EncodeToString([]byte(fmt.Sprintf(
+						"%s:%s", authUserLocal, authPassLocal))))),
+			}
+			secret := NewSecret().
+				WithData(secretData).
+				WithDockerConfigJSONType().
+				WithName("mto-testing-local-pull-secret").
+				WithNameSpace(ns.Name).
+				Build()
+			err = client.Create(ctx, secret)
+			Expect(err).NotTo(HaveOccurred())
+			By("Create a deployment using the container with images that requiring credentials set in pod imagePullSecrets")
+			ps := NewPodSpec().
+				WithContainersImages(helloOpenshiftPrivateMultiarchImageLocal).
+				WithImagePullSecrets(secret.Name).
+				Build()
+			d := NewDeployment().
+				WithSelectorAndPodLabels(podLabel).
+				WithPodSpec(ps).
+				WithReplicas(utils.NewPtr(int32(1))).
+				WithName("test-deployment").
+				WithNamespace(ns.Name).
+				Build()
+			err = client.Create(ctx, d)
+			Expect(err).NotTo(HaveOccurred())
+			archLabelNSR := NewNodeSelectorRequirement().
+				WithKeyAndValues(utils.ArchLabel, corev1.NodeSelectorOpIn, utils.ArchitectureAmd64,
+					utils.ArchitectureArm64, utils.ArchitectureS390x, utils.ArchitecturePpc64le).
+				Build()
+			expectedNSTs := NewNodeSelectorTerm().WithMatchExpressions(archLabelNSR).Build()
+			By("The pod should have been processed by the webhook and the scheduling gate label should be added")
+			Eventually(framework.VerifyPodLabels(ctx, client, ns, "app", "test", e2e.Present, schedulingGateLabel), e2e.WaitShort).Should(Succeed())
+			By("Verify arch label are set")
+			Eventually(framework.VerifyPodLabelsAreSet(ctx, client, ns, "app", "test",
+				utils.MultiArchLabel, "",
+				utils.ArchLabelValue(utils.ArchitectureAmd64), "",
+				utils.ArchLabelValue(utils.ArchitectureArm64), "",
+				utils.ArchLabelValue(utils.ArchitectureS390x), "",
+				utils.ArchLabelValue(utils.ArchitecturePpc64le), "",
+			), e2e.WaitShort).Should(Succeed())
+			By("Verify node affinity label are set correct")
+			Eventually(framework.VerifyPodLabelsAreSet(ctx, client, ns, "app", "test",
+				utils.NodeAffinityLabel, utils.NodeAffinityLabelValueSet,
+				utils.PreferredNodeAffinityLabel, utils.NodeAffinityLabelValueSet,
+			), e2e.WaitShort).Should(Succeed())
+			By("The pod should have been set node affinity of arch info.")
+			Eventually(framework.VerifyPodNodeAffinity(ctx, client, ns, "app", "test", *expectedNSTs), e2e.WaitShort).Should(Succeed())
+			By("The pod should have the preferred affinities set in the ClusterPodPlacementConfig")
+			Eventually(framework.VerifyPodPreferredNodeAffinity(ctx, client, ns, "app", "test",
+				defaultExpectedAffinityTerms()), e2e.WaitShort).Should(Succeed())
+		})
+		It("should set the node affinity in pods with images requiring credentials including globs set in pods imagePullSecrets", func() {
+			var err error
+			By("Create an ephemeral namespace")
+			ns := framework.NewEphemeralNamespace()
+			err = client.Create(ctx, ns)
+			Expect(err).NotTo(HaveOccurred())
+			//nolint:errcheck
+			defer client.Delete(ctx, ns)
+			registryHostWithGlob := strings.Replace(registryAddress, "quay.io", "*.io", 1)
+			By("Create a secret for the local pull secret for " + registryHostWithGlob)
+			secretData := map[string][]byte{
+				".dockerconfigjson": []byte(fmt.Sprintf(`{"auths":{"%s":{"auth":"%s"}}}`,
+					registryHostWithGlob, base64.StdEncoding.EncodeToString([]byte(fmt.Sprintf(
 						"%s:%s", authUserLocal, authPassLocal))))),
 			}
 			secret := NewSecret().

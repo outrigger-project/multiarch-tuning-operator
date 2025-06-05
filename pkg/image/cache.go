@@ -41,7 +41,7 @@ func (c *cacheProxy) GetCompatibleArchitecturesSet(ctx context.Context, imageRef
 	metrics.InitCommonMetrics()
 	metrics.InspectionGauge.Set(float64(c.imageRefsCache.Len()))
 	now := time.Now()
-	authJSON, err := marshaledImagePullSecrets(secrets)
+	authJSON, err := marshaledImagePullSecrets(imageReference, secrets)
 	if err != nil {
 		return nil, err
 	}
