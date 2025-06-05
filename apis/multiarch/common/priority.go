@@ -19,6 +19,7 @@ package common
 // +k8s:deepcopy-gen=package
 
 // Priority represents the priority configuration.
+
 // priority field indicates the priority of in range 1-100.
 // +kubebuilder:"validation:Required
 // +kubebuilder:validation:Minimum:=1
