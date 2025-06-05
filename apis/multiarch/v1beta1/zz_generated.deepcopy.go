@@ -5,7 +5,6 @@
 package v1beta1
 
 import (
-	"github.com/openshift/multiarch-tuning-operator/apis/multiarch/common"
 	"github.com/openshift/multiarch-tuning-operator/apis/multiarch/common/plugins"
 	"k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -292,11 +291,6 @@ func (in *PodPlacementConfigSpec) DeepCopyInto(out *PodPlacementConfigSpec) {
 		in, out := &in.Plugins, &out.Plugins
 		*out = new(plugins.Plugins)
 		(*in).DeepCopyInto(*out)
-	}
-	if in.Priority != nil {
-		in, out := &in.Priority, &out.Priority
-		*out = new(common.Priority)
-		**out = **in
 	}
 }
 
