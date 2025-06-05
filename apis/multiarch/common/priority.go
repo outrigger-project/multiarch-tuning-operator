@@ -19,10 +19,9 @@ package common
 // +k8s:deepcopy-gen=package
 
 // Priority represents the priority configuration.
-type Priority struct {
-	// priority is a required field that indicates the priority of in range 1-100.
-	// +kubebuilder:"validation:Required
-	// +kubebuilder:validation:Minimum:=1
-	// +kubebuilder:validation:Maximum:=100
-	Priority int32 `json:"priority" protobuf:"bytes,1,rep,name=priority"`
-}
+
+// priority field indicates the priority of in range 1-100.
+// +kubebuilder:"validation:Required
+// +kubebuilder:validation:Minimum:=1
+// +kubebuilder:validation:Maximum:=100
+type Priority int32

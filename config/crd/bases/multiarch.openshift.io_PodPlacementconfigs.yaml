@@ -168,18 +168,13 @@ spec:
                     type: object
                 type: object
               priority:
-                description: Priority
-                properties:
-                  priority:
-                    description: priority is a required field that indicates the priority
-                      of the plugin in range 1-100.
-                    format: int32
-                    maximum: 100
-                    minimum: 1
-                    type: integer
-                required:
-                - priority
-                type: object
+                description: |-
+                  Priority defines the priority of the pod placement operand.
+                  This field is optional and will be omitted from the output if not set.
+                format: int32
+                maximum: 100
+                minimum: 1
+                type: integer
             type: object
           status:
             description: PodPlacementConfigStatus defines the observed state of PodPlacementConfig

@@ -49,8 +49,10 @@ type PodPlacementConfigSpec struct {
 	// +optional
 	Plugins *plugins.Plugins `json:"plugins,omitempty"`
 
-	// Priority
-	Priority *common.Priority `json:"priority,omitempty"`
+	// Priority defines the priority of the pod placement operand.
+	// This field is optional and will be omitted from the output if not set.
+	// +optional
+	Priority common.Priority `json:"priority,omitempty"`
 }
 
 // PodPlacementConfigStatus defines the observed state of PodPlacementConfig
