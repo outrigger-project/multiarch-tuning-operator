@@ -310,6 +310,7 @@ var _ = Describe("The Multiarch Tuning Operator", Serial, func() {
 					WithName(common.SingletonResourceObjectName).
 					WithNodeAffinityScoring(true).
 					WithNodeAffinityScoringTerm(utils.ArchitectureArm64, 50).
+					WithExecFormatErrorMonitor(true).
 					Build(),
 			)
 			Expect(err).NotTo(HaveOccurred(), "failed to create the v1beta1 ClusterPodPlacementConfig", err)
@@ -325,6 +326,7 @@ var _ = Describe("The Multiarch Tuning Operator", Serial, func() {
 			By("Validate the plugins stanza is set")
 			Expect(ppc.Spec.Plugins).NotTo(BeNil())
 			Expect(ppc.Spec.Plugins.NodeAffinityScoring.IsEnabled()).To(BeTrue())
+			Expect(ppc.Spec.Plugins.ExecFormatErrorMonitor.IsEnabled()).To(BeTrue())
 			// Get v1alpha1 ClusterPodPlacementConfig
 			By("Get the v1alpha1 version of the ClusterPodPlacementConfig")
 			v1alpha1obj := &v1alpha1.ClusterPodPlacementConfig{}
