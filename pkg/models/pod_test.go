@@ -545,3 +545,139 @@ func TestPod_IsFromDaemonSet(t *testing.T) {
 		})
 	}
 }
+
+func TestPod_ContainerNameFor(t *testing.T) {
+	type fields struct {
+		Pod      v1.Pod
+		ctx      context.Context
+		recorder record.EventRecorder
+	}
+	type args struct {
+		containerID string
+	}
+	tests := []struct {
+		name    string
+		fields  fields
+		args    args
+		want    string
+		wantErr bool
+	}{
+		{
+			name: "valid container ID matches a container (cri-o)",
+			fields: fields{
+				Pod: v1.Pod{
+					Status: v1.PodStatus{
+						ContainerStatuses: []v1.ContainerStatus{
+							{
+								Name:        "test-container",
+								ContainerID: "cri-o://1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+							},
+						},
+					},
+				},
+			},
+			args: args{
+				containerID: "cri-o://1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+			},
+			want:    "test-container",
+			wantErr: false,
+		},
+		{
+			name: "valid container ID matches a container (containerd)",
+			fields: fields{
+				Pod: v1.Pod{
+					Status: v1.PodStatus{
+						ContainerStatuses: []v1.ContainerStatus{
+							{
+								Name:        "test-container",
+								ContainerID: "containerd://abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890",
+							},
+						},
+					},
+				},
+			},
+			args: args{
+				containerID: "containerd://abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890",
+			},
+			want:    "test-container",
+			wantErr: false,
+		},
+		{
+			name: "valid container ID does not match any container",
+			fields: fields{
+				Pod: v1.Pod{
+					Status: v1.PodStatus{
+						ContainerStatuses: []v1.ContainerStatus{
+							{
+								Name:        "test-container",
+								ContainerID: "cri-o://abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890",
+							},
+						},
+					},
+				},
+			},
+			args: args{
+				containerID: "cri-o://1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+			},
+			want:    "",
+			wantErr: true,
+		},
+		{
+			name: "invalid container ID format",
+			fields: fields{
+				Pod: v1.Pod{
+					Status: v1.PodStatus{
+						ContainerStatuses: []v1.ContainerStatus{
+							{
+								Name:        "test-container",
+								ContainerID: "cri-o://1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+							},
+						},
+					},
+				},
+			},
+			args: args{
+				containerID: "invalid-container-id",
+			},
+			want:    "",
+			wantErr: true,
+		},
+		{
+			name: "empty container ID",
+			fields: fields{
+				Pod: v1.Pod{
+					Status: v1.PodStatus{
+						ContainerStatuses: []v1.ContainerStatus{
+							{
+								Name:        "test-container",
+								ContainerID: "cri-o://1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+							},
+						},
+					},
+				},
+			},
+			args: args{
+				containerID: "",
+			},
+			want:    "",
+			wantErr: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pod := &Pod{
+				Pod:      tt.fields.Pod,
+				ctx:      tt.fields.ctx,
+				recorder: tt.fields.recorder,
+			}
+			got, err := pod.ContainerNameFor(tt.args.containerID)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ContainerNameFor() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if got != tt.want {
+				t.Errorf("ContainerNameFor() got = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

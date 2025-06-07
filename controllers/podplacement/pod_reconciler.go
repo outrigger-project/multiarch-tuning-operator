@@ -172,13 +172,16 @@ func (r *PodReconciler) pullSecretDataList(ctx context.Context, pod *Pod) ([][]b
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *PodReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	ctrllog.FromContext(context.Background()).Info("Setting up the PodReconciler with the manager with max"+
-		" concurrent reconciles", "maxConcurrentReconciles", runtime2.NumCPU()*2)
-	// As the main bottleneck is the image inspection, which is strongly I/O bound, we can increase the number of concurrent
+	// This reconciler is mostly I/O bound due to the pod and node retrievals, so we can increase the number of concurrent
 	// reconciles to the number of CPUs * 4.
+	// The main bottleneck is the image inspection.
+	maxConcurrentReconciles := runtime2.NumCPU() * 4
+	ctrllog.FromContext(context.Background()).Info("Setting up the PodReconciler with the manager with max"+
+		" concurrent reconciles", "maxConcurrentReconciles", maxConcurrentReconciles)
+
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&corev1.Pod{}).WithOptions(ctrl2.Options{
-		MaxConcurrentReconciles: runtime2.NumCPU() * 4,
+		MaxConcurrentReconciles: maxConcurrentReconciles,
 	}).
 		Complete(r)
 }

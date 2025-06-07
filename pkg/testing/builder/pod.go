@@ -20,6 +20,11 @@ func NewPod() *PodBuilder {
 	}
 }
 
+func (p *PodBuilder) WithName(name string) *PodBuilder {
+	p.pod.Name = name
+	return p
+}
+
 func (p *PodBuilder) WithImagePullSecrets(imagePullSecrets ...string) *PodBuilder {
 	p.pod.Spec.ImagePullSecrets = make([]v1.LocalObjectReference, len(imagePullSecrets))
 	for i, secret := range imagePullSecrets {
@@ -198,6 +203,11 @@ func (p *PodBuilder) WithLabels(labelsKeyValuesPair ...string) *PodBuilder {
 
 func (p *PodBuilder) WithOwnerReference(or metav1.OwnerReference) *PodBuilder {
 	p.pod.OwnerReferences = append(p.pod.OwnerReferences, or)
+	return p
+}
+
+func (p *PodBuilder) WithContainerStatuses(statuses ...v1.ContainerStatus) *PodBuilder {
+	p.pod.Status.ContainerStatuses = statuses
 	return p
 }
 
