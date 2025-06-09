@@ -127,8 +127,7 @@ func buildServiceAccount(name string) *corev1.ServiceAccount {
 	}
 }
 
-func buildDeployment(logVerbosity int,
-	name string, replicas int32, serviceAccount string, finalizer string, args ...string) *appsv1.Deployment {
+func buildDeployment(logVerbosity int, name string, replicas int32, serviceAccount string, finalizer string, args ...string) *appsv1.Deployment {
 	finalizers := make([]string, 0)
 	if finalizer != "" {
 		finalizers = append(finalizers, finalizer)
