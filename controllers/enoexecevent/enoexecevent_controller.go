@@ -22,16 +22,19 @@ import (
 
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/record"
 
-	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	ctrl2 "sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
+	"github.com/openshift/library-go/pkg/operator/events"
 	multiarchv1beta1 "github.com/openshift/multiarch-tuning-operator/apis/multiarch/v1beta1"
+	"github.com/openshift/multiarch-tuning-operator/controllers/operator"
 	"github.com/openshift/multiarch-tuning-operator/pkg/models"
 	"github.com/openshift/multiarch-tuning-operator/pkg/utils"
 )
@@ -39,9 +42,11 @@ import (
 // Reconciler reconciles a ENoExecEvent object
 type Reconciler struct {
 	client.Client
-	clientSet *kubernetes.Clientset
-	Scheme    *runtime.Scheme
-	recorder  record.EventRecorder
+	clientSet     *kubernetes.Clientset
+	dynamicClient *dynamic.DynamicClient
+	Scheme        *runtime.Scheme
+	recorder      record.EventRecorder
+	eventRecorder events.Recorder
 }
 
 func NewReconciler(client client.Client, clientSet *kubernetes.Clientset, scheme *runtime.Scheme, recorder record.EventRecorder) *Reconciler {
@@ -150,6 +155,30 @@ func (r *Reconciler) reconcile(ctx context.Context, enoExecEvent *multiarchv1bet
 		// if the error is "not found", it means the pod has been deleted, the caller will handle this case.
 		return ctrl.Result{}, err
 	}
+
+	objects := []client.Object{
+		// The finalizer will not affect the reconciliation of ReplicaSets and Pods
+		// when updates to the ClusterPodPlacementConfig are made.
+		operator.BuildServiceAccount(utils.EnoexecControllerName),
+		operator.BuildEnoexecClusterRoleController(),
+		operator.BuildEnoexecClusterRoleBindingController(),
+		operator.BuildEnoexecRoleController(),
+		operator.BuildEnoexecRoleBindingController(),
+
+		operator.BuildServiceAccount(utils.EnoexecDaemonSet),
+		operator.BuildEnoexecRoleDaemonSet(),
+		operator.BuildEnoexecRoleBindingDaemonSet(),
+		operator.BuildEnoexecDaemonSet(utils.EnoexecDaemonSet),
+		operator.BuildDeployment(utils.EnoexecControllerName, 3, utils.EnoexecControllerName),
+	}
+
+	//Still working on this
+	if err := utils.ApplyResources(ctx, r.clientSet, r.dynamicClient, r.eventRecorder, objects); err != nil {
+		logger.Error(err, "Unable to apply resources")
+		return ctrl.Result{}, err
+	}
+
+	// Requeue only if needed (like rechecking readiness, which is not part of this basic flow)
 	return ctrl.Result{}, nil
 }
 
