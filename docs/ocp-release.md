@@ -189,9 +189,12 @@ If so, update hack/bump-version.sh to include any further patches required to up
 2. When planning to release a new version (e.g. v1.0) or a patch version (e.g., v1.0.z), select a snapshot from the
 corresponding Konflux application
 and ensure all post-submit checks have successfully passed.
-```shell
-oc get snapshots --sort-by .metadata.creationTimestamp -l pac.test.appstudio.openshift.io/event-type=push,appstudio.openshift.io/application=multiarch-tuning-operator-<version>
-```
+There are two ways to check if the snapshot contains the right images.
+   - Run `./hack/check-snapshots.sh` and skip to step 4
+   - Manually check with the following command and steps  2 and 3
+    ```shell
+    oc get snapshots --sort-by .metadata.creationTimestamp -l pac.test.appstudio.openshift.io/event-type=push,appstudio.openshift.io/application=multiarch-tuning-operator-<version>
+    ```
 2. Look at the results of the tests for the commit reported in the snapshot:
 ```yaml
 # [ ... ]

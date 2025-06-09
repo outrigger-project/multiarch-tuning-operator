@@ -16,8 +16,8 @@ VERSION ?= 1.1.1
 # To re-generate a bundle for other specific channels without changing the standard setup, you can:
 # - use the CHANNELS as arg of the bundle target (e.g make bundle CHANNELS=candidate,fast,stable)
 # - use environment variables to overwrite this value (e.g export CHANNELS="candidate,fast,stable")
-CHANNELS=tech-preview
-DEFAULT_CHANNEL=tech-preview
+CHANNELS=stable
+DEFAULT_CHANNEL=stable
 ifneq ($(origin CHANNELS), undefined)
 BUNDLE_CHANNELS := --channels=$(CHANNELS)
 endif
@@ -404,3 +404,7 @@ clean:
 
 version:
 	VERSION=$(VERSION) ./hack/bump-version.sh
+
+.PHONY: verify-snapshots
+verify-snapshots:  ## Verify snapshots for given [SNAPSHOT=..] [VERSION=..]
+	./hack/check-snapshots.sh $(filter-out $@,$(MAKECMDGOALS))
