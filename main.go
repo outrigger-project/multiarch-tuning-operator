@@ -126,6 +126,9 @@ func main() {
 			},
 		}
 	}
+	if enableENoExecEventControllers {
+		leaderID = fmt.Sprintf("enoexecevent-controllers-%s", leaderID)
+	}
 
 	// Rapid Reset CVEs. For more information see:
 	// - https://github.com/advisories/GHSA-qppj-fm5r-hxr3
@@ -268,21 +271,35 @@ func RunClusterPodPlacementConfigOperandWebHook(mgr ctrl.Manager) {
 func RunENoExecEventControllers(mgr ctrl.Manager) {
 	config := ctrl.GetConfigOrDie()
 	clientset := kubernetes.NewForConfigOrDie(config)
+	// Get GVK for ClusterPodPlacementConfig
+	gvk, _ := apiutil.GVKForObject(&multiarchv1beta1.ENoExecEvent{}, mgr.GetScheme())
 	must(enoexecevent.NewReconciler(
 		mgr.GetClient(),
 		clientset,
 		mgr.GetScheme(),
-		mgr.GetEventRecorderFor("enoexecevent-controller"),
+		mgr.GetEventRecorderFor(utils.EnoexecControllerName),
+		dynamic.NewForConfigOrDie(config),
+		events.NewKubeRecorder(
+			clientset.CoreV1().Events(utils.Namespace()),
+			utils.OperatorName,
+			&corev1.ObjectReference{
+				Kind:       gvk.Kind,
+				Name:       common.SingletonResourceObjectName,
+				Namespace:  utils.Namespace(),
+				APIVersion: gvk.GroupVersion().String(),
+			},
+			clock.RealClock{},
+		),
 	).SetupWithManager(mgr), unableToCreateController, controllerKey, "ENoExecEventController")
 }
 
 func validateFlags() error {
-	if !enableOperator && !enableClusterPodPlacementConfigOperandControllers && !enableClusterPodPlacementConfigOperandWebHook {
-		return errors.New("at least one of the following flags must be set: --enable-operator, --enable-ppc-controllers, --enable-ppc-webhook")
+	if !enableOperator && !enableClusterPodPlacementConfigOperandControllers && !enableClusterPodPlacementConfigOperandWebHook && !enableENoExecEventControllers {
+		return errors.New("at least one of the following flags must be set: --enable-operator, --enable-ppc-controllers, --enable-ppc-webhook,  --enable-enoexec-event-controllers")
 	}
 	// no more than one of the flags can be set
-	if btoi(enableOperator)+btoi(enableClusterPodPlacementConfigOperandControllers)+btoi(enableClusterPodPlacementConfigOperandWebHook) > 1 {
-		return errors.New("only one of the following flags can be set: --enable-operator, --enable-ppc-controllers, --enable-ppc-webhook")
+	if btoi(enableOperator)+btoi(enableClusterPodPlacementConfigOperandControllers)+btoi(enableClusterPodPlacementConfigOperandWebHook)+btoi(enableENoExecEventControllers) > 1 {
+		return errors.New("only one of the following flags can be set: --enable-operator, --enable-ppc-controllers, --enable-ppc-webhook, --enable-enoexec-event-controllers")
 	}
 	return nil
 }

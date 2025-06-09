@@ -19,6 +19,9 @@ package enoexecevent
 import (
 	"context"
 	"encoding/json"
+	"github.com/openshift/library-go/pkg/operator/events"
+	"k8s.io/client-go/dynamic"
+	"k8s.io/utils/clock"
 	"net/http"
 	"path/filepath"
 	"testing"
@@ -225,10 +228,19 @@ func runManager() {
 
 	suiteLog.Info("Manager created")
 
+	clientset := kubernetes.NewForConfigOrDie(cfg)
+
+	By("Setting up ClusterPodPlacementConfig controller")
+	ctrlref, err := events.GetControllerReferenceForCurrentPod(context.TODO(), clientset, utils.Namespace(), nil)
+	if err != nil {
+		suiteLog.Error(err, "unable to get controller reference for current pod (falling back to namespace)")
+	}
+
 	err = mgr.AddReadyzCheck("readyz", healthz.Ping)
 	Expect(err).NotTo(HaveOccurred())
 
-	reconciler := NewReconciler(mgr.GetClient(), k8sClientSet, mgr.GetScheme(), mgr.GetEventRecorderFor("enoexecevent-controller"))
+	reconciler := NewReconciler(mgr.GetClient(), k8sClientSet, mgr.GetScheme(), mgr.GetEventRecorderFor("enoexecevent-controller"),
+		dynamic.NewForConfigOrDie(cfg), events.NewKubeRecorder(clientset.CoreV1().Events(utils.Namespace()), utils.OperatorName, ctrlref, clock.RealClock{}))
 	if err = reconciler.SetupWithManager(mgr); err != nil {
 		suiteLog.Error(err, "unable to create controller", "controller", "ENoExecEvent")
 	}
