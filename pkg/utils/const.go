@@ -59,6 +59,8 @@ const (
 	ExecFormatErrorEventReason     = "ExecFormatError"
 	execFormatErrorEventMessageFmt = "Container \"%s\" is running a binary (\"%s\") that is not compatible with the node architecture (%s). This is likely due to an error in the image build process or a misconfiguration in other scripts used by the container. Please ensure that the container image is built for the correct architecture and that any scripts or binaries used within the container are compatible with the architectures supported by the image."
 	UnknownContainer               = "unknown-container" // Used when the container name is not known or not provided
+	EnoexecControllerName          = "enoexecevent-controller"
+	EnoexecDaemonSet               = "enoexecevent-daemon-set"
 )
 
 func AllSupportedArchitecturesSet() sets.Set[string] {

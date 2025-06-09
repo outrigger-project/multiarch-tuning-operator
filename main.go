@@ -46,6 +46,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	ctrllog "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
+	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/filters"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
@@ -268,21 +269,46 @@ func RunClusterPodPlacementConfigOperandWebHook(mgr ctrl.Manager) {
 func RunENoExecEventControllers(mgr ctrl.Manager) {
 	config := ctrl.GetConfigOrDie()
 	clientset := kubernetes.NewForConfigOrDie(config)
+	// Get GVK for ClusterPodPlacementConfig
+	gvk, _ := apiutil.GVKForObject(&multiarchv1beta1.ENoExecEvent{}, mgr.GetScheme())
+	recorder := events.NewKubeRecorder(
+		clientset.CoreV1().Events(utils.Namespace()),
+		utils.OperatorName,
+		&corev1.ObjectReference{
+			Kind:       gvk.Kind,
+			Name:       common.SingletonResourceObjectName,
+			Namespace:  utils.Namespace(),
+			APIVersion: gvk.GroupVersion().String(),
+		},
+		clock.RealClock{},
+	)
+	// Register a Runnable to bootstrap support resources on controller startup
+	must(mgr.Add(manager.RunnableFunc(func(ctx context.Context) error {
+		return enoexecevent.ApplySupportResources(
+			ctx,
+			clientset,
+			dynamic.NewForConfigOrDie(config),
+			recorder,
+		)
+	})), unableToCreateController, controllerKey, "ENoExecEventBootstrap")
+
 	must(enoexecevent.NewReconciler(
 		mgr.GetClient(),
 		clientset,
 		mgr.GetScheme(),
-		mgr.GetEventRecorderFor("enoexecevent-controller"),
+		mgr.GetEventRecorderFor(utils.EnoexecControllerName),
+		dynamic.NewForConfigOrDie(config),
+		recorder,
 	).SetupWithManager(mgr), unableToCreateController, controllerKey, "ENoExecEventController")
 }
 
 func validateFlags() error {
-	if !enableOperator && !enableClusterPodPlacementConfigOperandControllers && !enableClusterPodPlacementConfigOperandWebHook {
-		return errors.New("at least one of the following flags must be set: --enable-operator, --enable-ppc-controllers, --enable-ppc-webhook")
+	if !enableOperator && !enableClusterPodPlacementConfigOperandControllers && !enableClusterPodPlacementConfigOperandWebHook && !enableENoExecEventControllers {
+		return errors.New("at least one of the following flags must be set: --enable-operator, --enable-ppc-controllers, --enable-ppc-webhook,  --enable-enoexec-event-controllers")
 	}
 	// no more than one of the flags can be set
-	if btoi(enableOperator)+btoi(enableClusterPodPlacementConfigOperandControllers)+btoi(enableClusterPodPlacementConfigOperandWebHook) > 1 {
-		return errors.New("only one of the following flags can be set: --enable-operator, --enable-ppc-controllers, --enable-ppc-webhook")
+	if btoi(enableOperator)+btoi(enableClusterPodPlacementConfigOperandControllers)+btoi(enableClusterPodPlacementConfigOperandWebHook)+btoi(enableENoExecEventControllers) > 1 {
+		return errors.New("only one of the following flags can be set: --enable-operator, --enable-ppc-controllers, --enable-ppc-webhook, --enable-enoexec-event-controllers")
 	}
 	return nil
 }
