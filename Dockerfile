@@ -20,6 +20,7 @@ COPY main.go main.go
 COPY apis/ apis/
 COPY controllers/ controllers/
 COPY pkg/ pkg/
+COPY enoexec-daemon/ enoexec-daemon/
 
 # Build
 # the GOARCH has not a default value to allow the binary be built according to the host where the command
@@ -27,6 +28,9 @@ COPY pkg/ pkg/
 # the docker BUILDPLATFORM arg will be linux/arm64 when for Apple x86 it will be linux/amd64. Therefore,
 # by leaving it empty we can ensure that the container and binary shipped on it will have the same platform.
 RUN CGO_ENABLED=1 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -o manager main.go
+
+WORKDIR /workspace/enoexec-daemon
+RUN CGO_ENABLED=1 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -o enoexec-daemon main.go
 
 # Use distroless as minimal base image to package the manager binary
 # Refer to https://github.com/GoogleContainerTools/distroless for more details
@@ -53,6 +57,7 @@ LABEL io.openshift.tags="openshift,operator,multiarch,scheduling"
 
 WORKDIR /
 COPY --from=builder /workspace/manager .
+COPY --from=builder /workspace/enoexec-daemon/enoexec-daemon .
 USER 65532:65532
 
 ENTRYPOINT ["/manager"]
