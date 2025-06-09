@@ -33,6 +33,7 @@ import (
 	"github.com/containers/image/v5/signature"
 	"github.com/containers/image/v5/types"
 	"github.com/opencontainers/go-digest"
+	ociv1 "github.com/opencontainers/image-spec/specs-go/v1"
 
 	"golang.org/x/sys/unix"
 
@@ -40,7 +41,20 @@ import (
 )
 
 const (
-	operatorSDKBuilderBundleAnnotation = "operators.operatorframework.io.metrics.builder"
+	osdkMetricsAnnotation              = "operators.operatorframework.io.metrics.builder"
+	osdkMediaTypeAnnotation            = "operators.operatorframework.io.bundle.mediatype.v1"
+	osdkManifestsAnnotation            = "operators.operatorframework.io.bundle.manifests.v1"
+	osdkBundleMetadataAnnotation       = "operators.operatorframework.io.bundle.metadata.v1"
+	osdkBundlePackageAnnotation        = "operators.operatorframework.io.bundle.package.v1"
+	osdkBundleChannelsAnnotation       = "operators.operatorframework.io.bundle.channels.v1"
+	osdkBundleDefaultChannelAnnotation = "operators.operatorframework.io.bundle.channel.default.v1"
+)
+
+var (
+	// https://github.com/operator-framework/operator-registry/blob/c4b5f1196/docs/design/operator-bundle.md
+	operatorSDKBuilderBundleAnnotationSet = sets.New[string](
+		osdkMetricsAnnotation, osdkMediaTypeAnnotation, osdkManifestsAnnotation, osdkBundleMetadataAnnotation,
+		osdkBundlePackageAnnotation, osdkBundleChannelsAnnotation, osdkBundleDefaultChannelAnnotation)
 )
 
 type registryInspector struct {
@@ -165,7 +179,7 @@ func (i *registryInspector) GetCompatibleArchitecturesSet(ctx context.Context, i
 		log.Error(err, "Error parsing the OCI config of the image")
 		return nil, err
 	}
-	if _, ok := config.Config.Labels[operatorSDKBuilderBundleAnnotation]; ok {
+	if isBundleImage(config.Config) {
 		log.V(3).Info("The image is an operator bundle image")
 		// Operator bundle images are not tied to a specific architecture, so we should not set any constraints
 		// based on the architecture they report.
@@ -180,6 +194,17 @@ func (i *registryInspector) GetCompatibleArchitecturesSet(ctx context.Context, i
 		return sets.New[string](config.Architecture), nil
 	}
 	return supportedArchitectures, nil
+}
+
+func isBundleImage(image ociv1.ImageConfig) bool {
+	// Check if the image is an operator bundle image by looking for the operator-sdk annotation
+	for label, _ := range image.Labels {
+		if operatorSDKBuilderBundleAnnotationSet.Has(label) {
+			// The image is an operator bundle image
+			return true
+		}
+	}
+	return false
 }
 
 func (i *registryInspector) createAuthFile(imageReference string, secrets ...[]byte) (*os.File, error) {
