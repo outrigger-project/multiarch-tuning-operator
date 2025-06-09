@@ -422,7 +422,7 @@ func (r *ClusterPodPlacementConfigReconciler) reconcile(ctx context.Context, clu
 		buildService(utils.PodPlacementControllerName),
 		buildService(utils.PodPlacementWebhookName),
 		buildClusterRoleController(), buildClusterRoleWebhook(), buildRoleController(),
-		buildServiceAccount(utils.PodPlacementWebhookName), buildServiceAccount(utils.PodPlacementControllerName),
+		BuildServiceAccount(utils.PodPlacementWebhookName), BuildServiceAccount(utils.PodPlacementControllerName),
 		buildClusterRoleBinding(utils.PodPlacementControllerName, rbacv1.RoleRef{
 			APIGroup: rbacv1.GroupName,
 			Kind:     clusterRoleKind,
