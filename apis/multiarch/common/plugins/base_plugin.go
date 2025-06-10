@@ -18,7 +18,13 @@ package plugins
 
 // +k8s:deepcopy-gen=package
 
-// Plugins represents the plugins configuration.
+// LocalPlugins represents the plugins configuration for pod placement config.
+// +kubebuilder:object:generate=true
+type LocalPlugins struct {
+	NodeAffinityScoring *NodeAffinityScoring `json:"nodeAffinityScoring,omitempty"`
+}
+
+// Plugins represents the plugins configuration for cluster pod placement config.
 // +kubebuilder:object:generate=true
 type Plugins struct {
 	NodeAffinityScoring *NodeAffinityScoring `json:"nodeAffinityScoring,omitempty"`
