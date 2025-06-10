@@ -19,10 +19,11 @@ package plugins
 // +k8s:deepcopy-gen=package
 
 // Plugins represents the plugins configuration.
+// +kubebuilder:object:generate=true
 type Plugins struct {
-	// +kubebuilder:"validation:Required
 	NodeAffinityScoring *NodeAffinityScoring `json:"nodeAffinityScoring,omitempty"`
-	// Future plugins can be added here.
+
+	ExecFormatErrorMonitor *ExecFormatErrorMonitor `json:"execFormatErrorMonitor,omitempty"`
 }
 
 // IBasePlugin defines a basic interface for plugins.
