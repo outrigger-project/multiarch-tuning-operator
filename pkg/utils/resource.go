@@ -67,6 +67,8 @@ func ApplyResource(ctx context.Context, clientSet *kubernetes.Clientset, client 
 	switch t := obj.(type) {
 	case *appsv1.Deployment:
 		return resourceapply.ApplyDeployment(ctx, clientSet.AppsV1(), recorder, t, 0)
+	case *appsv1.DaemonSet:
+		return resourceapply.ApplyDaemonSet(ctx, clientSet.AppsV1(), recorder, t, 0)
 	case *corev1.Service:
 		return applyService(ctx, clientSet.CoreV1(), recorder, t)
 	case *admissionv1.MutatingWebhookConfiguration:
