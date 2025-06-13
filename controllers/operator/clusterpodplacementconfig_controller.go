@@ -145,12 +145,6 @@ func (r *ClusterPodPlacementConfigReconciler) Reconcile(ctx context.Context, req
 		return ctrl.Result{}, err
 	}
 
-<<<<<<< HEAD
-=======
-	if err != nil {
-		log.Error(err, "Unable to enable the ENoExec event")
-	}
->>>>>>> b3899880 (squash! MULTIARCH-5421: Add ENoExecEvent daemon set and deploy objects to reconcile)
 	return ctrl.Result{}, r.reconcile(ctx, clusterPodPlacementConfig)
 }
 
@@ -578,8 +572,7 @@ func (r *ClusterPodPlacementConfigReconciler) updateStatus(ctx context.Context, 
 	return err
 }
 
-<<<<<<< HEAD
-=======
+
 func (r *ClusterPodPlacementConfigReconciler) buildPodPlacementConfigObjects(clusterPodPlacementConfig *multiarchv1beta1.ClusterPodPlacementConfig, ctx context.Context) ([]client.Object, error) {
 	log := ctrllog.FromContext(ctx)
 
@@ -723,7 +716,6 @@ func (r *ClusterPodPlacementConfigReconciler) doesDeploymentExist(deploymentName
 	return true, nil
 }
 
->>>>>>> b3899880 (squash! MULTIARCH-5421: Add ENoExecEvent daemon set and deploy objects to reconcile)
 func isDeploymentAvailable(deployment *appsv1.Deployment) bool {
 	if deployment == nil {
 		return false

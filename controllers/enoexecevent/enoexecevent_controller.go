@@ -169,18 +169,6 @@ func (r *Reconciler) reconcile(ctx context.Context, enoExecEvent *multiarchv1bet
 		return ctrl.Result{}, err
 	}
 
-	//objs := []client.Object{
-	//	operator.BuildRoleController(),
-	//	operator.BuildRoleBindingController(),
-	//	//operator.BuildDeployment(),
-	//}
-	//if err := utils.ApplyResources(ctx, r.clientSet, r.dynamicClient, r.events, objs); err != nil {
-	//	logger.Error(err, "Failed to apply bootstrap support resources")
-	//	return ctrl.Result{}, err
-	//}
-	//
-	//logger.Info("Successfully applied support resources")
-
 	// Requeue only if needed (like rechecking readiness, which is not part of this basic flow)
 	return ctrl.Result{}, nil
 }
@@ -195,13 +183,6 @@ func (r *Reconciler) SetupWithManager(mgr ctrl.Manager) error {
 
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&multiarchv1beta1.ENoExecEvent{}).
-		//Owns(&corev1.ServiceAccount{}).     // for the 2 ServiceAccounts
-		//Owns(&appsv1.Deployment{}).         // for the Deployment
-		//Owns(&appsv1.DaemonSet{}).          // for the DaemonSet
-		//Owns(&rbacv1.ClusterRole{}).        // for the ClusterRole
-		//Owns(&rbacv1.ClusterRoleBinding{}). // for the ClusterRoleBinding
-		//Owns(&rbacv1.Role{}).               // for the 2 Roles
-		//Owns(&rbacv1.RoleBinding{}).        // for the 2 RoleBindings
 		WithOptions(ctrl2.Options{
 			MaxConcurrentReconciles: maxConcurrentReconciles,
 		}).
