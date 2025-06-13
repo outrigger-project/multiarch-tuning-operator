@@ -69,17 +69,10 @@ func ApplySupportResources(ctx context.Context, kubeClient *kubernetes.Clientset
 	logger.Info("%%%%%%%%%%%%%%%%%%%%%%%%")
 
 	objs := []client.Object{
-		operator.BuildServiceAccount(utils.EnoexecControllerName),
-		operator.BuildEnoexecClusterRoleController(),
-		operator.BuildEnoexecClusterRoleBindingController(),
-		operator.BuildEnoexecRoleController(),
-		operator.BuildEnoexecRoleBindingController(),
-
 		operator.BuildServiceAccount(utils.EnoexecDaemonSet),
 		operator.BuildEnoexecRoleDaemonSet(),
 		operator.BuildEnoexecRoleBindingDaemonSet(),
 		operator.BuildEnoexecDaemonSet(utils.EnoexecDaemonSet),
-		operator.BuildDeployment(),
 	}
 
 	if err := utils.ApplyResources(ctx, kubeClient, dynamicClient, eventRecorder, objs); err != nil {
@@ -199,6 +192,21 @@ func (r *Reconciler) reconcile(ctx context.Context, enoExecEvent *multiarchv1bet
 		// if the error is "not found", it means the pod has been deleted, the caller will handle this case.
 		return ctrl.Result{}, err
 	}
+
+	objs := []client.Object{
+		operator.BuildServiceAccount(utils.EnoexecControllerName),
+		operator.BuildEnoexecClusterRoleController(),
+		operator.BuildEnoexecClusterRoleBindingController(),
+		operator.BuildEnoexecRoleController(),
+		operator.BuildEnoexecRoleBindingController(),
+		//operator.BuildDeployment(),
+	}
+	if err := utils.ApplyResources(ctx, r.clientSet, r.dynamicClient, r.events, objs); err != nil {
+		logger.Error(err, "Failed to apply bootstrap support resources")
+		return ctrl.Result{}, err
+	}
+
+	logger.Info("Successfully applied support resources")
 
 	// Requeue only if needed (like rechecking readiness, which is not part of this basic flow)
 	return ctrl.Result{}, nil

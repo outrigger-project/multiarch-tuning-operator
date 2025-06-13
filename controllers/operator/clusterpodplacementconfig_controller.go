@@ -19,7 +19,6 @@ package operator
 import (
 	"context"
 	"errors"
-
 	admissionv1 "k8s.io/api/admissionregistration/v1"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -143,6 +142,10 @@ func (r *ClusterPodPlacementConfigReconciler) Reconcile(ctx context.Context, req
 		return ctrl.Result{}, err
 	}
 
+	err = r.enableENoExecEvent(*clusterPodPlacementConfig, ctx)
+	if err != nil {
+		log.Error(err, "Unable to enable the ENoExec event")
+	}
 	return ctrl.Result{}, r.reconcile(ctx, clusterPodPlacementConfig)
 }
 
@@ -525,6 +528,34 @@ func (r *ClusterPodPlacementConfigReconciler) updateStatus(ctx context.Context, 
 		err = errors.New(clusterPodPlacementConfigNotReady)
 	}
 	return err
+}
+
+// enableENoExecEvent if the ExecFormatErrorMonitor plugin is enabled create the deployment to start the controller
+// if it does not already exist
+func (r *ClusterPodPlacementConfigReconciler) enableENoExecEvent(config multiarchv1beta1.ClusterPodPlacementConfig, ctx context.Context) error {
+	log := ctrllog.FromContext(ctx)
+	if config.Spec.Plugins != nil && config.Spec.Plugins.ExecFormatErrorMonitor != nil && config.Spec.Plugins.ExecFormatErrorMonitor.IsEnabled() {
+		// Check if the Deployment exists
+		enoexeceventDeployment := &appsv1.Deployment{}
+		var err error
+		err = r.Get(ctx, client.ObjectKey{
+			Name:      utils.EnoexecControllerName,
+			Namespace: utils.Namespace(),
+		}, enoexeceventDeployment)
+		if client.IgnoreNotFound(err) == nil {
+			log.Info("Starting ENoExecEvent Controller")
+			object := []client.Object{buildEnoexecDeployment()}
+
+			if err := utils.ApplyResources(ctx, r.ClientSet, r.DynamicClient, r.Recorder, object); err != nil {
+				log.Error(err, "Unable to apply resources for ENoExecEvent")
+				return err
+			}
+		} else if err != nil {
+			log.Error(err, "Unable to fetch the deployment")
+			return err
+		}
+	}
+	return nil
 }
 
 func isDeploymentAvailable(deployment *appsv1.Deployment) bool {
