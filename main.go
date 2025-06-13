@@ -284,7 +284,7 @@ func RunENoExecEventControllers(mgr ctrl.Manager) {
 	)
 	// Register a Runnable to bootstrap support resources on controller startup
 	must(mgr.Add(manager.RunnableFunc(func(ctx context.Context) error {
-		return enoexecevent.ApplySupportResources(
+		return enoexecevent.ApplyDaemonSetSupportResources(
 			ctx,
 			clientset,
 			dynamic.NewForConfigOrDie(config),

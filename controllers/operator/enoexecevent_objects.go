@@ -66,8 +66,8 @@ func BuildEnoexecRoleController() *rbacv1.Role {
 	}
 }
 
-func BuildEnoexecRoleBindingController() *rbacv1.ClusterRoleBinding {
-	return buildClusterRoleBinding(
+func BuildEnoexecRoleBindingController() *rbacv1.RoleBinding {
+	return buildRoleBinding(
 		utils.EnoexecControllerName,
 		rbacv1.RoleRef{
 			APIGroup: rbacv1.GroupName,
@@ -238,8 +238,8 @@ func BuildEnoexecDaemonSet(serviceAccount string) *appsv1.DaemonSet {
 }
 
 // buildEnoexecDeployment returns a minimal Deployment object matching your YAML
-func buildEnoexecDeployment() *appsv1.Deployment {
+func BuildEnoexecDeployment() *appsv1.Deployment {
 	return buildDeployment(common.LogVerbosityLevelNormal.ToZapLevelInt(), utils.EnoexecControllerName, 3, utils.EnoexecControllerName, "",
-		"--leader-elect", "--enable-enoexec-event-controllers",
+		"--enable-enoexec-event-controllers",
 	)
 }

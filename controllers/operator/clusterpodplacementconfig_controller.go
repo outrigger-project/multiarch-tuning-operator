@@ -544,7 +544,12 @@ func (r *ClusterPodPlacementConfigReconciler) enableENoExecEvent(config multiarc
 		}, enoexeceventDeployment)
 		if client.IgnoreNotFound(err) == nil {
 			log.Info("Starting ENoExecEvent Controller")
-			object := []client.Object{buildEnoexecDeployment()}
+			object := []client.Object{
+				BuildServiceAccount(utils.EnoexecControllerName),
+				BuildEnoexecClusterRoleController(),
+				BuildEnoexecClusterRoleBindingController(),
+				BuildEnoexecDeployment(),
+			}
 
 			if err := utils.ApplyResources(ctx, r.ClientSet, r.DynamicClient, r.Recorder, object); err != nil {
 				log.Error(err, "Unable to apply resources for ENoExecEvent")

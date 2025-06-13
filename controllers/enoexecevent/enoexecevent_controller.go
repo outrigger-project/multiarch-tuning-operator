@@ -63,10 +63,33 @@ func NewReconciler(client client.Client, clientSet *kubernetes.Clientset, scheme
 	}
 }
 
-// ApplySupportResources creates and applies static cluster-scoped resources.
-func ApplySupportResources(ctx context.Context, kubeClient *kubernetes.Clientset, dynamicClient *dynamic.DynamicClient, eventRecorder events.Recorder) error {
+// ApplySupportResources creates and applies static resources.
+func ApplyDeploymentSupportResources(ctx context.Context, kubeClient *kubernetes.Clientset, dynamicClient *dynamic.DynamicClient, eventRecorder events.Recorder) error {
 	logger := log.FromContext(ctx)
-	logger.Info("%%%%%%%%%%%%%%%%%%%%%%%%")
+	logger.Info("Creating ENoExecEvent deployment and supporting resources")
+
+	objs := []client.Object{
+		operator.BuildServiceAccount(utils.EnoexecControllerName),
+		operator.BuildEnoexecClusterRoleController(),
+		operator.BuildEnoexecClusterRoleBindingController(),
+		operator.BuildEnoexecRoleController(),
+		operator.BuildEnoexecRoleBindingController(),
+		operator.BuildEnoexecDeployment(),
+	}
+
+	if err := utils.ApplyResources(ctx, kubeClient, dynamicClient, eventRecorder, objs); err != nil {
+		logger.Error(err, "Failed to apply support resources")
+		return err
+	}
+
+	logger.Info("Successfully applied support resources")
+	return nil
+}
+
+// ApplySupportResources creates and applies static resources.
+func ApplyDaemonSetSupportResources(ctx context.Context, kubeClient *kubernetes.Clientset, dynamicClient *dynamic.DynamicClient, eventRecorder events.Recorder) error {
+	logger := log.FromContext(ctx)
+	logger.Info("Creating ENoExecEvent daemon set and supporting resources")
 
 	objs := []client.Object{
 		operator.BuildServiceAccount(utils.EnoexecDaemonSet),
@@ -194,9 +217,6 @@ func (r *Reconciler) reconcile(ctx context.Context, enoExecEvent *multiarchv1bet
 	}
 
 	objs := []client.Object{
-		operator.BuildServiceAccount(utils.EnoexecControllerName),
-		operator.BuildEnoexecClusterRoleController(),
-		operator.BuildEnoexecClusterRoleBindingController(),
 		operator.BuildEnoexecRoleController(),
 		operator.BuildEnoexecRoleBindingController(),
 		//operator.BuildDeployment(),
