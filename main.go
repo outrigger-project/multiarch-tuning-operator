@@ -128,6 +128,9 @@ func main() {
 	}
 	if enableENoExecEventControllers {
 		leaderID = fmt.Sprintf("enoexecevent-controllers-%s", leaderID)
+		cacheOpts.DefaultNamespaces = map[string]cache.Config{
+			"openshift-multiarch-tuning-operator": {},
+		}
 	}
 
 	// Rapid Reset CVEs. For more information see:
