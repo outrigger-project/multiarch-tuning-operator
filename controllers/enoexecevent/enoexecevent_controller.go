@@ -20,17 +20,19 @@ import (
 	"context"
 	runtime2 "runtime"
 
-	v1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/record"
 
-	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	ctrl2 "sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
+	"github.com/openshift/library-go/pkg/operator/events"
 	multiarchv1beta1 "github.com/openshift/multiarch-tuning-operator/apis/multiarch/v1beta1"
 	"github.com/openshift/multiarch-tuning-operator/pkg/models"
 	"github.com/openshift/multiarch-tuning-operator/pkg/utils"
@@ -39,17 +41,22 @@ import (
 // Reconciler reconciles a ENoExecEvent object
 type Reconciler struct {
 	client.Client
-	clientSet *kubernetes.Clientset
-	Scheme    *runtime.Scheme
-	recorder  record.EventRecorder
+	clientSet     *kubernetes.Clientset
+	dynamicClient *dynamic.DynamicClient
+	Scheme        *runtime.Scheme
+	recorder      record.EventRecorder
+	events        events.Recorder
 }
 
-func NewReconciler(client client.Client, clientSet *kubernetes.Clientset, scheme *runtime.Scheme, recorder record.EventRecorder) *Reconciler {
+func NewReconciler(client client.Client, clientSet *kubernetes.Clientset, scheme *runtime.Scheme, recorder record.EventRecorder,
+	dynamicClient *dynamic.DynamicClient, events events.Recorder) *Reconciler {
 	return &Reconciler{
-		Client:    client,
-		clientSet: clientSet,
-		Scheme:    scheme,
-		recorder:  recorder,
+		Client:        client,
+		clientSet:     clientSet,
+		Scheme:        scheme,
+		recorder:      recorder,
+		dynamicClient: dynamicClient,
+		events:        events,
 	}
 }
 
@@ -58,6 +65,17 @@ func NewReconciler(client client.Client, clientSet *kubernetes.Clientset, scheme
 //+kubebuilder:rbac:groups=multiarch.openshift.io,resources=enoexecevents/finalizers,verbs=update
 //+kubebuilder:rbac:groups="",resources=pods,verbs=get;list;update
 //+kubebuilder:rbac:groups="",resources=nodes,verbs=get;list
+
+//TODO: reduce permissions
+//+kubebuilder:rbac:groups=core,resources=namespaces,verbs=get;update
+//+kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;update;patch;create;delete
+//+kubebuilder:rbac:groups=apps,resources=deployments/status,verbs=get
+//+kubebuilder:rbac:groups=apps,resources=daemonsets,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=core,resources=serviceaccounts,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=roles,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=rolebindings,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=clusterroles,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=clusterrolebindings,verbs=get;list;watch;create;update;patch;delete
 
 // Reconcile will reconcile the ENoExecEvent resource.
 // It will fetch the ENoExecEvent instance, retrieve the pod and node information,
@@ -138,7 +156,7 @@ func (r *Reconciler) reconcile(ctx context.Context, enoExecEvent *multiarchv1bet
 	}
 
 	logger.Info("Publishing event for ENoExecEvent", "podName", pod.Name, "namespace", pod.Namespace)
-	pod.PublishEvent(v1.EventTypeWarning, utils.ExecFormatErrorEventReason,
+	pod.PublishEvent(corev1.EventTypeWarning, utils.ExecFormatErrorEventReason,
 		utils.ExecFormatErrorEventMessage(containerName, node.Labels[utils.ArchLabel], enoExecEvent.Status.Command))
 
 	// Label the pod with the ENoExecEvent label.
@@ -150,6 +168,8 @@ func (r *Reconciler) reconcile(ctx context.Context, enoExecEvent *multiarchv1bet
 		// if the error is "not found", it means the pod has been deleted, the caller will handle this case.
 		return ctrl.Result{}, err
 	}
+
+	// Requeue only if needed (like rechecking readiness, which is not part of this basic flow)
 	return ctrl.Result{}, nil
 }
 
