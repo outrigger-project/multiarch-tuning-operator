@@ -1,6 +1,10 @@
 #!/bin/sh
+set -euxo pipefail
 
-set -eux
+if [ "${#}" -gt 0 ]; then
+  pushd "${1}"
+  trap 'popd || true' ERR EXIT SIGINT SIGTERM
+fi
 
 go mod tidy
 go mod vendor
