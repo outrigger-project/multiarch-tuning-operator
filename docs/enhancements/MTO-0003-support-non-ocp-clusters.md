@@ -81,8 +81,10 @@ Its development is expected to ship in the following phases:
 
 #### Global pull secret for inspecting the images
 Regarding pull secret handling, we propose adding a `GlobalPullSecretRef` field in the `ClusterPodPlacementConfig` CRD for non-OCP clusters.
-The operator will read this reference and use the specified pull secret globally.
-For non-OCP clusters, users must create the pull secret beforehand, prior to installing the operator.
+Default values will be set as follows:
+For OCP clusters: `openshift-config/pull-secret`
+For non-OCP clusters: `operator-namespace/pull-secret`
+The operator will read this reference and use the specified pull secret globally. If the secret does not exist, the controller will update the resource condition accordingly to indicate a `degraded` state.
 
 #### CA bundle to verify registry certification
 Regarding CA Bundle handling, we propose adding a `CABundleConfigmapRef` field in the ClusterPodPlacementConfig CRD. 
@@ -134,6 +136,55 @@ spec:
     namespace: pull-secret-ns
 ...
 ```
+#### Changes to the Multiarch Tuning Operator
+A new condition `LINKED_OBJECTS_EXIST` will be added to track whether the referenced resources exist. When a `ClusterPodPlacementConfig resource is created, it will initially transition to this state. If the linked objects exist, the status will be updated to the next state, and the resource will progress until it is ready for normal operation.
+
+The controller continuously monitors these referenced resources. If any of these resources are deleted, the controller will trigger a reconciliation to re-evaluate the state. If the resource is not ready during reconciliation, the controller will delete the related objects to maintain consistency.
+```mermaid
+%%{init: {'securityLevel': 'loose', 'theme':'neutral', 'themeVariables': { 'fontSize':'14px', 'fontFamily':'Roboto Mono'}}}%%
+stateDiagram
+    [*] --> ClusterPodPlacementConfig : create ClusterPodPlacementConfig
+    ClusterPodPlacementConfig --> LinkedObjectsExistCheck
+
+    state LinkedObjectsExistCheck {
+        direction LR
+
+        state CABundleCheck {
+            [*] --> CheckCABundleConfigMap
+            CheckCABundleConfigMap --> CreateCABundleConfigMap : not exists
+            CreateCABundleConfigMap --> CABundleReady
+
+            CheckCABundleConfigMap --> CABundleReady : exists
+            CABundleReady --> [*]
+        }
+
+        state PullSecretCheck {
+            [*] --> CheckGlobalPullSecret
+            CheckGlobalPullSecret --> SetConditionFalse : not exists
+            SetConditionFalse --> [*]
+
+            CheckGlobalPullSecret --> PullSecretReady : exists
+            PullSecretReady --> [*]
+        }
+
+        CABundleCheck --> AllLinkedObjectsReady : if CABundleReady
+        PullSecretCheck --> AllLinkedObjectsReady : if PullSecretReady
+
+        AllLinkedObjectsReady --> NEXT_STATE
+        SetConditionFalse --> LinkedObjectsExistCheck : requeue and cleanup objects
+    }
+
+    NEXT_STATE --> Available
+
+    Available --> MonitorRefResourceDeletion : normal operation
+
+    state MonitorRefResourceDeletion {
+        [*] --> ResourceExists
+        ResourceExists --> ResourceDeleted : ref resource deleted event
+        ResourceDeleted --> LinkedObjectsExistCheck : trigger requeue/reconcile
+    }
+```
+
 ### Implementation Details/Notes/Constraints
 
 ### Risks and Mitigations
@@ -156,9 +207,10 @@ spec:
 
 #### Functional Test Suite
 
-- The operator should reject configuration of `GlobalPullSecretRef` and `CABundleConfigmapRef` on OpenShift clusters.
+- The operator should reject configuration/updating of `GlobalPullSecretRef` and `CABundleConfigmapRef` on OpenShift clusters.
 - The operator should not introduce any regressions on OpenShift clusters, and all e2e tests should pass.
-- The operator should reject the creation or update of a `ClusterPodPlacementConfig` that does not include `GlobalPullSecretRef` when running on a non-OpenShift cluster.
+- The operator should remain in the `LINKED_OBJECTS_EXIST` state if the referenced `GlobalPullSecretRef` does not exist when running on a non-OpenShift cluster.
+- The operator should trigger a reconciliation if any of the referenced resources are deleted on non-OpenShift clusters.
 - The operator should allow setting `GlobalPullSecretRef` on standard Kubernetes clusters, and it can be used to inspect container images.
 - The operator should allow setting `CABundleConfigmapRef` on standard Kubernetes clusters, and it can be used to verify TLS connections to registries.
 - If the `CABundleConfigmapRef` field is not set on non-OpenShift clusters, the operator should automatically create a CA bundle ConfigMap using certificates read from cluster nodes.
