@@ -263,6 +263,9 @@ func RunClusterPodPlacementConfigOperandWebHook(mgr ctrl.Manager) {
 	handler := podplacement.NewPodSchedulingGateMutatingWebHook(mgr.GetClient(), clientset, mgr.GetScheme(),
 		mgr.GetEventRecorderFor(utils.OperatorName), pool)
 	mgr.GetWebhookServer().Register("/add-pod-scheduling-gate", &webhook.Admission{Handler: handler})
+
+	// register the PodPlacementConfig validating webhook
+	must((&multiarchv1beta1.PodPlacementConfig{}).SetupWebhookWithManager(mgr), unableToCreateController, controllerKey, "PodPlacementConfigValidationWebhook")
 }
 
 func RunENoExecEventControllers(mgr ctrl.Manager) {
