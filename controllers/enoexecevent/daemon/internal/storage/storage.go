@@ -26,20 +26,8 @@ type IWStorageBase struct {
 	ctx context.Context
 }
 
-// Store writes data to a channel internal to the storage implementation.
-// This method is non-blocking and will return immediately, queuing the data for later processing.
-func (i *IWStorageBase) Store(evt *types.ENOEXECInternalEvent) error {
-	select {
-	case i.ch <- evt:
-		return nil
-	case <-i.ctx.Done():
-		return i.ctx.Err()
-	}
-}
-
 // close runs the cleanup operations for the storage implementation.
 func (i *IWStorageBase) close() error {
-	close(i.ch)
 	if i.ctx != nil {
 		if cancelFunc, ok := i.ctx.Value("cancelFunc").(context.CancelFunc); ok {
 			cancelFunc()
