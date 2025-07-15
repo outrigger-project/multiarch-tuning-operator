@@ -33,11 +33,11 @@ func RunDaemon(ctx context.Context, cancel context.CancelFunc) error {
 	maxEvents := 256
 	// The buffer size has to be a multiple of the page size.
 	// We calculate the required buffer size based on the maximum number of events as
-	// size_max = maxEvents * 32 [bytes].
+	// size_max = maxEvents * 24 [bytes].
 	// We obtain the number of pages required to store the events rounding up the number of pages required
 	// to store size_max bytes: required_pages = Ceil(size_max [bytes] / pageSize [bytes]).
 	// Finally, we multiply required_pages by the page size to get the buffer size.
-	bufferSize := pageSize * uint32(math.Ceil(float64(maxEvents*32)/float64(pageSize)))
+	bufferSize := pageSize * uint32(math.Ceil(float64(maxEvents*24)/float64(pageSize)))
 
 	log.Info("Buffer size calculated", "buffer_size", bufferSize, "page_size", pageSize, "max_events", maxEvents)
 

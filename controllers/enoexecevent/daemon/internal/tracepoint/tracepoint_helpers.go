@@ -108,22 +108,33 @@ func (tp *Tracepoint) initializeOffsets() error {
 	if !ok {
 		return fmt.Errorf("task_struct is not a struct")
 	}
-	var realParentOffset, tgidOffset int32
-	var realParentFound, tgidFound bool
+	var realParentOffset, tgidOffset, commOffset int32
+	const (
+		realParentFound = 1 << 0
+		tgidFound       = 1 << 1
+		commFound       = 1 << 2
+	)
+	var foundFlags uint32
 	for _, member := range taskStruct.Members {
 		if member.Name == "real_parent" {
 			realParentOffset = int32(member.Offset.Bytes())
-			realParentFound = true
+			foundFlags |= realParentFound
 		}
 		if member.Name == "tgid" {
 			tgidOffset = int32(member.Offset.Bytes())
-			tgidFound = true
+			foundFlags |= tgidFound
+		}
+
+		if member.Name == "comm" {
+			commOffset = int32(member.Offset.Bytes())
+			foundFlags |= commFound
 		}
 	}
-	if !realParentFound || !tgidFound {
-		return fmt.Errorf("failed to find real_parent or tgid in task_struct")
+	if foundFlags != (realParentFound | tgidFound | commFound) {
+		return fmt.Errorf("failed to find real_parent, tgid or comm in task_struct")
 	}
 	tp.realParentOffset = &realParentOffset
 	tp.tgidOffset = &tgidOffset
+	tp.commOffset = &commOffset
 	return nil
 }

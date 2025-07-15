@@ -29,6 +29,7 @@ type Tracepoint struct {
 
 	tgidOffset       *int32
 	realParentOffset *int32
+	commOffset       *int32
 	bufferSize       uint32 // Size of the ring buffer in bytes
 
 	ch chan *types.ENOEXECInternalEvent
