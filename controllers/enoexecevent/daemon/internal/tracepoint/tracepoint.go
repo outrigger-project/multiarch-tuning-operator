@@ -169,9 +169,13 @@ func (tp *Tracepoint) processRecord(record *ringbuf.Record) (*types.ENOEXECInter
 	if len(record.RawSample) < 8 {
 		return nil, fmt.Errorf("record too short: %d bytes, expected at least 8 bytes", len(record.RawSample))
 	}
-	// TODO: Is this ok on s390x?
-	realParentTGID := int32(binary.LittleEndian.Uint32(record.RawSample[:4]))
-	currentTaskTGID := int32(binary.LittleEndian.Uint32(record.RawSample[4:]))
+	var order binary.ByteOrder = binary.LittleEndian
+	if binary.LittleEndian.Uint16([]byte{1, 0}) != 1 {
+		order = binary.BigEndian
+	}
+	realParentTGID := int32(order.Uint32(record.RawSample[:4]))
+	currentTaskTGID := int32(order.Uint32(record.RawSample[4:8]))
+	commandName := string(record.RawSample[8:])
 	log.V(4).Info("Processing record",
 		"real_parent_tgid", realParentTGID, "current_task_tgid", currentTaskTGID)
 	for _, pid := range []int32{currentTaskTGID, realParentTGID} {
@@ -199,7 +203,7 @@ func (tp *Tracepoint) processRecord(record *ringbuf.Record) (*types.ENOEXECInter
 			PodName:      podName,
 			PodNamespace: podNamespace,
 			ContainerID:  containerUUID,
-			// Binary:      "", // TODO: get binary name from record
+			ProcessName:  commandName,
 		}, nil
 	}
 	return nil, fmt.Errorf("failed to find pod/container UUIDs in record: %v", record) // No pod/container found
