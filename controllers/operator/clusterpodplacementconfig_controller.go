@@ -79,6 +79,7 @@ const (
 //+kubebuilder:rbac:groups=core,resources=services,verbs=get;list;watch;update;patch;create;delete
 //+kubebuilder:rbac:groups=core,resources=services/status,verbs=get
 //+kubebuilder:rbac:groups=core,resources=events,verbs=create;patch
+//+kubebuilder:rbac:groups=apps,resources=daemonsets,verbs=get;list;watch;create;update;patch;delete
 
 //+kubebuilder:rbac:groups=core,resources=serviceaccounts,verbs=get;list;watch;update;patch;create;delete
 //+kubebuilder:rbac:groups=core,resources=serviceaccounts/status,verbs=get
