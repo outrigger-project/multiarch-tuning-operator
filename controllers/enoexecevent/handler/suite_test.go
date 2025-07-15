@@ -25,12 +25,14 @@ import (
 	"time"
 
 	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/tools/clientcmd/api"
 	"k8s.io/klog/v2"
+	"k8s.io/utils/clock"
 
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -44,6 +46,7 @@ import (
 
 	"go.uber.org/zap/zapcore"
 
+	"github.com/openshift/library-go/pkg/operator/events"
 	"github.com/openshift/multiarch-tuning-operator/pkg/e2e"
 	"github.com/openshift/multiarch-tuning-operator/pkg/testing/builder"
 	testingutils "github.com/openshift/multiarch-tuning-operator/pkg/testing/framework"
@@ -225,10 +228,19 @@ func runManager() {
 
 	suiteLog.Info("Manager created")
 
+	clientset := kubernetes.NewForConfigOrDie(cfg)
+
+	By("Setting up ClusterPodPlacementConfig controller")
+	ctrlref, err := events.GetControllerReferenceForCurrentPod(context.TODO(), clientset, utils.Namespace(), nil)
+	if err != nil {
+		suiteLog.Error(err, "unable to get controller reference for current pod (falling back to namespace)")
+	}
+
 	err = mgr.AddReadyzCheck("readyz", healthz.Ping)
 	Expect(err).NotTo(HaveOccurred())
 
-	reconciler := NewReconciler(mgr.GetClient(), k8sClientSet, mgr.GetScheme(), mgr.GetEventRecorderFor("enoexecevent-controller"))
+	reconciler := NewReconciler(mgr.GetClient(), k8sClientSet, mgr.GetScheme(), mgr.GetEventRecorderFor("enoexecevent-controller"),
+		dynamic.NewForConfigOrDie(cfg), events.NewKubeRecorder(clientset.CoreV1().Events(utils.Namespace()), utils.OperatorName, ctrlref, clock.RealClock{}))
 	if err = reconciler.SetupWithManager(mgr); err != nil {
 		suiteLog.Error(err, "unable to create controller", "controller", "ENoExecEvent")
 	}
