@@ -27,7 +27,7 @@ metadata:
     categories: OpenShift Optional, Other
     console.openshift.io/disable-operand-delete: "false"
     containerImage: registry.ci.openshift.org/origin/multiarch-tuning-operator:main
-    createdAt: "2025-05-30T14:31:44Z"
+    createdAt: "2025-07-18T05:12:48Z"
     features.operators.openshift.io/cnf: "false"
     features.operators.openshift.io/cni: "false"
     features.operators.openshift.io/csi: "false"
@@ -78,6 +78,13 @@ spec:
       displayName: ENo Exec Event
       kind: ENoExecEvent
       name: enoexecevents.multiarch.openshift.io
+      version: v1beta1
+    - description: PodPlacementConfig defines the configuration for the architecture
+        aware pod placement operand. Users can only deploy a single object named "Namespaced".
+        Creating the object enables the operand.
+      displayName: Pod Placement Config
+      kind: PodPlacementConfig
+      name: podplacementconfigs.multiarch.openshift.io
       version: v1beta1
   description: |
     The Multiarch Tuning Operator optimizes workload management within multi-architecture clusters and in
