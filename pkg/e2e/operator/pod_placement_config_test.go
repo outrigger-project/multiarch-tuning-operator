@@ -422,6 +422,40 @@ var _ = Describe("The Multiarch Tuning Operator", Serial, func() {
 			By("The pod should not have any preferred affinities")
 			Eventually(framework.VerifyPodPreferredNodeAffinity(ctx, client, ns, "app", "test", nil), e2e.WaitShort).Should(Succeed())
 		})
+		It("Should create a pod when plugin NodeAffinityScoring is nil", func() {
+			var err error
+			By("Creating a v1beta1 ClusterPodPlacementConfig")
+			err = client.Create(ctx,
+				NewClusterPodPlacementConfig().
+					WithName(common.SingletonResourceObjectName).
+					WithPlugins().
+					Build(),
+			)
+			Expect(err).NotTo(HaveOccurred(), "failed to create the ClusterPodPlacementConfig", err)
+			By("Get the v1beta1 version of the CPPC")
+			ppc := &v1beta1.ClusterPodPlacementConfig{}
+			err = client.Get(ctx, runtimeclient.ObjectKeyFromObject(&v1beta1.ClusterPodPlacementConfig{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: common.SingletonResourceObjectName,
+				},
+			}), ppc)
+			Expect(err).NotTo(HaveOccurred(), "failed to get the v1beta1 ClusterPodPlacementConfig", err)
+			Eventually(framework.ValidateCreation(client, ctx)).Should(Succeed())
+			By("Create a namespace")
+			ns := framework.NewEphemeralNamespace()
+			err = client.Create(ctx, ns)
+			Expect(err).NotTo(HaveOccurred())
+			//nolint:errcheck
+			defer client.Delete(ctx, ns)
+			By("Create a pod")
+			pod := NewPod().
+				WithContainersImages("quay.io/non-existing/image:latest").
+				WithGenerateName("test-pod-").
+				WithNamespace(ns.Name).
+				Build()
+			err = client.Create(ctx, pod)
+			Expect(err).NotTo(HaveOccurred(), "failed to create pod", err)
+		})
 	})
 	Context("the ClusterPodPlacementConfig is deleted within 1s after creation", func() {
 		It("Should cleanup all finalizers", func() {
