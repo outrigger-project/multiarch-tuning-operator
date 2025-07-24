@@ -445,4 +445,54 @@ var _ = Describe("The Multiarch Tuning Operator", Serial, func() {
 			Eventually(framework.ValidateDeletion(client, ctx)).Should(Succeed())
 		})
 	})
+	Context("When the operator is running and eNoExecEvent plugin is enabled in the ClusterPodPlacementConfig", func() {
+		It("should deploy the eNoExecEvent operands", func() {
+			var err error
+			By("Creating a ClusterPodPlacementConfig with execFormatErrorMonitor plugin enabled")
+			err = client.Create(ctx,
+				NewClusterPodPlacementConfig().
+					WithName(common.SingletonResourceObjectName).
+					WithExecFormatErrorMonitor(true).
+					Build(),
+			)
+			Expect(err).NotTo(HaveOccurred(), "failed to create the ClusterPodPlacementConfig", err)
+			By("validate the clusterPodPlacementConfig and eNoExecEvent objects exist")
+			Eventually(framework.ValidateCreation(client, ctx, framework.MainPlugin, framework.ENoExecPlugin)).Should(Succeed())
+			By("Deleting the clusterpodplacementconfig")
+			err = client.Delete(ctx, &v1beta1.ClusterPodPlacementConfig{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: common.SingletonResourceObjectName,
+				},
+			})
+			Expect(err).NotTo(HaveOccurred())
+			By("Verify all corresponding resources are deleted")
+			Eventually(framework.ValidateDeletion(client, ctx, framework.MainPlugin, framework.ENoExecPlugin)).Should(Succeed())
+		})
+		It("should deploy the eNoExecEvent operands and the then destroy them when disabled", func() {
+			var err error
+			By("Creating a ClusterPodPlacementConfig with execFormatErrorMonitor plugin enabled")
+			err = client.Create(ctx,
+				NewClusterPodPlacementConfig().
+					WithName(common.SingletonResourceObjectName).
+					WithExecFormatErrorMonitor(true).
+					Build(),
+			)
+			Expect(err).NotTo(HaveOccurred(), "failed to create the ClusterPodPlacementConfig", err)
+			By("validate the clusterPodPlacementConfig and eNoExecEvent objects exist")
+			Eventually(framework.ValidateCreation(client, ctx, framework.MainPlugin, framework.ENoExecPlugin)).Should(Succeed())
+			By("Get the v1beta1 version of the CPPC")
+			cppc := &v1beta1.ClusterPodPlacementConfig{}
+			err = client.Get(ctx, runtimeclient.ObjectKeyFromObject(&v1beta1.ClusterPodPlacementConfig{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: common.SingletonResourceObjectName,
+				},
+			}), cppc)
+			Expect(err).NotTo(HaveOccurred())
+			cppc.Spec.Plugins.ExecFormatErrorMonitor.Enabled = false
+			err = client.Update(ctx, cppc)
+			Expect(err).NotTo(HaveOccurred())
+			By("Verify all eNoExecEvent resources are deleted")
+			Eventually(framework.ValidateDeletion(client, ctx, framework.ENoExecPlugin)).Should(Succeed())
+		})
+	})
 })
