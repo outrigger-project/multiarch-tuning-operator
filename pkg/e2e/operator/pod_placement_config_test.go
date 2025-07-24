@@ -22,6 +22,16 @@ import (
 
 const (
 	helloOpenshiftPublicMultiarchImage = "quay.io/openshifttest/hello-openshift:1.2.0"
+	enoexecTriggerScriptArgs           = `#!/bin/bash
+output_file="$(mktemp)"
+dd if=/dev/zero of="$output_file" bs=1024 count=1 status=none
+chmod +x "$output_file"
+echo "Running $output_file to trigger ENOEXEC"
+for i in $(seq 1 10); do
+  $output_file
+  sleep 1
+done
+`
 )
 
 var _ = Describe("The Multiarch Tuning Operator", Serial, func() {
@@ -483,6 +493,131 @@ var _ = Describe("The Multiarch Tuning Operator", Serial, func() {
 			Expect(err).NotTo(HaveOccurred())
 			By("Verify all corresponding resources are deleted")
 			Eventually(framework.ValidateDeletion(client, ctx)).Should(Succeed())
+		})
+	})
+	Context("When the operator is running and eNoExecEvent plugin is enabled in the ClusterPodPlacementConfig", func() {
+		It("should deploy the eNoExecEvent operands", func() {
+			var err error
+			By("Creating a ClusterPodPlacementConfig with execFormatErrorMonitor plugin enabled")
+			err = client.Create(ctx,
+				NewClusterPodPlacementConfig().
+					WithName(common.SingletonResourceObjectName).
+					WithExecFormatErrorMonitor(true).
+					Build(),
+			)
+			Expect(err).NotTo(HaveOccurred(), "failed to create the ClusterPodPlacementConfig", err)
+			By("validate the clusterPodPlacementConfig and eNoExecEvent objects exist")
+			Eventually(framework.ValidateCreation(client, ctx, framework.MainPlugin, framework.ENoExecPlugin)).Should(Succeed())
+			By("Deleting the clusterpodplacementconfig")
+			err = client.Delete(ctx, &v1beta1.ClusterPodPlacementConfig{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: common.SingletonResourceObjectName,
+				},
+			})
+			Expect(err).NotTo(HaveOccurred())
+			By("Verify all corresponding resources are deleted")
+			Eventually(framework.ValidateDeletion(client, ctx, framework.MainPlugin, framework.ENoExecPlugin)).Should(Succeed())
+		})
+		It("should deploy the eNoExecEvent operands and the then destroy them when disabled", func() {
+			var err error
+			By("Creating a ClusterPodPlacementConfig with execFormatErrorMonitor plugin enabled")
+			err = client.Create(ctx,
+				NewClusterPodPlacementConfig().
+					WithName(common.SingletonResourceObjectName).
+					WithExecFormatErrorMonitor(true).
+					Build(),
+			)
+			Expect(err).NotTo(HaveOccurred(), "failed to create the ClusterPodPlacementConfig", err)
+			By("validate the clusterPodPlacementConfig and eNoExecEvent objects exist")
+			Eventually(framework.ValidateCreation(client, ctx, framework.MainPlugin, framework.ENoExecPlugin)).Should(Succeed())
+			By("Get the v1beta1 version of the CPPC")
+			Eventually(func(g Gomega) {
+				cppc := &v1beta1.ClusterPodPlacementConfig{}
+				err = client.Get(ctx, runtimeclient.ObjectKeyFromObject(&v1beta1.ClusterPodPlacementConfig{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: common.SingletonResourceObjectName,
+					},
+				}), cppc)
+				Expect(err).NotTo(HaveOccurred())
+				By("Disabling the execFormatErrorMonitor plugin")
+				cppc.Spec.Plugins.ExecFormatErrorMonitor.Enabled = false
+				err = client.Update(ctx, cppc)
+				Expect(err).NotTo(HaveOccurred())
+			}).Should(Succeed(), "failed to update the ClusterPodPlacementConfig", err)
+			By("Get the v1beta1 version of the CPPC")
+			cppc := &v1beta1.ClusterPodPlacementConfig{}
+			err = client.Get(ctx, runtimeclient.ObjectKeyFromObject(&v1beta1.ClusterPodPlacementConfig{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: common.SingletonResourceObjectName,
+				},
+			}), cppc)
+			Expect(err).NotTo(HaveOccurred(), "failed to get the v1beta1 ClusterPodPlacementConfig", err)
+			Eventually(Expect(cppc.Spec.Plugins.ExecFormatErrorMonitor.IsEnabled()).Should(BeFalse()))
+			By("Verify all eNoExecEvent resources are deleted")
+			Eventually(framework.ValidateDeletion(client, ctx, framework.ENoExecPlugin)).Should(Succeed())
+		})
+		Context("When the eNoExecEvent plugin is active", func() {
+			It("should create an ENoExecEvent CR when a pod triggers an ENOEXEC error", func() {
+				var err error
+				By("Creating a ClusterPodPlacementConfig with execFormatErrorMonitor plugin enabled")
+				err = client.Create(ctx,
+					NewClusterPodPlacementConfig().
+						WithName(common.SingletonResourceObjectName).
+						WithExecFormatErrorMonitor(true).
+						Build(),
+				)
+				Expect(err).NotTo(HaveOccurred(), "failed to create the ClusterPodPlacementConfig")
+				By("Validate the clusterPodPlacementConfig and eNoExecEvent objects exist")
+				Eventually(framework.ValidateCreation(client, ctx, framework.MainPlugin, framework.ENoExecPlugin)).Should(Succeed())
+				By("Create an ephemeral namespace for the test pod")
+				ns := framework.NewEphemeralNamespace()
+				err = client.Create(ctx, ns)
+				Expect(err).NotTo(HaveOccurred())
+				//nolint:errcheck
+				defer client.Delete(ctx, ns)
+				By("Creating a pod designed to trigger an ENOEXEC error")
+				ps := NewPodSpec().
+					WithContainersImages(helloOpenshiftPublicMultiarchImage).
+					WithNodeSelectors(map[string]string{utils.ArchLabel: utils.ArchitectureAmd64}).
+					WithCommand("/bin/bash").
+					WithArgs("-c", enoexecTriggerScriptArgs).
+					Build()
+				d := NewDeployment().
+					WithSelectorAndPodLabels(podLabel).
+					WithPodSpec(ps).
+					WithReplicas(utils.NewPtr(int32(1))).
+					WithName("test-deployment").
+					WithNamespace(ns.Name).
+					Build()
+				err = client.Create(ctx, d)
+				Expect(err).NotTo(HaveOccurred())
+				By("The pod should not have been processed by the webhook and the scheduling gate label should be set as not-set")
+				Eventually(framework.VerifyPodLabels(ctx, client, ns, "app", "test", e2e.Present, schedulingGateNotSetLabel), e2e.WaitShort).Should(Succeed())
+				By("Getting the pod created by the deployment")
+				podList := &corev1.PodList{}
+				// List pods in the test namespace with the label "app=test"
+				err = client.List(ctx, podList, runtimeclient.InNamespace(ns.Name), runtimeclient.MatchingLabels(podLabel))
+				Expect(err).NotTo(HaveOccurred())
+				Expect(podList.Items).NotTo(BeEmpty())
+				pod := podList.Items[0]
+				By("Polling for an ENoExecEvent from the pod")
+				Eventually(func(g Gomega) {
+					// List all events in the pod's namespace
+					eventList := &corev1.EventList{}
+					err := client.List(ctx, eventList, runtimeclient.InNamespace(ns.Name))
+					g.Expect(err).NotTo(HaveOccurred(), "failed to list events in the namespace")
+					foundEvent := false
+					for _, event := range eventList.Items {
+						// Check if the event is for our pod and has the correct reason/message
+						if event.InvolvedObject.UID == pod.UID && event.Reason == "ExecFormatError" {
+							foundEvent = true
+							break
+						}
+					}
+					g.Expect(foundEvent).To(BeTrue(), "an ENoExecEvent for the pod was not found")
+
+				}).Should(Succeed(), "the pod was not found in the namespace")
+			})
 		})
 	})
 })
