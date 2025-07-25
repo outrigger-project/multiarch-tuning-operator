@@ -425,6 +425,34 @@ var _ = Describe("The Multiarch Tuning Operator", Serial, func() {
 			By("The pod should not have any preferred affinities")
 			Eventually(framework.VerifyPodPreferredNodeAffinity(ctx, client, ns, "app", "test", nil), e2e.WaitShort).Should(Succeed())
 		})
+		It("Should create a deployment when plugin NodeAffinityScoring is nil", func() {
+			var err error
+			By("Creating a v1beta1 ClusterPodPlacementConfig")
+			err = client.Create(ctx,
+				NewClusterPodPlacementConfig().
+					WithName(common.SingletonResourceObjectName).
+					WithPlugins().
+					Build(),
+			)
+			Expect(err).NotTo(HaveOccurred(), "failed to create the ClusterPodPlacementConfig", err)
+			By("Get the v1beta1 version of the CPPC")
+			ppc := &v1beta1.ClusterPodPlacementConfig{}
+			err = client.Get(ctx, runtimeclient.ObjectKeyFromObject(&v1beta1.ClusterPodPlacementConfig{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: common.SingletonResourceObjectName,
+				},
+			}), ppc)
+			Expect(err).NotTo(HaveOccurred(), "failed to get the v1beta1 ClusterPodPlacementConfig", err)
+			Eventually(framework.ValidateCreation(client, ctx)).Should(Succeed())
+			By("Create a pod")
+			pod := NewPod().
+				WithContainersImages("quay.io/non-existing/image:latest").
+				WithGenerateName("test-pod-").
+				WithNamespace("test-namespace").
+				Build()
+			err = client.Create(ctx, pod)
+			Expect(err).NotTo(HaveOccurred(), "failed to create pod", err)
+		})
 	})
 	Context("the ClusterPodPlacementConfig is deleted within 1s after creation", func() {
 		It("Should cleanup all finalizers", func() {
@@ -443,6 +471,56 @@ var _ = Describe("The Multiarch Tuning Operator", Serial, func() {
 			Expect(err).NotTo(HaveOccurred())
 			By("Verify all corresponding resources are deleted")
 			Eventually(framework.ValidateDeletion(client, ctx)).Should(Succeed())
+		})
+	})
+	Context("When the operator is running and eNoExecEvent plugin is enabled in the ClusterPodPlacementConfig", func() {
+		It("should deploy the eNoExecEvent operands", func() {
+			var err error
+			By("Creating a ClusterPodPlacementConfig with execFormatErrorMonitor plugin enabled")
+			err = client.Create(ctx,
+				NewClusterPodPlacementConfig().
+					WithName(common.SingletonResourceObjectName).
+					WithExecFormatErrorMonitor(true).
+					Build(),
+			)
+			Expect(err).NotTo(HaveOccurred(), "failed to create the ClusterPodPlacementConfig", err)
+			By("validate the clusterPodPlacementConfig and eNoExecEvent objects exist")
+			Eventually(framework.ValidateCreation(client, ctx, framework.MainPlugin, framework.ENoExecPlugin)).Should(Succeed())
+			By("Deleting the clusterpodplacementconfig")
+			err = client.Delete(ctx, &v1beta1.ClusterPodPlacementConfig{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: common.SingletonResourceObjectName,
+				},
+			})
+			Expect(err).NotTo(HaveOccurred())
+			By("Verify all corresponding resources are deleted")
+			Eventually(framework.ValidateDeletion(client, ctx, framework.MainPlugin, framework.ENoExecPlugin)).Should(Succeed())
+		})
+		It("should deploy the eNoExecEvent operands and the then destroy them when disabled", func() {
+			var err error
+			By("Creating a ClusterPodPlacementConfig with execFormatErrorMonitor plugin enabled")
+			err = client.Create(ctx,
+				NewClusterPodPlacementConfig().
+					WithName(common.SingletonResourceObjectName).
+					WithExecFormatErrorMonitor(true).
+					Build(),
+			)
+			Expect(err).NotTo(HaveOccurred(), "failed to create the ClusterPodPlacementConfig", err)
+			By("validate the clusterPodPlacementConfig and eNoExecEvent objects exist")
+			Eventually(framework.ValidateCreation(client, ctx, framework.MainPlugin, framework.ENoExecPlugin)).Should(Succeed())
+			By("Get the v1beta1 version of the CPPC")
+			cppc := &v1beta1.ClusterPodPlacementConfig{}
+			err = client.Get(ctx, runtimeclient.ObjectKeyFromObject(&v1beta1.ClusterPodPlacementConfig{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: common.SingletonResourceObjectName,
+				},
+			}), cppc)
+			Expect(err).NotTo(HaveOccurred())
+			cppc.Spec.Plugins.ExecFormatErrorMonitor.Enabled = false
+			err = client.Update(ctx, cppc)
+			Expect(err).NotTo(HaveOccurred())
+			By("Verify all eNoExecEvent resources are deleted")
+			Eventually(framework.ValidateDeletion(client, ctx, framework.ENoExecPlugin)).Should(Succeed())
 		})
 	})
 })

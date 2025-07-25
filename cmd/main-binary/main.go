@@ -126,6 +126,12 @@ func main() {
 			},
 		}
 	}
+	if enableENoExecEventControllers {
+		leaderID = fmt.Sprintf("enoexecevent-controllers-%s", leaderID)
+		cacheOpts.DefaultNamespaces = map[string]cache.Config{
+			utils.Namespace(): {},
+		}
+	}
 
 	// Rapid Reset CVEs. For more information see:
 	// - https://github.com/advisories/GHSA-qppj-fm5r-hxr3
@@ -272,17 +278,17 @@ func RunENoExecEventControllers(mgr ctrl.Manager) {
 		mgr.GetClient(),
 		clientset,
 		mgr.GetScheme(),
-		mgr.GetEventRecorderFor("enoexecevent-controller"),
+		mgr.GetEventRecorderFor(utils.EnoexecControllerName),
 	).SetupWithManager(mgr), unableToCreateController, controllerKey, "ENoExecEventController")
 }
 
 func validateFlags() error {
-	if !enableOperator && !enableClusterPodPlacementConfigOperandControllers && !enableClusterPodPlacementConfigOperandWebHook {
-		return errors.New("at least one of the following flags must be set: --enable-operator, --enable-ppc-controllers, --enable-ppc-webhook")
+	if !enableOperator && !enableClusterPodPlacementConfigOperandControllers && !enableClusterPodPlacementConfigOperandWebHook && !enableENoExecEventControllers {
+		return errors.New("at least one of the following flags must be set: --enable-operator, --enable-ppc-controllers, --enable-ppc-webhook, --enable-enoexec-event-controllers")
 	}
 	// no more than one of the flags can be set
-	if btoi(enableOperator)+btoi(enableClusterPodPlacementConfigOperandControllers)+btoi(enableClusterPodPlacementConfigOperandWebHook) > 1 {
-		return errors.New("only one of the following flags can be set: --enable-operator, --enable-ppc-controllers, --enable-ppc-webhook")
+	if btoi(enableOperator)+btoi(enableClusterPodPlacementConfigOperandControllers)+btoi(enableClusterPodPlacementConfigOperandWebHook)+btoi(enableENoExecEventControllers) > 1 {
+		return errors.New("only one of the following flags can be set: --enable-operator, --enable-ppc-controllers, --enable-ppc-webhook, --enable-enoexec-event-controllers")
 	}
 	return nil
 }
