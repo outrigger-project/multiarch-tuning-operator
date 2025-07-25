@@ -489,23 +489,21 @@ func (r *ClusterPodPlacementConfigReconciler) reconcile(ctx context.Context, clu
 	}
 
 	execFormatErrorObjects := []client.Object{}
-	if clusterPodPlacementConfig.Spec.Plugins != nil && clusterPodPlacementConfig.Spec.Plugins.ExecFormatErrorMonitor != nil {
-		if clusterPodPlacementConfig.Spec.Plugins.ExecFormatErrorMonitor.IsEnabled() {
-			execFormatErrorObjects, err = r.buildENoExecEventObjects(ctx)
+	if clusterPodPlacementConfig.Spec.Plugins != nil && clusterPodPlacementConfig.Spec.Plugins.ExecFormatErrorMonitor != nil && clusterPodPlacementConfig.Spec.Plugins.ExecFormatErrorMonitor.IsEnabled() {
+		execFormatErrorObjects, err = r.buildENoExecEventObjects(ctx)
+		if err != nil {
+			return err
+		}
+	} else {
+		deploymentExists, err := r.doesDeploymentExist(utils.EnoexecControllerName, ctx, log)
+		if err != nil {
+			return err
+		}
+		daemonSetExists, err := r.doesDaemonSetExist(utils.EnoexecControllerName, ctx, log)
+		if deploymentExists || daemonSetExists {
+			err := r.handleEnoexecDelete(ctx)
 			if err != nil {
 				return err
-			}
-		} else {
-			// Check if the Deployment exists
-			exists, err := r.doesDeploymentExist(utils.EnoexecControllerName, ctx, log)
-			if err != nil {
-				return err
-			}
-			if exists {
-				err := r.handleEnoexecDelete(ctx)
-				if err != nil {
-					return err
-				}
 			}
 		}
 	}
@@ -733,10 +731,29 @@ func (r *ClusterPodPlacementConfigReconciler) doesDeploymentExist(deploymentName
 
 	if err != nil {
 		if apierrors.IsNotFound(err) {
-			log.Info("Deployment not found", "name", utils.EnoexecControllerName, "namespace", utils.Namespace())
+			log.Info("Deployment not found", "name", deploymentName, "namespace", utils.Namespace())
 			return false, nil
 		}
 		log.Error(err, "Unable to fetch the deployment")
+		return false, err
+	}
+
+	return true, nil
+}
+
+func (r *ClusterPodPlacementConfigReconciler) doesDaemonSetExist(daemonSetName string, ctx context.Context, log logr.Logger) (bool, error) {
+	daemonSet := &appsv1.DaemonSet{}
+	err := r.Get(ctx, client.ObjectKey{
+		Name:      daemonSetName,
+		Namespace: utils.Namespace(),
+	}, daemonSet)
+
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			log.Info("DaemonSet not found", "name", daemonSetName, "namespace", utils.Namespace())
+			return false, nil
+		}
+		log.Error(err, "Unable to fetch the daemonSet")
 		return false, err
 	}
 
