@@ -27,7 +27,7 @@ metadata:
     categories: OpenShift Optional, Other
     console.openshift.io/disable-operand-delete: "false"
     containerImage: registry.ci.openshift.org/origin/multiarch-tuning-operator:main
-    createdAt: "2025-07-31T08:25:31Z"
+    createdAt: "2025-08-01T10:05:53Z"
     features.operators.openshift.io/cnf: "false"
     features.operators.openshift.io/cni: "false"
     features.operators.openshift.io/csi: "false"
@@ -243,6 +243,7 @@ spec:
           resources:
           - clusterpodplacementconfigs
           - enoexecevents
+          - podplacementconfigs
           verbs:
           - create
           - delete
@@ -256,6 +257,7 @@ spec:
           resources:
           - clusterpodplacementconfigs/finalizers
           - enoexecevents/finalizers
+          - podplacementconfigs/finalizers
           verbs:
           - update
         - apiGroups:
@@ -263,6 +265,7 @@ spec:
           resources:
           - clusterpodplacementconfigs/status
           - enoexecevents/status
+          - podplacementconfigs/status
           verbs:
           - get
           - patch
@@ -519,3 +522,23 @@ spec:
     targetPort: 9443
     type: ValidatingAdmissionWebhook
     webhookPath: /validate-multiarch-openshift-io-v1beta1-clusterpodplacementconfig
+  - admissionReviewVersions:
+    - v1
+    containerPort: 443
+    deploymentName: multiarch-tuning-operator-controller-manager
+    failurePolicy: Fail
+    generateName: validate-podplacementconfig.multiarch.openshift.io
+    rules:
+    - apiGroups:
+      - multiarch.openshift.io
+      apiVersions:
+      - v1beta1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - podplacementconfigs
+    sideEffects: None
+    targetPort: 9443
+    type: ValidatingAdmissionWebhook
+    webhookPath: /validate-multiarch-openshift-io-v1beta1-podplacementconfig

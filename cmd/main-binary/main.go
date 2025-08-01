@@ -67,6 +67,7 @@ import (
 	enoexeceventhandler "github.com/openshift/multiarch-tuning-operator/controllers/enoexecevent/handler"
 	"github.com/openshift/multiarch-tuning-operator/controllers/operator"
 	"github.com/openshift/multiarch-tuning-operator/controllers/podplacement"
+	"github.com/openshift/multiarch-tuning-operator/controllers/podplacementconfig"
 	"github.com/openshift/multiarch-tuning-operator/pkg/informers/clusterpodplacementconfig"
 	"github.com/openshift/multiarch-tuning-operator/pkg/utils"
 )
@@ -181,6 +182,7 @@ func main() {
 
 	if enableOperator {
 		RunOperator(mgr)
+		RunPodPlacementConfigWebHook(mgr)
 	}
 	if enableClusterPodPlacementConfigOperandControllers {
 		RunClusterPodPlacementConfigOperandControllers(mgr)
@@ -263,6 +265,13 @@ func RunClusterPodPlacementConfigOperandWebHook(mgr ctrl.Manager) {
 	handler := podplacement.NewPodSchedulingGateMutatingWebHook(mgr.GetClient(), clientset, mgr.GetScheme(),
 		mgr.GetEventRecorderFor(utils.OperatorName), pool)
 	mgr.GetWebhookServer().Register("/add-pod-scheduling-gate", &webhook.Admission{Handler: handler})
+}
+
+func RunPodPlacementConfigWebHook(mgr ctrl.Manager) {
+	config := ctrl.GetConfigOrDie()
+	clientset := kubernetes.NewForConfigOrDie(config)
+	mgr.GetWebhookServer().Register("/validate-multiarch-openshift-io-v1beta1-podplacementconfig",
+		&webhook.Admission{Handler: podplacementconfig.NewPodPlacementConfigWebhook(mgr.GetClient(), clientset, mgr.GetScheme())})
 }
 
 func RunENoExecEventControllers(mgr ctrl.Manager) {

@@ -12,7 +12,11 @@ patches:
       - op: replace
         path: /webhooks/0/clientConfig/service/name
         value: controller-manager-service
+      - op: replace
+        path: /webhooks/1/clientConfig/service/name
+        value: controller-manager-service
       - op: add
         path: /metadata/annotations
         value:
           "service.beta.openshift.io/inject-cabundle": "true"
+
