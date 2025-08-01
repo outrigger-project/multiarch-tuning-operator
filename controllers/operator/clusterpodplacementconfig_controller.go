@@ -79,6 +79,7 @@ const (
 //+kubebuilder:rbac:groups=core,resources=services,verbs=get;list;watch;update;patch;create;delete
 //+kubebuilder:rbac:groups=core,resources=services/status,verbs=get
 //+kubebuilder:rbac:groups=core,resources=events,verbs=create;patch
+//+kubebuilder:rbac:groups=apps,resources=daemonsets,verbs=get;list;watch;create;update;patch;delete
 
 //+kubebuilder:rbac:groups=core,resources=serviceaccounts,verbs=get;list;watch;update;patch;create;delete
 //+kubebuilder:rbac:groups=core,resources=serviceaccounts/status,verbs=get
@@ -248,6 +249,12 @@ func (r *ClusterPodPlacementConfigReconciler) handleDelete(ctx context.Context,
 	clusterPodPlacementConfig *multiarchv1beta1.ClusterPodPlacementConfig) error {
 	// The ClusterPodPlacementConfig is being deleted, cleanup the resources
 	log := ctrllog.FromContext(ctx).WithValues("operation", "handleDelete")
+
+	err := r.handleEnoexecDelete(ctx)
+	if err != nil {
+		return err
+	}
+
 	// The error by the updateStatus function, if any, is ignored, as the deletion should always proceed.
 	// We execute the update here because this function returns multiple times before the whole deletion process is completed.
 	// Executing it here ensures that the conditions are updated throughout the deletion process.
@@ -284,7 +291,7 @@ func (r *ClusterPodPlacementConfigReconciler) handleDelete(ctx context.Context,
 		log.Error(err, "Unable to delete resources")
 		return err
 	}
-	_, err := r.ClientSet.CoreV1().Services(utils.Namespace()).Get(ctx, utils.PodPlacementWebhookName, metav1.GetOptions{})
+	_, err = r.ClientSet.CoreV1().Services(utils.Namespace()).Get(ctx, utils.PodPlacementWebhookName, metav1.GetOptions{})
 	// We look for the webhook service to ensure that the webhook has stopped communicating with the API server.
 	// If the error is nil, the service was found. If the error is not nil and the error is not NotFound, some other error occurred.
 	// In both the cases we return an error, to requeue the request and ensure no race conditions between the verification of the
@@ -400,6 +407,69 @@ func (r *ClusterPodPlacementConfigReconciler) handleDelete(ctx context.Context,
 	return err
 }
 
+func (r *ClusterPodPlacementConfigReconciler) handleEnoexecDelete(ctx context.Context) error {
+	log := ctrllog.FromContext(ctx)
+	log.Info("Disabling ENoExecEvent Controller")
+	objsToDelete := []utils.ToDeleteRef{
+		{
+			NamespacedTypedClient: r.ClientSet.RbacV1().Roles(utils.Namespace()),
+			ObjName:               utils.EnoexecControllerName,
+		},
+		{
+			NamespacedTypedClient: r.ClientSet.RbacV1().RoleBindings(utils.Namespace()),
+			ObjName:               utils.EnoexecControllerName,
+		},
+		{
+			NamespacedTypedClient: r.ClientSet.RbacV1().ClusterRoles(),
+			ObjName:               utils.EnoexecDaemonSet,
+		},
+		{
+			NamespacedTypedClient: r.ClientSet.RbacV1().ClusterRoleBindings(),
+			ObjName:               utils.EnoexecDaemonSet,
+		},
+		{
+			NamespacedTypedClient: r.ClientSet.RbacV1().Roles(utils.Namespace()),
+			ObjName:               utils.EnoexecDaemonSet,
+		},
+		{
+			NamespacedTypedClient: r.ClientSet.RbacV1().RoleBindings(utils.Namespace()),
+			ObjName:               utils.EnoexecDaemonSet,
+		},
+		{
+			NamespacedTypedClient: r.ClientSet.RbacV1().ClusterRoles(),
+			ObjName:               utils.EnoexecControllerName,
+		},
+		{
+			NamespacedTypedClient: r.ClientSet.RbacV1().ClusterRoleBindings(),
+			ObjName:               utils.EnoexecControllerName,
+		},
+		{
+			NamespacedTypedClient: r.ClientSet.CoreV1().ServiceAccounts(utils.Namespace()),
+			ObjName:               utils.EnoexecControllerName,
+		},
+		{
+			NamespacedTypedClient: r.ClientSet.CoreV1().ServiceAccounts(utils.Namespace()),
+			ObjName:               utils.EnoexecDaemonSet,
+		},
+		{
+			NamespacedTypedClient: r.ClientSet.AppsV1().Deployments(utils.Namespace()),
+			ObjName:               utils.EnoexecControllerName,
+		},
+		{
+			NamespacedTypedClient: r.ClientSet.AppsV1().DaemonSets(utils.Namespace()),
+			ObjName:               utils.EnoexecDaemonSet,
+		},
+	}
+
+	log.Info("Deleting the ENoExecEvent resources")
+	// NOTE: err aggregates non-nil errors, excluding NotFound errors
+	if err := utils.DeleteResources(ctx, objsToDelete); err != nil {
+		log.Error(err, "Unable to delete resources")
+		return err
+	}
+	return nil
+}
+
 // reconcile reconciles the ClusterPodPlacementConfig operand's resources.
 func (r *ClusterPodPlacementConfigReconciler) reconcile(ctx context.Context, clusterPodPlacementConfig *multiarchv1beta1.ClusterPodPlacementConfig) error {
 	log := ctrllog.FromContext(ctx)
@@ -411,53 +481,26 @@ func (r *ClusterPodPlacementConfigReconciler) reconcile(ctx context.Context, clu
 		log.Error(err, "Unable to ensure namespace labels")
 		return errorutils.NewAggregate([]error{err, r.updateStatus(ctx, clusterPodPlacementConfig)})
 	}
-	requiredSCCHostmountAnyUID, seLinuxOptionsType, err := r.getCorrectHostmountAnyUIDSCC(ctx)
+	clusterPodPlacementConfigObjects, err := r.buildPodPlacementConfigObjects(clusterPodPlacementConfig, ctx)
 	if err != nil {
-		log.Error(err, "Unable to set correct hostmount SCC", "requiredSCCHostmoundAnyUID", requiredSCCHostmountAnyUID)
-		return errorutils.NewAggregate([]error{err, r.updateStatus(ctx, clusterPodPlacementConfig)})
+		return err
 	}
-	objects := []client.Object{
-		// The finalizer will not affect the reconciliation of ReplicaSets and Pods
-		// when updates to the ClusterPodPlacementConfig are made.
-		buildService(utils.PodPlacementControllerName),
-		buildService(utils.PodPlacementWebhookName),
-		buildClusterRoleController(), buildClusterRoleWebhook(), buildRoleController(),
-		buildServiceAccount(utils.PodPlacementWebhookName), buildServiceAccount(utils.PodPlacementControllerName),
-		buildClusterRoleBinding(utils.PodPlacementControllerName, rbacv1.RoleRef{
-			APIGroup: rbacv1.GroupName,
-			Kind:     clusterRoleKind,
-			Name:     utils.PodPlacementControllerName,
-		}, []rbacv1.Subject{
-			{
-				Kind:      serviceAccountKind,
-				Name:      utils.PodPlacementControllerName,
-				Namespace: utils.Namespace(),
-			},
-		}),
-		buildRoleBinding(utils.PodPlacementControllerName, rbacv1.RoleRef{
-			APIGroup: rbacv1.GroupName,
-			Kind:     roleKind,
-			Name:     utils.PodPlacementControllerName,
-		}, []rbacv1.Subject{
-			{
-				Kind: serviceAccountKind,
-				Name: utils.PodPlacementControllerName,
-			},
-		}),
-		buildClusterRoleBinding(utils.PodPlacementWebhookName, rbacv1.RoleRef{
-			APIGroup: rbacv1.GroupName,
-			Kind:     clusterRoleKind,
-			Name:     utils.PodPlacementWebhookName,
-		}, []rbacv1.Subject{
-			{
-				Kind:      serviceAccountKind,
-				Name:      utils.PodPlacementWebhookName,
-				Namespace: utils.Namespace(),
-			},
-		}),
-		buildControllerDeployment(clusterPodPlacementConfig, requiredSCCHostmountAnyUID, seLinuxOptionsType),
-		buildWebhookDeployment(clusterPodPlacementConfig),
+
+	execFormatErrorObjects := []client.Object{}
+	if clusterPodPlacementConfig.Spec.Plugins != nil && clusterPodPlacementConfig.Spec.Plugins.ExecFormatErrorMonitor != nil && clusterPodPlacementConfig.Spec.Plugins.ExecFormatErrorMonitor.IsEnabled() {
+		execFormatErrorObjects, err = r.buildENoExecEventObjects(ctx, clusterPodPlacementConfig)
+		if err != nil {
+			return err
+		}
+	} else {
+		err := r.handleEnoexecDelete(ctx)
+		if err != nil {
+			return err
+		}
 	}
+
+	objects := append(clusterPodPlacementConfigObjects, execFormatErrorObjects...)
+
 	// We ensure the MutatingWebHookConfiguration is created and present only if the operand is ready to serve the admission request and add/remove the scheduling gate.
 	shouldEnsureMWC := clusterPodPlacementConfig.Status.CanDeployMutatingWebhook()
 	shouldDeleteMWC := !shouldEnsureMWC && !clusterPodPlacementConfig.Status.IsMutatingWebhookConfigurationNotAvailable()
@@ -527,6 +570,142 @@ func (r *ClusterPodPlacementConfigReconciler) updateStatus(ctx context.Context, 
 	return err
 }
 
+func (r *ClusterPodPlacementConfigReconciler) buildPodPlacementConfigObjects(clusterPodPlacementConfig *multiarchv1beta1.ClusterPodPlacementConfig, ctx context.Context) ([]client.Object, error) {
+	log := ctrllog.FromContext(ctx)
+
+	requiredSCCHostmountAnyUID, seLinuxOptionsType, err := r.getCorrectHostmountAnyUIDSCC(ctx)
+	if err != nil {
+		log.Error(err, "Unable to set correct hostmount SCC", "requiredSCCHostmoundAnyUID", requiredSCCHostmountAnyUID)
+		return []client.Object{}, errorutils.NewAggregate([]error{err, r.updateStatus(ctx, clusterPodPlacementConfig)})
+	}
+	objects := []client.Object{
+		// The finalizer will not affect the reconciliation of ReplicaSets and Pods
+		// when updates to the ClusterPodPlacementConfig are made.
+		buildService(utils.PodPlacementControllerName),
+		buildService(utils.PodPlacementWebhookName),
+		buildClusterRoleController(), buildClusterRoleWebhook(), buildRoleController(),
+		buildServiceAccount(utils.PodPlacementWebhookName), buildServiceAccount(utils.PodPlacementControllerName),
+		buildClusterRoleBinding(utils.PodPlacementControllerName, rbacv1.RoleRef{
+			APIGroup: rbacv1.GroupName,
+			Kind:     clusterRoleKind,
+			Name:     utils.PodPlacementControllerName,
+		}, []rbacv1.Subject{
+			{
+				Kind:      serviceAccountKind,
+				Name:      utils.PodPlacementControllerName,
+				Namespace: utils.Namespace(),
+			},
+		}),
+		buildRoleBinding(utils.PodPlacementControllerName, rbacv1.RoleRef{
+			APIGroup: rbacv1.GroupName,
+			Kind:     roleKind,
+			Name:     utils.PodPlacementControllerName,
+		}, []rbacv1.Subject{
+			{
+				Kind: serviceAccountKind,
+				Name: utils.PodPlacementControllerName,
+			},
+		}),
+		buildClusterRoleBinding(utils.PodPlacementWebhookName, rbacv1.RoleRef{
+			APIGroup: rbacv1.GroupName,
+			Kind:     clusterRoleKind,
+			Name:     utils.PodPlacementWebhookName,
+		}, []rbacv1.Subject{
+			{
+				Kind:      serviceAccountKind,
+				Name:      utils.PodPlacementWebhookName,
+				Namespace: utils.Namespace(),
+			},
+		}),
+		buildControllerDeployment(clusterPodPlacementConfig, requiredSCCHostmountAnyUID, seLinuxOptionsType),
+		buildWebhookDeployment(clusterPodPlacementConfig),
+	}
+	return objects, nil
+}
+
+// buildENoExecEventObjects if the ExecFormatErrorMonitor plugin is enabled create the deployment to start the controller
+// if it does not already exist
+func (r *ClusterPodPlacementConfigReconciler) buildENoExecEventObjects(ctx context.Context, clusterPodPlacementConfig *multiarchv1beta1.ClusterPodPlacementConfig) ([]client.Object, error) {
+	log := ctrllog.FromContext(ctx)
+	logVerbosityLevel := clusterPodPlacementConfig.Spec.LogVerbosity.ToZapLevelInt()
+
+	log.Info("Starting ENoExecEvent Controller")
+	objects := []client.Object{
+		buildServiceAccount(utils.EnoexecControllerName),
+		buildServiceAccount(utils.EnoexecDaemonSet),
+
+		// Then Roles and ClusterRoles
+		buildClusterRoleENoExecEventsController(),
+		buildRoleENoExecEventController(),
+		buildClusterRoleENoExecEventsDaemonSet(),
+		buildRoleENoExecEventDaemonSet(),
+
+		buildClusterRoleBinding(
+			utils.EnoexecControllerName,
+			rbacv1.RoleRef{
+				APIGroup: rbacv1.GroupName,
+				Kind:     clusterRoleKind,
+				Name:     utils.EnoexecControllerName,
+			},
+			[]rbacv1.Subject{
+				{
+					Kind:      serviceAccountKind,
+					Name:      utils.EnoexecControllerName,
+					Namespace: utils.Namespace(),
+				},
+			},
+		),
+		buildRoleBinding(
+			utils.EnoexecControllerName,
+			rbacv1.RoleRef{
+				APIGroup: rbacv1.GroupName,
+				Kind:     roleKind,
+				Name:     utils.EnoexecControllerName,
+			},
+			[]rbacv1.Subject{
+				{
+					Kind:      serviceAccountKind,
+					Name:      utils.EnoexecControllerName,
+					Namespace: utils.Namespace(),
+				},
+			},
+		),
+		buildClusterRoleBinding(
+			utils.EnoexecDaemonSet,
+			rbacv1.RoleRef{
+				APIGroup: rbacv1.GroupName,
+				Kind:     clusterRoleKind,
+				Name:     utils.EnoexecDaemonSet,
+			},
+			[]rbacv1.Subject{
+				{
+					Kind:      serviceAccountKind,
+					Name:      utils.EnoexecDaemonSet,
+					Namespace: utils.Namespace(),
+				},
+			},
+		),
+		buildRoleBinding(
+			utils.EnoexecDaemonSet,
+			rbacv1.RoleRef{
+				APIGroup: rbacv1.GroupName,
+				Kind:     roleKind,
+				Name:     utils.EnoexecDaemonSet,
+			},
+			[]rbacv1.Subject{
+				{
+					Kind:      serviceAccountKind,
+					Name:      utils.EnoexecDaemonSet,
+					Namespace: utils.Namespace(),
+				},
+			},
+		),
+		buildDeploymentENoExecEventHandler(logVerbosityLevel),
+		buildDaemonSetENoExecEvent(utils.EnoexecDaemonSet, utils.EnoexecDaemonSet, logVerbosityLevel),
+	}
+	return objects, nil
+}
+
 func isDeploymentAvailable(deployment *appsv1.Deployment) bool {
 	if deployment == nil {
 		return false
@@ -555,6 +734,7 @@ func (r *ClusterPodPlacementConfigReconciler) SetupWithManager(mgr ctrl.Manager)
 	c := ctrl.NewControllerManagedBy(mgr).
 		For(&multiarchv1beta1.ClusterPodPlacementConfig{}).
 		Owns(&appsv1.Deployment{}).
+		Owns(&appsv1.DaemonSet{}).
 		Owns(&corev1.Service{}).
 		Owns(&rbacv1.ClusterRole{}).
 		Owns(&rbacv1.ClusterRoleBinding{}).

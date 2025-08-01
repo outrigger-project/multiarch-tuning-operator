@@ -49,6 +49,22 @@ func (ps *PodSpecBuilder) WithContainers(containers ...*v1.Container) *PodSpecBu
 	return ps
 }
 
+func (ps *PodSpecBuilder) WithCommand(command ...string) *PodSpecBuilder {
+	if len(ps.podspec.Containers) == 0 {
+		panic("cannot set command on a podspec with no containers; call WithContainersImages first")
+	}
+	ps.podspec.Containers[0].Command = command
+	return ps
+}
+
+func (ps *PodSpecBuilder) WithArgs(args ...string) *PodSpecBuilder {
+	if len(ps.podspec.Containers) == 0 {
+		panic("cannot set args on a podspec with no containers; call WithContainersImages first")
+	}
+	ps.podspec.Containers[0].Args = args
+	return ps
+}
+
 func (ps *PodSpecBuilder) WithRestartPolicy(restartPolicy v1.RestartPolicy) *PodSpecBuilder {
 	ps.podspec.RestartPolicy = restartPolicy
 	return ps
