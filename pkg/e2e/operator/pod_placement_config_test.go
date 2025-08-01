@@ -1,6 +1,7 @@
 package operator_test
 
 import (
+	"fmt"
 	"os"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -557,7 +558,28 @@ var _ = Describe("The Multiarch Tuning Operator", Serial, func() {
 			Eventually(framework.ValidateDeletion(client, ctx, framework.ENoExecPlugin)).Should(Succeed())
 		})
 		Context("When the eNoExecEvent plugin is active", func() {
-			It("should create an ENoExecEvent CR when a pod triggers an ENOEXEC error", func() {
+			var (
+				availableArchitectures map[string]bool
+			)
+			// Before running the tests in this table, get all available node architectures.
+			BeforeEach(func() {
+				By("Getting all available node architectures in the cluster")
+				nodeList := &corev1.NodeList{}
+				err := client.List(ctx, nodeList)
+				Expect(err).NotTo(HaveOccurred())
+
+				availableArchitectures = make(map[string]bool)
+				for _, node := range nodeList.Items {
+					if arch, ok := node.Labels[utils.ArchLabel]; ok {
+						availableArchitectures[arch] = true
+					}
+				}
+			})
+			DescribeTable("it should create an ENoExecEvent CR when a pod triggers an ENOEXEC error on", func(arch string) {
+				// Skip the test if the required architecture is not available on the cluster.
+				if !availableArchitectures[arch] {
+					Skip(fmt.Sprintf("Skipping test because no node with architecture %s is available", arch))
+				}
 				var err error
 				By("Creating a ClusterPodPlacementConfig with execFormatErrorMonitor plugin enabled")
 				err = client.Create(ctx,
@@ -615,9 +637,20 @@ var _ = Describe("The Multiarch Tuning Operator", Serial, func() {
 						}
 					}
 					g.Expect(foundEvent).To(BeTrue(), "an ENoExecEvent for the pod was not found")
-
 				}).Should(Succeed(), "the pod was not found in the namespace")
-			})
+				Eventually(func(g Gomega) {
+					By("Checking for the existence of any ENoExecEvent CRs")
+					enoexecEventList := &v1beta1.ENoExecEventList{}
+					err = client.List(ctx, enoexecEventList)
+					Expect(err).NotTo(HaveOccurred(), "failed to list ENoExecEvent resources")
+					Expect(enoexecEventList.Items).To(BeEmpty(), "ENoExecEvent resources were found when they should be deleted")
+				}).Should(Succeed(), "the pod was not found in the namespace")
+			},
+				Entry("amd64", utils.ArchitectureAmd64),
+				Entry("arm64", utils.ArchitectureArm64),
+				Entry("s390x", utils.ArchitectureS390x),
+				Entry("ppc64le", utils.ArchitecturePpc64le),
+			)
 		})
 	})
 })
