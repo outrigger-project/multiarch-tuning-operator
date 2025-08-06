@@ -116,7 +116,7 @@ func (r *PodReconciler) processPod(ctx context.Context, pod *Pod) {
 		return
 	}
 
-	if cppc != nil && cppc.Spec.Plugins != nil && cppc.Spec.Plugins.NodeAffinityScoring != nil && cppc.Spec.Plugins.NodeAffinityScoring.IsEnabled() {
+	if cppc != nil && cppc.Spec.Plugins.IsNodeAffinityScoringEnabled() {
 		pod.SetPreferredArchNodeAffinity(cppc)
 	}
 

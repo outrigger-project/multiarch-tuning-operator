@@ -80,7 +80,7 @@ func (a *PodSchedulingGateMutatingWebHook) Handle(ctx context.Context, req admis
 	log := ctrllog.FromContext(ctx).WithValues("namespace", pod.Namespace, "name", pod.Name)
 
 	cppc := clusterpodplacementconfig.GetClusterPodPlacementConfig()
-	if cppc != nil && cppc.Spec.Plugins != nil && cppc.Spec.Plugins.NodeAffinityScoring != nil && cppc.Spec.Plugins.NodeAffinityScoring.IsEnabled() {
+	if cppc != nil && cppc.Spec.Plugins.IsNodeAffinityScoringEnabled() {
 		pod.EnsureLabel(utils.PreferredNodeAffinityLabel, utils.LabelValueNotSet)
 	}
 	pod.EnsureLabel(utils.NodeAffinityLabel, utils.LabelValueNotSet)

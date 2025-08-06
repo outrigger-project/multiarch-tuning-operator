@@ -339,8 +339,8 @@ var _ = Describe("The Multiarch Tuning Operator", Serial, func() {
 			Eventually(framework.ValidateCreation(client, ctx)).Should(Succeed())
 			By("Validate the plugins stanza is set")
 			Expect(ppc.Spec.Plugins).NotTo(BeNil())
-			Expect(ppc.Spec.Plugins.NodeAffinityScoring.IsEnabled()).To(BeTrue())
-			Expect(ppc.Spec.Plugins.ExecFormatErrorMonitor.IsEnabled()).To(BeTrue())
+			Expect(ppc.Spec.Plugins.IsNodeAffinityScoringEnabled()).To(BeTrue())
+			Expect(ppc.Spec.Plugins.IsExecFormatErrorMonitorEnabled()).To(BeTrue())
 			// Get v1alpha1 ClusterPodPlacementConfig
 			By("Get the v1alpha1 version of the ClusterPodPlacementConfig")
 			v1alpha1obj := &v1alpha1.ClusterPodPlacementConfig{}

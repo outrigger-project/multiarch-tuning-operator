@@ -32,6 +32,20 @@ type Plugins struct {
 	ExecFormatErrorMonitor *ExecFormatErrorMonitor `json:"execFormatErrorMonitor,omitempty"`
 }
 
+// IsExecFormatErrorMonitorEnabled is a helper function that safely checks if the
+// ExecFormatErrorMonitor plugin is configured and enabled.
+func (p *Plugins) IsExecFormatErrorMonitorEnabled() bool {
+	// This single function contains all the necessary nil checks.
+	return p != nil && p.ExecFormatErrorMonitor != nil && p.ExecFormatErrorMonitor.IsEnabled()
+}
+
+// IsNodeAffinityScoringEnabled is a helper function that safely checks if the
+// NodeAffinityScoring plugin is configured and enabled.
+func (p *Plugins) IsNodeAffinityScoringEnabled() bool {
+	// This single function contains all the necessary nil checks.
+	return p != nil && p.NodeAffinityScoring != nil && p.NodeAffinityScoring.IsEnabled()
+}
+
 // IBasePlugin defines a basic interface for plugins.
 // +k8s:deepcopy-gen=false
 type IBasePlugin interface {
