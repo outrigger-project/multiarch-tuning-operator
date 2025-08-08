@@ -131,6 +131,18 @@ func ValidateCreation(cl client.Client, ctx context.Context, pluginObjectsSet ..
 	}
 }
 
+func ValidateENoExecEventsObjectsExist(cl client.Client, ctx context.Context) func(gomega.Gomega) {
+	return func(g gomega.Gomega) {
+		ginkgo.By("Verify all objects exist")
+		for _, obj := range getENoExecEventsObjects() {
+			newObj := obj.DeepCopyObject().(client.Object)
+			err := cl.Get(ctx, client.ObjectKeyFromObject(obj), newObj)
+			g.Expect(err).NotTo(gomega.HaveOccurred(), "the object should be created", err)
+			g.Expect(newObj).NotTo(gomega.BeNil(), "the object should not be nil")
+		}
+	}
+}
+
 // getObjectsFor returns the list of objects to be validated based on the provided mode.
 func getObjectsFor(pluginObjectsSet ...PluginObjectsSet) []client.Object {
 	// If the input is empty, default to the MainPlugin.
