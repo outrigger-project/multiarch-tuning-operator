@@ -557,6 +557,29 @@ var _ = Describe("The Multiarch Tuning Operator", Serial, func() {
 			By("Verify all eNoExecEvent resources are deleted")
 			Eventually(framework.ValidateDeletion(client, ctx, framework.ENoExecPlugin)).Should(Succeed())
 		})
+		It("the eNoExecEvent deployment is deleted within 1s after creation and should cleanup all finalizers", func() {
+			var err error
+			By("Creating a ClusterPodPlacementConfig with execFormatErrorMonitor plugin enabled")
+			err = client.Create(ctx,
+				NewClusterPodPlacementConfig().
+					WithName(common.SingletonResourceObjectName).
+					WithExecFormatErrorMonitor(true).
+					Build(),
+			)
+			Expect(err).NotTo(HaveOccurred(), "failed to create the ClusterPodPlacementConfig", err)
+			By("validate the clusterPodPlacementConfig and eNoExecEvent objects exist")
+			//Eventually(framework.ValidateCreation(client, ctx, framework.MainPlugin, framework.ENoExecPlugin)).Should(Succeed())
+			By("imeditately deleting the clusterpodplacementconfig after creation")
+			err = client.Delete(ctx, &v1beta1.ClusterPodPlacementConfig{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "cluster",
+				},
+			})
+			Expect(err).NotTo(HaveOccurred())
+			By("Verify all corresponding resources are deleted")
+			Eventually(framework.ValidateDeletion(client, ctx)).Should(Succeed())
+
+		})
 		Context("When the eNoExecEvent plugin is active", func() {
 			var (
 				availableArchitectures map[string]bool

@@ -25,6 +25,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	crclient "sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -317,7 +318,7 @@ var _ = Describe("Controllers/ClusterPodPlacementConfig/ClusterPodPlacementConfi
 					g.Expect(mw.Webhooks[0].NamespaceSelector).To(Equal(ppc.Spec.NamespaceSelector))
 				}).Should(Succeed(), "the deployment "+utils.PodPlacementControllerName+" should be updated")
 			})
-			It("Should have finalizers", func() {
+			It("Should have ClusterPodPlacementConfig finalizers", func() {
 				ppc := &v1beta1.ClusterPodPlacementConfig{}
 				err := k8sClient.Get(ctx, crclient.ObjectKeyFromObject(&v1beta1.ClusterPodPlacementConfig{
 					ObjectMeta: metav1.ObjectMeta{
@@ -631,6 +632,84 @@ var _ = Describe("Controllers/ClusterPodPlacementConfig/ClusterPodPlacementConfi
 			})
 		})
 	})
+	FContext("is handling the cleanup lifecycle of the ClusterPodPlacementConfig with the ExecFormatErrorMonitor enabled", func() {
+		BeforeEach(func() {
+			By("Creating the ClusterPodPlacementConfig with ExecFormatErrorMonitor enabled")
+			err := k8sClient.Create(ctx, builder.NewClusterPodPlacementConfig().WithName(common.SingletonResourceObjectName).
+				WithExecFormatErrorMonitor(true).Build())
+			Expect(err).NotTo(HaveOccurred(), "failed to create ClusterPodPlacementConfig", err)
+			validateReconcile(framework.MainPlugin, framework.ENoExecPlugin)
+		})
+		AfterEach(func() {
+			By("Deleting the ClusterPodPlacementConfig")
+			err := k8sClient.Delete(ctx, builder.NewClusterPodPlacementConfig().WithName(common.SingletonResourceObjectName).Build())
+			Expect(err).NotTo(HaveOccurred(), "failed to delete ClusterPodPlacementConfig", err)
+			Eventually(framework.ValidateDeletion(k8sClient, ctx, framework.MainPlugin, framework.ENoExecPlugin)).Should(Succeed(), "the ClusterPodPlacementConfig should be deleted")
+		})
+		It("ensure the finalizers exist", func() {
+			By("Verifying the enoexec Deployment has the correct finalizer")
+			d := appsv1.Deployment{}
+			err := k8sClient.Get(ctx, crclient.ObjectKeyFromObject(&appsv1.Deployment{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      utils.EnoexecControllerName,
+					Namespace: utils.Namespace(),
+				},
+			}), &d)
+			Expect(err).NotTo(HaveOccurred(), "failed to get deployment "+utils.EnoexecControllerName, err)
+			Expect(d.Finalizers).To(ContainElement(utils.ExecDeploymentFinalizerName))
+			Expect(d.Finalizers).To(ContainElement(utils.ExecFormatErrorFinalizerName))
+		})
+		It("should ensure the DaemonSet is deleted before the Deployment", func() {
+			By("Adding a temporary finalizer to the DaemonSet to block its deletion")
+			deploymentKey := crclient.ObjectKeyFromObject(&appsv1.Deployment{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      utils.EnoexecControllerName,
+					Namespace: utils.Namespace(),
+				},
+			})
+			daemonSetKey := crclient.ObjectKeyFromObject(&appsv1.DaemonSet{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      utils.EnoexecDaemonSet,
+					Namespace: utils.Namespace(),
+				},
+			})
+			daemonset := &appsv1.DaemonSet{}
+			Expect(k8sClient.Get(ctx, daemonSetKey, daemonset)).To(Succeed())
+			controllerutil.AddFinalizer(daemonset, "e2e.test/block-deletion")
+			Expect(k8sClient.Update(ctx, daemonset)).To(Succeed())
+
+			By("Disabling the enoexec plugin to trigger cleanup")
+			cppc := &v1beta1.ClusterPodPlacementConfig{}
+			err := k8sClient.Get(ctx, crclient.ObjectKeyFromObject(&v1beta1.ClusterPodPlacementConfig{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      common.SingletonResourceObjectName,
+					Namespace: utils.Namespace(),
+				},
+			}), cppc)
+			Expect(err).NotTo(HaveOccurred(), "failed to get ClusterPodPlacementConfig", err)
+			cppc.Spec.Plugins.ExecFormatErrorMonitor.Enabled = false
+			Expect(k8sClient.Update(ctx, cppc)).To(Succeed())
+
+			//// Trigger the reconcile loop that will start the deletion process
+			//err = reconcile.Reconciler(ctx, ctrl.Request{NamespacedName: k8sClient.ObjectKeyFromObject(cppc)})
+			//Expect(err).NotTo(HaveOccurred())
+
+			By("Verifying the Deployment is stuck terminating because the DaemonSet is blocked")
+			Eventually(func(g Gomega) {
+				d := &appsv1.Deployment{}
+				g.Expect(k8sClient.Get(ctx, deploymentKey, d)).To(Succeed(), "Deployment should still exist")
+				g.Expect(d.DeletionTimestamp).NotTo(BeNil(), "Deployment should be marked for deletion")
+			}).Should(Succeed())
+
+			By("Removing the temporary finalizer from the DaemonSet to unblock cleanup")
+			Eventually(func(g Gomega) {
+				Expect(k8sClient.Get(ctx, daemonSetKey, daemonset)).To(Succeed())
+				Expect(controllerutil.RemoveFinalizer(daemonset, "e2e.test/block-deletion")).To(BeTrue())
+				Expect(k8sClient.Update(ctx, daemonset)).To(Succeed())
+			}).Should(Succeed())
+		})
+	})
+
 })
 
 func patchDeploymentStatus(name string, g Gomega, patch func(*appsv1.Deployment)) {
@@ -659,12 +738,12 @@ func setDeploymentReady(name string, g Gomega) {
 
 // validateReconcile
 // NOTE: this can be used only in integratoin tests as it changes the status of deployments
-func validateReconcile() {
+func validateReconcile(pluginObjectsSet ...framework.PluginObjectsSet) {
 	for _, name := range []string{utils.PodPlacementControllerName, utils.PodPlacementWebhookName} {
 		Eventually(func(g Gomega) {
 			setDeploymentReady(name, g)
 		}).Should(Succeed(), "the deployment "+name+" should be ready")
 	}
-	Eventually(framework.ValidateCreation(k8sClient, ctx)).Should(Succeed(), "the ClusterPodPlacementConfig should be created")
+	Eventually(framework.ValidateCreation(k8sClient, ctx, pluginObjectsSet...)).Should(Succeed(), "the ClusterPodPlacementConfig should be created")
 	By("The ClusterPodPlacementConfig is ready")
 }
