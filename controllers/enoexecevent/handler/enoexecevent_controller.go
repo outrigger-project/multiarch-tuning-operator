@@ -96,7 +96,8 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		logger.Info("Deleted ENoExecEvent resource after successful reconciliation", "name", enoExecEvent.Name)
 		return ret, nil
 	}
-	return ctrl.Result{}, nil
+	logger.Error(err, "Failed to reconcile ENoExecEvent", "name", enoExecEvent.Name)
+	return ctrl.Result{}, err
 }
 
 func (r *Reconciler) reconcile(ctx context.Context, enoExecEvent *multiarchv1beta1.ENoExecEvent) (ctrl.Result, error) {
