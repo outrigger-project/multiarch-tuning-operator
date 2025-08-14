@@ -29,6 +29,7 @@ import (
 	ctrllog "sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/openshift/multiarch-tuning-operator/api/common"
+	"github.com/openshift/multiarch-tuning-operator/api/common/plugins"
 	"github.com/openshift/multiarch-tuning-operator/api/v1beta1"
 	"github.com/openshift/multiarch-tuning-operator/internal/controller/podplacement/metrics"
 	"github.com/openshift/multiarch-tuning-operator/pkg/image"
@@ -166,12 +167,8 @@ func (pod *Pod) setRequiredArchNodeAffinity(requirement corev1.NodeSelectorRequi
 }
 
 // SetPreferredArchNodeAffinity sets the node affinity for the pod to the preferences given in the ClusterPodPlacementConfig.
-func (pod *Pod) SetPreferredArchNodeAffinity(cppc *v1beta1.ClusterPodPlacementConfig) {
-	// Prevent overriding of user-provided kubernetes.io/arch preferred affinities or overwriting previously set preferred affinity
-	if pod.isPreferredAffinityConfiguredForArchitecture() {
-		return
-	}
-
+func (pod *Pod) SetPreferredArchNodeAffinity(nodeAffinity *plugins.NodeAffinityScoring) {
+	log := ctrllog.FromContext(pod.Ctx())
 	if pod.Spec.Affinity == nil {
 		pod.Spec.Affinity = &corev1.Affinity{}
 	}
@@ -184,27 +181,57 @@ func (pod *Pod) SetPreferredArchNodeAffinity(cppc *v1beta1.ClusterPodPlacementCo
 		pod.Spec.Affinity.NodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution = []corev1.PreferredSchedulingTerm{}
 	}
 
-	for _, nodeAffinityScoringPlatformTerm := range cppc.Spec.Plugins.NodeAffinityScoring.Platforms {
-		preferredSchedulingTerm := corev1.PreferredSchedulingTerm{
-			Weight: nodeAffinityScoringPlatformTerm.Weight,
-			Preference: corev1.NodeSelectorTerm{
-				MatchExpressions: []corev1.NodeSelectorRequirement{
-					{
-						Key:      utils.ArchLabel,
-						Operator: corev1.NodeSelectorOpIn,
-						Values:   []string{nodeAffinityScoringPlatformTerm.Architecture},
+	seenArchitectures := pod.getExistingPreferredArchitectures()
+	var preferredSchedulingTerms []corev1.PreferredSchedulingTerm
+	for _, nodeAffinityScoringPlatformTerm := range nodeAffinity.Platforms {
+		if !seenArchitectures[nodeAffinityScoringPlatformTerm.Architecture] {
+			preferredSchedulingTerm := corev1.PreferredSchedulingTerm{
+				Weight: nodeAffinityScoringPlatformTerm.Weight,
+				Preference: corev1.NodeSelectorTerm{
+					MatchExpressions: []corev1.NodeSelectorRequirement{
+						{
+							Key:      utils.ArchLabel,
+							Operator: corev1.NodeSelectorOpIn,
+							Values:   []string{nodeAffinityScoringPlatformTerm.Architecture},
+						},
 					},
 				},
-			},
+			}
+			preferredSchedulingTerms = append(preferredSchedulingTerms, preferredSchedulingTerm)
+			seenArchitectures[nodeAffinityScoringPlatformTerm.Architecture] = true
+		} else {
+			log.Info("Preferred affinity for pod is already set", "Architecture", nodeAffinityScoringPlatformTerm.Architecture, "Weight", nodeAffinityScoringPlatformTerm.Weight, "Pod.Name", pod.Name, "Pod.Namespace", pod.Namespace)
 		}
-		pod.Spec.Affinity.NodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution = append(
-			pod.Spec.Affinity.NodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution, preferredSchedulingTerm)
 	}
 
 	// if the nodeSelectorTerms were patched at least once, we set the nodeAffinity label to the set value, to keep
 	// track of the fact that the nodeAffinity was patched by the operator.
-	pod.EnsureLabel(utils.PreferredNodeAffinityLabel, utils.NodeAffinityLabelValueSet)
-	pod.PublishEvent(corev1.EventTypeNormal, ArchitectureAwareNodeAffinitySet, ArchitecturePreferredPredicateSetupMsg)
+	if preferredSchedulingTerms != nil {
+		pod.Spec.Affinity.NodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution = append(
+			pod.Spec.Affinity.NodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution, preferredSchedulingTerms...)
+		pod.EnsureLabel(utils.PreferredNodeAffinityLabel, utils.NodeAffinityLabelValueSet)
+		pod.PublishEvent(corev1.EventTypeNormal, ArchitectureAwareNodeAffinitySet, ArchitecturePreferredPredicateSetupMsg)
+	}
+}
+
+// getExistingPreferredArchitectures finds all
+// architectures that already have a preferred node affinity configured on the pod.
+func (pod *Pod) getExistingPreferredArchitectures() map[string]bool {
+	seen := make(map[string]bool)
+	if pod.Spec.Affinity == nil || pod.Spec.Affinity.NodeAffinity == nil {
+		return seen
+	}
+
+	for _, term := range pod.Spec.Affinity.NodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution {
+		for _, expr := range term.Preference.MatchExpressions {
+			if expr.Key == utils.ArchLabel {
+				for _, value := range expr.Values {
+					seen[value] = true
+				}
+			}
+		}
+	}
+	return seen
 }
 
 func (pod *Pod) getArchitecturePredicate(pullSecretDataList [][]byte) (corev1.NodeSelectorRequirement, error) {
