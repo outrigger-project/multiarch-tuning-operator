@@ -20,10 +20,12 @@ import (
 	"context"
 	"fmt"
 	runtime2 "runtime"
+	"sort"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/record"
@@ -33,6 +35,7 @@ import (
 	ctrllog "sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/openshift/multiarch-tuning-operator/api/common"
+	multiarchv1beta1 "github.com/openshift/multiarch-tuning-operator/api/v1beta1"
 	"github.com/openshift/multiarch-tuning-operator/internal/controller/podplacement/metrics"
 	"github.com/openshift/multiarch-tuning-operator/pkg/informers/clusterpodplacementconfig"
 	"github.com/openshift/multiarch-tuning-operator/pkg/utils"
@@ -117,8 +120,10 @@ func (r *PodReconciler) processPod(ctx context.Context, pod *Pod) {
 		return
 	}
 
+	r.applyPodPlacementConfigs(ctx, pod)
+
 	if cppc != nil && cppc.PluginsEnabled(common.NodeAffinityScoringPluginName) {
-		pod.SetPreferredArchNodeAffinity(cppc)
+		pod.SetPreferredArchNodeAffinity(cppc.Spec.Plugins.NodeAffinityScoring)
 	}
 
 	// Prepare the requirement for the node affinity.
@@ -147,6 +152,45 @@ func (r *PodReconciler) processPod(ctx context.Context, pod *Pod) {
 
 		log.V(1).Info("Removing the scheduling gate from pod.")
 		pod.RemoveSchedulingGate()
+	}
+}
+
+func (r *PodReconciler) applyPodPlacementConfigs(ctx context.Context, pod *Pod) {
+	log := ctrllog.FromContext(ctx).WithName("PodPlacementConfig")
+	// List existing PodPlacementConfigs in the same namespace
+	ppcList := &multiarchv1beta1.PodPlacementConfigList{}
+	if err := r.List(ctx, ppcList, client.InNamespace(pod.Namespace)); err != nil {
+		pod.handleError(err, "failed to list existing PodPlacementConfigs in namespace")
+		return
+	}
+
+	// Sort the configurations by descending priority
+	sort.Slice(ppcList.Items, func(i, j int) bool {
+		return ppcList.Items[i].Spec.Priority > ppcList.Items[j].Spec.Priority
+	})
+
+	// For each namespace-scoped configuration, check selector and apply
+	for _, ppc := range ppcList.Items {
+		log.V(1).Info("Processing PodPlacementConfig", "namespace", ppc.Namespace, "name", ppc.Name)
+
+		// check if plugin is enabled
+		if !ppc.PluginsEnabled(common.NodeAffinityScoringPluginName) {
+			log.V(1).Info("Skipping PodPlacementConfig NodeAffinityScoring disabled", "namespace", ppc.Namespace, "name", ppc.Name)
+			continue
+		}
+
+		selector, err := metav1.LabelSelectorAsSelector(ppc.Spec.LabelSelector)
+		if err != nil {
+			pod.handleError(err, "Invalid label selector in PodPlacementConfig")
+			continue
+		}
+
+		// Check if the pod matches the label selector
+		if selector == labels.Nothing() || selector.Matches(labels.Set(pod.Labels)) {
+			log.Info("Applying namespace-scoped config", "PodPlacementConfig", ppc.Name)
+			// Apply the configuration, checking for overlaps
+			pod.SetPreferredArchNodeAffinity(ppc.Spec.Plugins.NodeAffinityScoring)
+		}
 	}
 }
 
