@@ -14,7 +14,17 @@ spec:
     singular: enoexecevent
   scope: Namespaced
   versions:
-  - name: v1beta1
+  - additionalPrinterColumns:
+    - jsonPath: .status.nodeName
+      name: NodeName
+      type: string
+    - jsonPath: .status.podName
+      name: PodName
+      type: string
+    - jsonPath: .status.podNamespace
+      name: PodNamespace
+      type: string
+    name: v1beta1
     schema:
       openAPIV3Schema:
         description: ENoExecEvent is the Schema for the enoexecevents API
