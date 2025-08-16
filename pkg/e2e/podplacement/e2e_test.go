@@ -207,6 +207,9 @@ func createRegistryConfigTestData() {
 		Name: trustedRegistryConfig.CertConfigmapName,
 	}
 	image.Spec.RegistrySources.BlockedRegistries = append(image.Spec.RegistrySources.BlockedRegistries, framework.GetImageRepository(e2e.PausePublicMultiarchImage))
+	By("Configuring containerRuntimeSearchRegistries in image.config")
+	image.Spec.RegistrySources.ContainerRuntimeSearchRegistries = append(image.Spec.RegistrySources.ContainerRuntimeSearchRegistries,
+		"quay.io", "registry.access.redhat.com", "docker.io")
 	err = client.Update(ctx, image)
 	Expect(err).NotTo(HaveOccurred())
 }

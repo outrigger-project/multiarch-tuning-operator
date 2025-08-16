@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -29,6 +30,7 @@ import (
 	"github.com/containers/image/v5/docker"
 	"github.com/containers/image/v5/image"
 	"github.com/containers/image/v5/manifest"
+	"github.com/containers/image/v5/pkg/shortnames"
 	"github.com/containers/image/v5/pkg/sysregistriesv2"
 	"github.com/containers/image/v5/signature"
 	"github.com/containers/image/v5/types"
@@ -91,18 +93,31 @@ func (i *registryInspector) GetCompatibleArchitecturesSet(ctx context.Context, i
 	// than do this everytime
 	sysregistriesv2.InvalidateCache()
 
+	sys := &types.SystemContext{
+		AuthFilePath:                authFile.Name(),
+		RegistriesDirPath:           RegistryCertsDir(),
+		SystemRegistriesConfPath:    RegistriesConfPath(),
+		SystemRegistriesConfDirPath: RegistriesConfDir(),
+		SignaturePolicyPath:         PolicyConfPath(),
+		DockerPerHostCertDirPath:    DockerCertsDir(),
+	}
+	// we expect the imageReference to start with `//`. Let's remove it for shortnames func
+	if strings.HasPrefix(imageReference, "//") {
+		trimmedRef := imageReference[2:]
+		if shortnames.IsShortName(trimmedRef) {
+			fullRef, err := inspectAndRecord(ctx, sys, trimmedRef)
+			if err != nil {
+				log.Error(err, "Error getting fully-qualified image reference from shortnames")
+				return nil, err
+			}
+			imageReference = fullRef
+		}
+	}
 	// Check if the image is a manifest list
 	ref, err := docker.ParseReference(imageReference)
 	if err != nil {
 		log.Error(err, "Error parsing the image reference for the image")
 		return nil, err
-	}
-	sys := &types.SystemContext{
-		AuthFilePath:                authFile.Name(),
-		SystemRegistriesConfPath:    RegistriesConfPath(),
-		SystemRegistriesConfDirPath: RegistryCertsDir(),
-		SignaturePolicyPath:         PolicyConfPath(),
-		DockerPerHostCertDirPath:    DockerCertsDir(),
 	}
 	src, err := ref.NewImageSource(ctx, sys)
 	if err != nil {
@@ -241,6 +256,69 @@ func marshaledImagePullSecrets(imageReference string, secrets [][]byte) ([]byte,
 		return nil, err
 	}
 	return authJSON, nil
+}
+
+func inspectAndRecord(ctx context.Context, sys *types.SystemContext, imageName string) (string, error) {
+	log := ctrllog.FromContext(ctx).WithValues("imageReference", imageName)
+
+	// 1. Resolve the short name (or confirm it is already a fully-qualified reference)
+	resolved, err := shortnames.Resolve(sys, imageName)
+	if err != nil {
+		log.Error(err, "Resolve failed")
+		return "", err
+	}
+
+	// Optionally log a user-friendly description of the resolution process
+	if desc := resolved.Description(); desc != "" {
+		log.V(2).Info("Shortname resolution", "details", desc)
+	}
+
+	// 2. Attempt to pull each candidate in order
+	var pullErrs []error
+	for i, cand := range resolved.PullCandidates {
+		fqName := cand.Value.String()
+		log.V(1).Info("Attempting pull", "candidate", i, "fullName", fqName)
+
+		// Ensure the reference starts with //
+		if !strings.HasPrefix(fqName, "//") {
+			fqName = "//" + fqName
+		}
+
+		// Parse the image reference
+		ref, err := docker.ParseReference(fqName)
+		if err != nil {
+			log.Error(err, "ParseReference failed", "candidate", fqName)
+			pullErrs = append(pullErrs, err)
+			continue
+		}
+
+		// Try creating an ImageSource to verify that the image exists and is accessible
+		src, err := ref.NewImageSource(ctx, sys)
+		if err != nil {
+			log.Error(err, "ImageSource creation failed", "candidate", fqName)
+			pullErrs = append(pullErrs, err)
+			continue
+		}
+		defer func(src types.ImageSource) {
+			err := src.Close()
+			if err != nil {
+				log.Error(err, "Error closing the image source for the image")
+			}
+		}(src)
+
+		// 3. After a successful pull, record the alias for the short name
+		if err := cand.Record(); err != nil {
+			log.Error(err, "Record alias for shortname image failed", "candidate", fqName)
+		}
+
+		log.Info("Image accessible and recorded", "image", fqName)
+		return fqName, nil
+	}
+
+	// 4. If all candidates fail, aggregate errors and return
+	err = resolved.FormatPullErrors(pullErrs)
+	log.Error(err, "All pull candidates failed")
+	return "", err
 }
 
 // writeMemFile creates an in memory file based on memfd_create
