@@ -545,11 +545,67 @@ func TestPod_SetPreferredArchNodeAffinityWithCPPC(t *testing.T) {
 			imageInspectionCache = fake.FacadeSingleton()
 			pod := newPod(tt.pod, ctx, nil)
 			g := NewGomegaWithT(t)
-			pod.SetPreferredArchNodeAffinity(
-				NewClusterPodPlacementConfig().
-					WithName(common.SingletonResourceObjectName).
-					WithNodeAffinityScoring(true).
-					WithNodeAffinityScoringTerm(utils.ArchitectureAmd64, 1).Build())
+			cppc := NewClusterPodPlacementConfig().
+				WithName(common.SingletonResourceObjectName).
+				WithNodeAffinityScoring(true).
+				WithNodeAffinityScoringTerm(utils.ArchitectureAmd64, 1).Build()
+			pod.SetPreferredArchNodeAffinity(cppc.Spec.Plugins.NodeAffinityScoring)
+			g.Expect(pod.Spec.Affinity).Should(Equal(tt.want.Spec.Affinity))
+			imageInspectionCache = mmoimage.FacadeSingleton()
+		})
+	}
+}
+
+func TestPod_SetPreferredArchNodeAffinityPPC(t *testing.T) {
+	tests := []struct {
+		name string
+		pod  *v1.Pod
+		want *v1.Pod
+	}{
+		{
+			name: "pod with no predefined preferred affinity",
+			pod:  NewPod().WithContainersImages(fake.SingleArchAmd64Image).Build(),
+			want: NewPod().WithContainersImages(fake.SingleArchAmd64Image).WithPreferredDuringSchedulingIgnoredDuringExecution(
+				NewPreferredSchedulingTerm().WithArchitecture(utils.ArchitectureAmd64).WithWeight(1).Build(),
+			).Build(),
+		},
+		{
+			name: "pod with predefined preferred node affinity",
+			pod: NewPod().WithContainersImages(fake.SingleArchAmd64Image).WithPreferredDuringSchedulingIgnoredDuringExecution(
+				NewPreferredSchedulingTerm().WithCustomKeyValue("foo", "bar").WithWeight(50).Build(),
+			).Build(),
+			want: NewPod().WithContainersImages(fake.SingleArchAmd64Image).WithPreferredDuringSchedulingIgnoredDuringExecution(
+				NewPreferredSchedulingTerm().WithCustomKeyValue("foo", "bar").WithWeight(50).Build(),
+				NewPreferredSchedulingTerm().WithArchitecture(utils.ArchitectureAmd64).WithWeight(1).Build(),
+			).Build(),
+		},
+		{
+			name: "pod with predefined preferred node affinity with arch label set",
+			pod: NewPod().WithContainersImages(fake.SingleArchAmd64Image).WithPreferredDuringSchedulingIgnoredDuringExecution(
+				NewPreferredSchedulingTerm().WithArchitecture(utils.ArchitectureAmd64).WithWeight(30).Build(),
+			).Build(),
+			want: NewPod().WithContainersImages(fake.SingleArchAmd64Image).WithPreferredDuringSchedulingIgnoredDuringExecution(
+				NewPreferredSchedulingTerm().WithArchitecture(utils.ArchitectureAmd64).WithWeight(30).Build(),
+			).Build(),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			imageInspectionCache = fake.FacadeSingleton()
+			pod := newPod(tt.pod, ctx, nil)
+			g := NewGomegaWithT(t)
+			ppc := NewPodPlacementConfig().
+				WithName("test-high-priority").
+				WithNodeAffinityScoring(true).
+				WithPriority(10).
+				WithNodeAffinityScoringTerm(utils.ArchitectureAmd64, 1).Build()
+			pod.SetPreferredArchNodeAffinity(ppc.Spec.Plugins.NodeAffinityScoring)
+			ppc = NewPodPlacementConfig().
+				WithName("test-low-priority").
+				WithNodeAffinityScoring(true).
+				WithPriority(5).
+				WithNodeAffinityScoringTerm(utils.ArchitectureAmd64, 5).Build()
+			pod.SetPreferredArchNodeAffinity(ppc.Spec.Plugins.NodeAffinityScoring)
 			g.Expect(pod.Spec.Affinity).Should(Equal(tt.want.Spec.Affinity))
 			imageInspectionCache = mmoimage.FacadeSingleton()
 		})
@@ -573,7 +629,7 @@ func TestPod_SetPreferredArchNodeAffinity(t *testing.T) {
 			imageInspectionCache = fake.FacadeSingleton()
 			pod := newPod(tt.pod, ctx, nil)
 			g := NewGomegaWithT(t)
-			pod.SetPreferredArchNodeAffinity(&v1beta1.ClusterPodPlacementConfig{
+			cppc := &v1beta1.ClusterPodPlacementConfig{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "cluster",
 				},
@@ -587,7 +643,8 @@ func TestPod_SetPreferredArchNodeAffinity(t *testing.T) {
 						},
 					},
 				},
-			})
+			}
+			pod.SetPreferredArchNodeAffinity(cppc.Spec.Plugins.NodeAffinityScoring)
 			g.Expect(pod.Spec.Affinity).Should(Equal(tt.want.Spec.Affinity))
 			imageInspectionCache = mmoimage.FacadeSingleton()
 		})
