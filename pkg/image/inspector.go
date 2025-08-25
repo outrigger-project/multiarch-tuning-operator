@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -91,6 +92,11 @@ func (i *registryInspector) GetCompatibleArchitecturesSet(ctx context.Context, i
 	// than do this everytime
 	sysregistriesv2.InvalidateCache()
 
+	imageReference, err = parseImageReference(imageReference)
+	if err != nil {
+		log.Error(err, "Couldn't parse image reference")
+		return nil, err
+	}
 	// Check if the image is a manifest list
 	ref, err := docker.ParseReference(imageReference)
 	if err != nil {
@@ -194,6 +200,29 @@ func (i *registryInspector) GetCompatibleArchitecturesSet(ctx context.Context, i
 		return sets.New[string](config.Architecture), nil
 	}
 	return supportedArchitectures, nil
+}
+
+// parseImageReference standardizes an image name, removing the digest
+// if a tag is also present to ensure parser compatibility.
+func parseImageReference(imageName string) (string, error) {
+	digestSplit := strings.Split(imageName, "@sha256:")
+	switch len(digestSplit) {
+	case 0:
+		return "", errors.New("invalid image name")
+	case 1:
+		return imageName, nil
+	}
+
+	// Since the length is 2, imageName is either a digest-only image or both the tag and the digest have been provided.
+	tagSplit := strings.Split(digestSplit[0], ":")
+	switch len(tagSplit) {
+	case 0:
+		return "", errors.New("invalid image name")
+	case 1:
+		// Since the length is 1, no tag has been found: imageName is a digest-only image.
+		return imageName, nil
+	}
+	return tagSplit[0] + "@sha256:" + digestSplit[1], nil
 }
 
 func isBundleImage(image ociv1.ImageConfig) bool {
