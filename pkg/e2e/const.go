@@ -20,6 +20,7 @@ const (
 	MyFakeICSPAllowContactSourceTestSourceRegistry = "my-fake-icsp-allow-contact-source-source-registry.io"
 	HelloopenshiftPublicMultiarchImage             = "quay.io/openshifttest/hello-openshift:1.2.0"
 	HelloopenshiftPublicMultiarchImageDigest       = "quay.io/openshifttest/hello-openshift@sha256:4200f438cf2e9446f6bcff9d67ceea1f69ed07a2f83363b7fb52529f7ddd8a83"
+	HelloopenshiftPublicMultiarchImageTagDigest    = "quay.io/openshifttest/hello-openshift:1.2.0@sha256:4200f438cf2e9446f6bcff9d67ceea1f69ed07a2f83363b7fb52529f7ddd8a83"
 	SleepPublicMultiarchImage                      = "quay.io/openshifttest/sleep:1.2.0"
 	RedisPublicMultiarchImage                      = "gcr.io/google_containers/redis:v1"
 	PausePublicMultiarchImage                      = "gcr.io/google_containers/pause:3.2"
