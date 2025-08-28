@@ -804,5 +804,53 @@ var _ = Describe("The Multiarch Tuning Operator", Serial, func() {
 			}).Should(Succeed(), "Failed to remove finalizer from daemon set", err)
 			Eventually(framework.ValidateDeletion(client, ctx, framework.ENoExecPlugin)).Should(Succeed())
 		})
+		It("should keep the ClusterPodPlacementConfig and its operands until the all of eNoExecEvent objects have been deleted", func() {
+			var err error
+			By("Creating a ClusterPodPlacementConfig with execFormatErrorMonitor plugin enabled")
+			err = client.Create(ctx,
+				NewClusterPodPlacementConfig().
+					WithName(common.SingletonResourceObjectName).
+					WithExecFormatErrorMonitor(true).
+					Build(),
+			)
+			Expect(err).NotTo(HaveOccurred(), "failed to create the ClusterPodPlacementConfig", err)
+			By("validate the clusterPodPlacementConfig and eNoExecEvent objects exist")
+			Eventually(framework.ValidateCreation(client, ctx, framework.MainPlugin, framework.ENoExecPlugin)).Should(Succeed())
+			By("Adding a finalizer to the daemon set")
+			d := appsv1.DaemonSet{}
+			Eventually(func(g Gomega) {
+				err = client.Get(ctx, runtimeclient.ObjectKeyFromObject(&appsv1.DaemonSet{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      utils.EnoexecDaemonSet,
+						Namespace: utils.Namespace(),
+					},
+				}), &d)
+				g.Expect(err).NotTo(HaveOccurred(), "failed to get daemon set "+utils.EnoexecDaemonSet, err)
+				controllerutil.AddFinalizer(&d, "e2e.test/block-deletion")
+				g.Expect(client.Update(ctx, &d)).To(Succeed())
+			}).Should(Succeed(), "Failed to add finalizer to daemon set", err)
+			By("Deleting the eNoExecEvent plugin")
+			err = client.Delete(ctx, &v1beta1.ClusterPodPlacementConfig{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: common.SingletonResourceObjectName,
+				},
+			})
+			Expect(err).NotTo(HaveOccurred())
+			By("Check that all objects still exist")
+			Eventually(framework.ValidateCreation(client, ctx, framework.MainPlugin, framework.ENoExecPlugin)).Should(Succeed(), "Should not have deleted ClusterPodPlacementConfig objects as the daemon set still exists", err)
+			By("Removing finalizers from the daemon set")
+			Eventually(func(g Gomega) {
+				err = client.Get(ctx, runtimeclient.ObjectKeyFromObject(&appsv1.DaemonSet{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      utils.EnoexecDaemonSet,
+						Namespace: utils.Namespace(),
+					},
+				}), &d)
+				g.Expect(err).NotTo(HaveOccurred(), "failed to get daemon set "+utils.EnoexecDaemonSet, err)
+				controllerutil.RemoveFinalizer(&d, "e2e.test/block-deletion")
+				g.Expect(client.Update(ctx, &d)).To(Succeed())
+			}).Should(Succeed(), "Failed to remove finalizer from daemon set", err)
+			Eventually(framework.ValidateDeletion(client, ctx, framework.MainPlugin, framework.ENoExecPlugin)).Should(Succeed())
+		})
 	})
 })

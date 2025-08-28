@@ -646,9 +646,16 @@ var _ = Describe("Controllers/ClusterPodPlacementConfig/ClusterPodPlacementConfi
 			Eventually(framework.ValidateDeletion(k8sClient, ctx, framework.MainPlugin, framework.ENoExecPlugin)).Should(Succeed(), "the ClusterPodPlacementConfig should be deleted")
 		})
 		It("ensure the finalizers exist", func() {
+			By("Verifying the cppc has the correct finalizer")
+			cppc := &v1beta1.ClusterPodPlacementConfig{}
+			err := k8sClient.Get(ctx, crclient.ObjectKey{
+				Name: common.SingletonResourceObjectName,
+			}, cppc)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(cppc.Finalizers).To(ContainElement(utils.ENoExecEventFinalizerName))
 			By("Verifying the enoexec Deployment has the correct finalizer")
 			d := appsv1.Deployment{}
-			err := k8sClient.Get(ctx, crclient.ObjectKeyFromObject(&appsv1.Deployment{
+			err = k8sClient.Get(ctx, crclient.ObjectKeyFromObject(&appsv1.Deployment{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      utils.EnoexecControllerName,
 					Namespace: utils.Namespace(),
@@ -659,7 +666,6 @@ var _ = Describe("Controllers/ClusterPodPlacementConfig/ClusterPodPlacementConfi
 			Expect(d.Finalizers).To(ContainElement(utils.ExecFormatErrorFinalizerName))
 		})
 	})
-
 })
 
 func patchDeploymentStatus(name string, g Gomega, patch func(*appsv1.Deployment)) {

@@ -140,6 +140,17 @@ func (r *ClusterPodPlacementConfigReconciler) Reconcile(ctx context.Context, req
 		return ctrl.Result{Requeue: true}, nil
 	}
 	if clusterPodPlacementConfig.PluginsEnabled(common.ExecFormatErrorMonitorPluginName) {
+		if !controllerutil.ContainsFinalizer(clusterPodPlacementConfig, utils.ENoExecEventFinalizerName) {
+			// Add the finalizer to the object
+			log.V(1).Info("Adding ENoExecEvent finalizer to the ClusterPodPlacementConfig")
+			controllerutil.AddFinalizer(clusterPodPlacementConfig, utils.ENoExecEventFinalizerName)
+			if err := r.Update(ctx, clusterPodPlacementConfig); err != nil {
+				log.Error(err, "Unable to update finalizers in the ClusterPodPlacementConfig")
+				return ctrl.Result{}, err
+			}
+			return ctrl.Result{Requeue: true}, nil
+		}
+
 		// Attempt to fetch the ENoExecEvent Deployment.
 		eNoExecEventDeployment := &appsv1.Deployment{}
 		err := r.Get(ctx, client.ObjectKey{
@@ -294,7 +305,7 @@ func (r *ClusterPodPlacementConfigReconciler) handleDelete(ctx context.Context,
 	// The ClusterPodPlacementConfig is being deleted, cleanup the resources
 	log := ctrllog.FromContext(ctx).WithValues("operation", "handleDelete")
 
-	err := r.handleEnoexecDelete(ctx)
+	err := r.handleEnoexecDelete(ctx, clusterPodPlacementConfig)
 	if err != nil {
 		return err
 	}
@@ -451,7 +462,7 @@ func (r *ClusterPodPlacementConfigReconciler) handleDelete(ctx context.Context,
 	return err
 }
 
-func (r *ClusterPodPlacementConfigReconciler) handleEnoexecDelete(ctx context.Context) error {
+func (r *ClusterPodPlacementConfigReconciler) handleEnoexecDelete(ctx context.Context, clusterPodPlacementConfig *multiarchv1beta1.ClusterPodPlacementConfig) error {
 	var err error
 	log := ctrllog.FromContext(ctx, "operation", "handleEnoexecDelete")
 	daemonSetRelatedObjsToDelete := []utils.ToDeleteRef{
@@ -585,6 +596,14 @@ func (r *ClusterPodPlacementConfigReconciler) handleEnoexecDelete(ctx context.Co
 		log.Error(err, "Unable to delete deployment resources")
 		return err
 	}
+	log.Info("Removing the ENoExecEvent finalizer from the ClusterPodPlacementConfig")
+	if controllerutil.RemoveFinalizer(clusterPodPlacementConfig, utils.ENoExecEventFinalizerName) {
+		if err = r.Update(ctx, clusterPodPlacementConfig); err != nil {
+			log.Error(err, "Unable to remove finalizers.",
+				clusterPodPlacementConfig.Kind, clusterPodPlacementConfig.Name)
+			return err
+		}
+	}
 	return nil
 }
 
@@ -611,7 +630,7 @@ func (r *ClusterPodPlacementConfigReconciler) reconcile(ctx context.Context, clu
 			return err
 		}
 	} else {
-		err := r.handleEnoexecDelete(ctx)
+		err := r.handleEnoexecDelete(ctx, clusterPodPlacementConfig)
 		if err != nil {
 			return err
 		}

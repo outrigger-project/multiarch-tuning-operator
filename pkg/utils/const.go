@@ -56,6 +56,7 @@ const (
 const (
 	ExecFormatErrorFinalizerName = "finalizers.multiarch.openshift.io/enoexec-events-present"
 	ExecDaemonSetFinalizerName   = "finalizers.multiarch.openshift.io/enoexec-daemonset-present"
+	ENoExecEventFinalizerName    = "finalizers.multiarch.openshift.io/enoexec-present"
 	ExecFormatErrorLabelKey      = "multiarch.openshift.io/exec-format-error"
 	True                         = "true"
 	False                        = "false"
