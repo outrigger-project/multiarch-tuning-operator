@@ -54,13 +54,16 @@ const (
 )
 
 const (
-	ExecFormatErrorLabelKey    = "multiarch.openshift.io/exec-format-error"
-	True                       = "true"
-	False                      = "false"
-	ExecFormatErrorEventReason = "ExecFormatError"
-	UnknownContainer           = "unknown-container" // Used when the container name is not known or not provided
-	EnoexecControllerName      = "enoexec-event-handler-controller"
-	EnoexecDaemonSet           = "enoexec-event-daemon"
+	ExecFormatErrorFinalizerName = "finalizers.multiarch.openshift.io/enoexec-events-present"
+	ExecDaemonSetFinalizerName   = "finalizers.multiarch.openshift.io/enoexec-daemonset-present"
+	ENoExecEventFinalizerName    = "finalizers.multiarch.openshift.io/enoexec-present"
+	ExecFormatErrorLabelKey      = "multiarch.openshift.io/exec-format-error"
+	True                         = "true"
+	False                        = "false"
+	ExecFormatErrorEventReason   = "ExecFormatError"
+	UnknownContainer             = "unknown-container" // Used when the container name is not known or not provided
+	EnoexecControllerName        = "enoexec-event-handler-controller"
+	EnoexecDaemonSet             = "enoexec-event-daemon"
 )
 
 func AllSupportedArchitecturesSet() sets.Set[string] {

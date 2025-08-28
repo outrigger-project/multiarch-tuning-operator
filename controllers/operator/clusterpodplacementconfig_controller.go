@@ -139,6 +139,60 @@ func (r *ClusterPodPlacementConfigReconciler) Reconcile(ctx context.Context, req
 		}
 		return ctrl.Result{Requeue: true}, nil
 	}
+	if clusterPodPlacementConfig.PluginsEnabled(common.ExecFormatErrorMonitorPluginName) {
+		if !controllerutil.ContainsFinalizer(clusterPodPlacementConfig, utils.ENoExecEventFinalizerName) {
+			// Add the finalizer to the object
+			log.V(1).Info("Adding ENoExecEvent finalizer to the ClusterPodPlacementConfig")
+			controllerutil.AddFinalizer(clusterPodPlacementConfig, utils.ENoExecEventFinalizerName)
+			if err := r.Update(ctx, clusterPodPlacementConfig); err != nil {
+				log.Error(err, "Unable to update finalizers in the ClusterPodPlacementConfig")
+				return ctrl.Result{}, err
+			}
+			return ctrl.Result{Requeue: true}, nil
+		}
+
+		// Attempt to fetch the ENoExecEvent Deployment.
+		eNoExecEventDeployment := &appsv1.Deployment{}
+		err := r.Get(ctx, client.ObjectKey{
+			Name:      utils.EnoexecControllerName,
+			Namespace: utils.Namespace(),
+		}, eNoExecEventDeployment)
+		if err != nil {
+			// If the deployment is not found, it may be created later.
+			// If any other error occurs, log it and requeue.
+			log.Error(err, "Unable to fetch EnoexecController Deployment")
+			if client.IgnoreNotFound(err) != nil {
+				return ctrl.Result{}, err
+			}
+		} else {
+			needsUpdate := false
+			// Check if either finalizer is missing.
+			if !controllerutil.ContainsFinalizer(eNoExecEventDeployment, utils.ExecDaemonSetFinalizerName) {
+				log.V(1).Info("Adding finalizer to the ENoExecEvent Deployment for the Daemon Set")
+				controllerutil.AddFinalizer(eNoExecEventDeployment, utils.ExecDaemonSetFinalizerName)
+				needsUpdate = true
+			}
+			if !controllerutil.ContainsFinalizer(eNoExecEventDeployment, utils.ExecFormatErrorFinalizerName) {
+				log.V(1).Info("Adding finalizers to the ENoExecEvent Deployment for the ENoExecEvents")
+				controllerutil.AddFinalizer(eNoExecEventDeployment, utils.ExecFormatErrorFinalizerName)
+				needsUpdate = true
+			}
+
+			// This logic is written to be idempotent. The Reconcile loop can be triggered
+			// multiple times for the same logical change, sometimes with a slightly outdated
+			// version of the object from the controller's cache.
+			if needsUpdate {
+				if err := r.Update(ctx, eNoExecEventDeployment); err != nil {
+					log.Error(err, "Unable to update finalizers on the EnoexecController Deployment")
+					// Requeue on conflict, as another process might have updated the object.
+					return ctrl.Result{}, err
+				}
+				// After a successful update, requeue to ensure the next state is processed.
+				return ctrl.Result{Requeue: true}, nil
+			}
+		}
+	}
+
 	err = r.dependentsStatusToClusterPodPlacementConfig(ctx, clusterPodPlacementConfig)
 	if err != nil {
 		log.Error(err, "Unable to retrieve the status of the PodPlacementConfig dependencies")
@@ -251,7 +305,7 @@ func (r *ClusterPodPlacementConfigReconciler) handleDelete(ctx context.Context,
 	// The ClusterPodPlacementConfig is being deleted, cleanup the resources
 	log := ctrllog.FromContext(ctx).WithValues("operation", "handleDelete")
 
-	err := r.handleEnoexecDelete(ctx)
+	err := r.handleEnoexecDelete(ctx, clusterPodPlacementConfig)
 	if err != nil {
 		return err
 	}
@@ -408,18 +462,10 @@ func (r *ClusterPodPlacementConfigReconciler) handleDelete(ctx context.Context,
 	return err
 }
 
-func (r *ClusterPodPlacementConfigReconciler) handleEnoexecDelete(ctx context.Context) error {
-	log := ctrllog.FromContext(ctx)
-	log.Info("Disabling ENoExecEvent Controller")
-	objsToDelete := []utils.ToDeleteRef{
-		{
-			NamespacedTypedClient: r.ClientSet.RbacV1().Roles(utils.Namespace()),
-			ObjName:               utils.EnoexecControllerName,
-		},
-		{
-			NamespacedTypedClient: r.ClientSet.RbacV1().RoleBindings(utils.Namespace()),
-			ObjName:               utils.EnoexecControllerName,
-		},
+func (r *ClusterPodPlacementConfigReconciler) handleEnoexecDelete(ctx context.Context, clusterPodPlacementConfig *multiarchv1beta1.ClusterPodPlacementConfig) error {
+	var err error
+	log := ctrllog.FromContext(ctx, "operation", "handleEnoexecDelete")
+	daemonSetRelatedObjsToDelete := []utils.ToDeleteRef{
 		{
 			NamespacedTypedClient: r.ClientSet.RbacV1().ClusterRoles(),
 			ObjName:               utils.EnoexecDaemonSet,
@@ -437,36 +483,126 @@ func (r *ClusterPodPlacementConfigReconciler) handleEnoexecDelete(ctx context.Co
 			ObjName:               utils.EnoexecDaemonSet,
 		},
 		{
-			NamespacedTypedClient: r.ClientSet.RbacV1().ClusterRoles(),
-			ObjName:               utils.EnoexecControllerName,
-		},
-		{
-			NamespacedTypedClient: r.ClientSet.RbacV1().ClusterRoleBindings(),
-			ObjName:               utils.EnoexecControllerName,
-		},
-		{
 			NamespacedTypedClient: r.ClientSet.CoreV1().ServiceAccounts(utils.Namespace()),
-			ObjName:               utils.EnoexecControllerName,
+			ObjName:               utils.EnoexecDaemonSet,
 		},
 		{
-			NamespacedTypedClient: r.ClientSet.CoreV1().ServiceAccounts(utils.Namespace()),
+			NamespacedTypedClient: r.ClientSet.AppsV1().DaemonSets(utils.Namespace()),
 			ObjName:               utils.EnoexecDaemonSet,
 		},
 		{
 			NamespacedTypedClient: r.ClientSet.AppsV1().Deployments(utils.Namespace()),
 			ObjName:               utils.EnoexecControllerName,
 		},
+	}
+	log.Info("Deleting the DaemonSet ENoExecEvent resources and Deployment")
+	if err := utils.DeleteResources(ctx, daemonSetRelatedObjsToDelete); err != nil {
+		log.Error(err, "Unable to delete DaemonSet resources")
+		return err
+	}
+	ds := &appsv1.DaemonSet{}
+	err = r.Get(ctx, client.ObjectKey{
+		Name:      utils.EnoexecDaemonSet,
+		Namespace: utils.Namespace(),
+	}, ds)
+	if err == nil {
+		log.Info("Waiting for the eNoExecEvent DaemonSet to be fully deleted...")
+		// Return an error to force requeue. This is a common pattern for waiting.
+		return errors.New("enoexec DaemonSet is still terminating")
+	}
+	if client.IgnoreNotFound(err) != nil {
+		log.Error(err, "Failed to check for the eNoExecEvent DaemonSet status")
+		return err
+	}
+	log.Info("eNoExecEvent DaemonSet has been deleted. Proceeding with eNoExecEvent controller cleanup.")
+	deployment := &appsv1.Deployment{}
+	err = r.Get(ctx, client.ObjectKey{
+		Name:      utils.EnoexecControllerName,
+		Namespace: utils.Namespace(),
+	}, deployment)
+	if err != nil {
+		log.Error(err, "ENoExecEvent Deployment not found")
+		return client.IgnoreNotFound(err)
+	}
+
+	log.Info("Removing the ExecDeployment finalizer from the ENoExec Deployment")
+	if controllerutil.RemoveFinalizer(deployment, utils.ExecDaemonSetFinalizerName) {
+		if err := r.Update(ctx, deployment); err != nil {
+			log.Error(err, "Unable to remove finalizer from deployment.", "name", deployment.Name)
+			return err
+		}
+	}
+
+	enoexecEventList := &multiarchv1beta1.ENoExecEventList{}
+	err = r.List(ctx, enoexecEventList, client.InNamespace(utils.Namespace()))
+	if err != nil {
+		log.Error(err, "Failed to list ENoExecEvent resources")
+		return err
+	}
+
+	// Check if any ENoExecEvent resources were found.
+	if len(enoexecEventList.Items) > 0 {
+		log.Info("Found existing ENoExecEvent resources", "count", len(enoexecEventList.Items))
+		return errors.New("found existing ENoExecEvent resources")
+	} else {
+		log.Info("No ENoExecEvent resources found in the cluster. Removing the ExecEvent finalizer from the ENoExec Deployment")
+		deployment := &appsv1.Deployment{}
+		err = r.Get(ctx, client.ObjectKey{
+			Name:      utils.EnoexecControllerName,
+			Namespace: utils.Namespace(),
+		}, deployment)
+		if err != nil {
+			log.Error(err, "ENoExecEvent Deployment not found")
+			return client.IgnoreNotFound(err)
+		}
+		if controllerutil.RemoveFinalizer(deployment, utils.ExecFormatErrorFinalizerName) {
+			if err = r.Update(ctx, deployment); err != nil {
+				log.Error(err, "Unable to remove finalizers.",
+					deployment.Kind, deployment.Name)
+				return err
+			}
+		}
+	}
+
+	deploymentRelatedObjsToDelete := []utils.ToDeleteRef{
 		{
-			NamespacedTypedClient: r.ClientSet.AppsV1().DaemonSets(utils.Namespace()),
+			NamespacedTypedClient: r.ClientSet.RbacV1().Roles(utils.Namespace()),
+			ObjName:               utils.EnoexecControllerName,
+		},
+		{
+			NamespacedTypedClient: r.ClientSet.RbacV1().RoleBindings(utils.Namespace()),
+			ObjName:               utils.EnoexecControllerName,
+		},
+		{
+			NamespacedTypedClient: r.ClientSet.RbacV1().ClusterRoles(),
+			ObjName:               utils.EnoexecControllerName,
+		},
+		{
+			NamespacedTypedClient: r.ClientSet.RbacV1().ClusterRoleBindings(),
+			ObjName:               utils.EnoexecControllerName,
+		},
+		{
+			NamespacedTypedClient: r.ClientSet.CoreV1().ServiceAccounts(utils.Namespace()),
+			ObjName:               utils.EnoexecControllerName,
+		},
+		{
+			NamespacedTypedClient: r.ClientSet.CoreV1().ServiceAccounts(utils.Namespace()),
 			ObjName:               utils.EnoexecDaemonSet,
 		},
 	}
 
-	log.Info("Deleting the ENoExecEvent resources")
-	// NOTE: err aggregates non-nil errors, excluding NotFound errors
-	if err := utils.DeleteResources(ctx, objsToDelete); err != nil {
-		log.Error(err, "Unable to delete resources")
+	log.Info("Deleting the ENoExecEvent Deployment resources")
+	if err = utils.DeleteResources(ctx, deploymentRelatedObjsToDelete); err != nil {
+		log.Error(err, "Unable to delete deployment resources")
 		return err
+	}
+	log.Info("Removing the ENoExecEvent finalizer from the ClusterPodPlacementConfig")
+	if controllerutil.RemoveFinalizer(clusterPodPlacementConfig, utils.ENoExecEventFinalizerName) {
+		if err = r.Update(ctx, clusterPodPlacementConfig); err != nil {
+			log.Error(err, "Unable to remove finalizers.",
+				clusterPodPlacementConfig.Kind, clusterPodPlacementConfig.Name)
+			return err
+		}
 	}
 	return nil
 }
@@ -494,7 +630,7 @@ func (r *ClusterPodPlacementConfigReconciler) reconcile(ctx context.Context, clu
 			return err
 		}
 	} else {
-		err := r.handleEnoexecDelete(ctx)
+		err := r.handleEnoexecDelete(ctx, clusterPodPlacementConfig)
 		if err != nil {
 			return err
 		}

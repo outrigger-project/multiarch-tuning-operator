@@ -30,12 +30,16 @@ const (
 	MainPlugin PluginObjectsSet = iota
 	// ENoExecPlugin checks the ENoExecEvent resources.
 	ENoExecPlugin
+	EnoExecPluginDeployment
+	EnoExecPluginDaemonSet
 )
 
 // pluginObjectFetchers a map to associate each plugin type with its object-fetching function.
 var pluginObjectFetchers = map[PluginObjectsSet]func() []client.Object{
-	MainPlugin:    getObjects,
-	ENoExecPlugin: getENoExecEventsObjects,
+	MainPlugin:              getObjects,
+	ENoExecPlugin:           getENoExecEventsObjects,
+	EnoExecPluginDeployment: getENoExecEventsDeploymentObjects,
+	EnoExecPluginDaemonSet:  getENoExecEventsDaemonSetObjects,
 }
 
 func NewConditionTypeStatusTuple(conditionType string, conditionStatus corev1.ConditionStatus) ConditionTypeStatusTuple {
@@ -81,18 +85,27 @@ func getObjects() []client.Object {
 }
 
 func getENoExecEventsObjects() []client.Object {
+	return append(getENoExecEventsDeploymentObjects(), getENoExecEventsDaemonSetObjects()...)
+}
+
+func getENoExecEventsDeploymentObjects() []client.Object {
 	return []client.Object{
 		builder.NewServiceAccount().WithName(utils.EnoexecControllerName).WithNamespace(utils.Namespace()).Build(),
-		builder.NewServiceAccount().WithName(utils.EnoexecDaemonSet).WithNamespace(utils.Namespace()).Build(),
 		builder.NewClusterRole().WithName(utils.EnoexecControllerName).Build(),
 		builder.NewClusterRoleBinding().WithName(utils.EnoexecControllerName).Build(),
-		builder.NewClusterRole().WithName(utils.EnoexecDaemonSet).Build(),
-		builder.NewClusterRoleBinding().WithName(utils.EnoexecDaemonSet).Build(),
 		builder.NewRole().WithName(utils.EnoexecControllerName).WithNamespace(utils.Namespace()).Build(),
 		builder.NewRoleBinding().WithName(utils.EnoexecControllerName).WithNamespace(utils.Namespace()).Build(),
+		builder.NewDeployment().WithName(utils.EnoexecControllerName).WithNamespace(utils.Namespace()).Build(),
+	}
+}
+
+func getENoExecEventsDaemonSetObjects() []client.Object {
+	return []client.Object{
+		builder.NewServiceAccount().WithName(utils.EnoexecDaemonSet).WithNamespace(utils.Namespace()).Build(),
+		builder.NewClusterRole().WithName(utils.EnoexecDaemonSet).Build(),
+		builder.NewClusterRoleBinding().WithName(utils.EnoexecDaemonSet).Build(),
 		builder.NewRole().WithName(utils.EnoexecDaemonSet).WithNamespace(utils.Namespace()).Build(),
 		builder.NewRoleBinding().WithName(utils.EnoexecDaemonSet).WithNamespace(utils.Namespace()).Build(),
-		builder.NewDeployment().WithName(utils.EnoexecControllerName).WithNamespace(utils.Namespace()).Build(),
 		builder.NewDaemonSet().WithName(utils.EnoexecDaemonSet).WithNamespace(utils.Namespace()).Build(),
 	}
 }
@@ -128,6 +141,18 @@ func ValidateCreation(cl client.Client, ctx context.Context, pluginObjectsSet ..
 			NewConditionTypeStatusTuple(v1beta1.MutatingWebhookConfigurationNotAvailable, corev1.ConditionFalse),
 			NewConditionTypeStatusTuple(v1beta1.DeprovisioningType, corev1.ConditionFalse),
 		)
+	}
+}
+
+func ValidateENoExecEventsObjectsExist(cl client.Client, ctx context.Context) func(gomega.Gomega) {
+	return func(g gomega.Gomega) {
+		ginkgo.By("Verify all objects exist")
+		for _, obj := range getENoExecEventsObjects() {
+			newObj := obj.DeepCopyObject().(client.Object)
+			err := cl.Get(ctx, client.ObjectKeyFromObject(obj), newObj)
+			g.Expect(err).NotTo(gomega.HaveOccurred(), "the object should be created", err)
+			g.Expect(newObj).NotTo(gomega.BeNil(), "the object should not be nil")
+		}
 	}
 }
 
