@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -29,6 +30,7 @@ import (
 	"github.com/containers/image/v5/docker"
 	"github.com/containers/image/v5/image"
 	"github.com/containers/image/v5/manifest"
+	"github.com/containers/image/v5/pkg/shortnames"
 	"github.com/containers/image/v5/pkg/sysregistriesv2"
 	"github.com/containers/image/v5/signature"
 	"github.com/containers/image/v5/types"
@@ -91,20 +93,17 @@ func (i *registryInspector) GetCompatibleArchitecturesSet(ctx context.Context, i
 	// than do this everytime
 	sysregistriesv2.InvalidateCache()
 
-	// Check if the image is a manifest list
-	ref, err := docker.ParseReference(imageReference)
-	if err != nil {
-		log.Error(err, "Error parsing the image reference for the image")
-		return nil, err
-	}
 	sys := &types.SystemContext{
 		AuthFilePath:                authFile.Name(),
+		RegistriesDirPath:           RegistryCertsDir(),
 		SystemRegistriesConfPath:    RegistriesConfPath(),
-		SystemRegistriesConfDirPath: RegistryCertsDir(),
+		SystemRegistriesConfDirPath: RegistriesConfDir(),
 		SignaturePolicyPath:         PolicyConfPath(),
 		DockerPerHostCertDirPath:    DockerCertsDir(),
 	}
-	src, err := ref.NewImageSource(ctx, sys)
+
+	// Check if the image is a manifest list
+	src, err := resolveAndOpenImageSource(ctx, sys, imageReference)
 	if err != nil {
 		log.Error(err, "Error creating the image source")
 		return nil, err
@@ -241,6 +240,49 @@ func marshaledImagePullSecrets(imageReference string, secrets [][]byte) ([]byte,
 		return nil, err
 	}
 	return authJSON, nil
+}
+
+func resolveAndOpenImageSource(ctx context.Context, sys *types.SystemContext, imageReference string) (types.ImageSource, error) {
+	log := ctrllog.FromContext(ctx).WithValues("imageReference", imageReference)
+
+	// Ensure the image is a fully-qualified reference.
+	// If it's a short name, shortnames.Resolve will expand it into one or more fully-qualified names.
+	// Since imageReference may start with "//", which shortnames.Resolve cannot handle,
+	// strip the leading "//" if present.
+	resolved, err := shortnames.Resolve(sys, strings.TrimPrefix(imageReference, "//"))
+	if err != nil {
+		log.Error(err, "Failed to resolve image shortname")
+		return nil, err
+	}
+
+	if desc := resolved.Description(); desc != "" {
+		log.V(2).Info("Shortname resolution details", "description", desc)
+	}
+
+	var pullErrs []error
+	for i, cand := range resolved.PullCandidates {
+		fqName := fmt.Sprintf("//%s", cand.Value.String())
+		log.V(1).Info("Trying candidate", "index", i, "fullName", fqName)
+
+		ref, err := docker.ParseReference(fqName)
+		if err != nil {
+			log.Error(err, "Failed to parse image reference")
+			pullErrs = append(pullErrs, err)
+			continue
+		}
+
+		src, err := ref.NewImageSource(ctx, sys)
+		if err != nil {
+			log.Error(err, "Failed to create image source")
+			pullErrs = append(pullErrs, err)
+			continue
+		}
+		return src, nil
+	}
+
+	err = resolved.FormatPullErrors(pullErrs)
+	log.Error(err, "All image pull candidates failed")
+	return nil, err
 }
 
 // writeMemFile creates an in memory file based on memfd_create

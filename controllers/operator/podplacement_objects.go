@@ -124,6 +124,12 @@ func buildControllerDeployment(clusterPodPlacementConfig *v1beta1.ClusterPodPlac
 				},
 			},
 		},
+		{
+			Name: "shortnames-cache",
+			VolumeSource: corev1.VolumeSource{
+				EmptyDir: &corev1.EmptyDirVolumeSource{},
+			},
+		},
 	}
 
 	additionalMounts := []corev1.VolumeMount{
@@ -142,10 +148,21 @@ func buildControllerDeployment(clusterPodPlacementConfig *v1beta1.ClusterPodPlac
 			MountPath: "/etc/containers/",
 			ReadOnly:  true,
 		},
+		{
+			Name:      "shortnames-cache",
+			MountPath: "/tmp/container/cache",
+		},
+	}
+	additionalEnv := []corev1.EnvVar{
+		{
+			Name:  "XDG_CACHE_HOME",
+			Value: "/tmp/container/cache",
+		},
 	}
 
 	// 3. Append the additional volumes and mounts to the base ones from the generic builder.
 	d.Spec.Template.Spec.Volumes = append(d.Spec.Template.Spec.Volumes, additionalVolumes...)
+	d.Spec.Template.Spec.Containers[0].Env = append(d.Spec.Template.Spec.Containers[0].Env, additionalEnv...)
 	d.Spec.Template.Spec.Containers[0].VolumeMounts = append(d.Spec.Template.Spec.Containers[0].VolumeMounts, additionalMounts...)
 
 	if seLinuxOptionsType != nil {
