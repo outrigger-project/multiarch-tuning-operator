@@ -694,7 +694,7 @@ var _ = Describe("The Multiarch Tuning Operator", Serial, func() {
 				d := NewDeployment().
 					WithSelectorAndPodLabels(podLabel).
 					WithPodSpec(ps).
-					WithReplicas(utils.NewPtr(int32(10))).
+					WithReplicas(utils.NewPtr(int32(5))).
 					WithName("test-deployment").
 					WithNamespace(ns.Name).
 					Build()
