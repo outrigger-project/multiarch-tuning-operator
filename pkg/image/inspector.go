@@ -213,25 +213,48 @@ func parseImageReference(imageName string) (string, error) {
 	case 0:
 		return "", errors.New("invalid image name, must not be empty")
 	case 1:
+		// No digest present, return as-is
 		return imageName, nil
 	case 2:
+		// Digest present, continue processing
 	default:
 		return "", errors.New("invalid image name, must only have one digest")
 	}
 
-	// Since the length is 2, imageName is either a digest-only image or both the tag and the digest have been provided.
-	tagSplit := strings.Split(digestSplit[0], ":")
-	switch len(tagSplit) {
-	case 0:
-		return "", errors.New("invalid image name, image must not be empty")
-	case 1:
-		// Since the length is 1, no tag has been found: imageName is a digest-only image.
+	// Since the length is 2, imageName has a digest.
+	// We need to check if there's also a tag to remove.
+	// Format: [registry[:port]/][namespace/]image[:tag]@sha256:digest
+
+	beforeDigest := digestSplit[0]
+	digest := digestSplit[1]
+
+	// Find the last "/" to separate registry/namespace from image name
+	lastSlashIdx := strings.LastIndex(beforeDigest, "/")
+	if lastSlashIdx == -1 {
+		// No "/" found - this is just "image[:tag]"
+		// Check if there's a tag to remove
+		if colonIdx := strings.Index(beforeDigest, ":"); colonIdx != -1 {
+			// Has a tag, remove it
+			return beforeDigest[:colonIdx] + "@sha256:" + digest, nil
+		}
+		// No tag, return as-is with digest
 		return imageName, nil
-	case 2:
-	default:
-		return "", errors.New("invalid image name, image contains more than one digest or tag")
 	}
-	return tagSplit[0] + "@sha256:" + digestSplit[1], nil
+
+	// We have a "/" so split into registry/namespace and image name parts
+	registryAndNamespace := beforeDigest[:lastSlashIdx]
+	imageNamePart := beforeDigest[lastSlashIdx+1:]
+
+	// Check if the image name part (after the last "/") has a tag
+	// Format of imageNamePart: "image" or "image:tag"
+	if colonIdx := strings.Index(imageNamePart, ":"); colonIdx != -1 {
+		// Has a tag, remove it
+		imageWithoutTag := imageNamePart[:colonIdx]
+		return registryAndNamespace + "/" + imageWithoutTag + "@sha256:" + digest, nil
+	}
+
+	// No tag in the image name, return the full reference with digest
+	return imageName, nil
 }
 
 func isBundleImage(image ociv1.ImageConfig) bool {
