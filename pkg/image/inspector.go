@@ -208,30 +208,30 @@ func (i *registryInspector) GetCompatibleArchitecturesSet(ctx context.Context, i
 //  2. A digest-only reference if a digest is present, dropping the tag when both
 //     a tag and digest are specified in the pod's container image field
 func parseImageReference(imageName string) (string, error) {
-	digestSplit := strings.Split(imageName, "@sha256:")
-	switch len(digestSplit) {
+	parts := strings.Split(imageName, "@sha256:")
+	switch len(parts) {
 	case 0:
 		return "", errors.New("invalid image name, must not be empty")
 	case 1:
+		// No digest present, return as-is
 		return imageName, nil
 	case 2:
+		// Since the length is 2, imageName has a digest.
+		// We need to check if there's also a tag to remove.
+		// Format: [registry[:port]/][namespace/]image[:tag]@sha256:digest
+		namePart := parts[0]
+		digest := parts[1]
+		/// Find last "/" to separate registry/namespace from image name
+		lastSlash := strings.LastIndex(namePart, "/")
+		lastColon := strings.LastIndex(namePart, ":")
+		if lastColon > lastSlash {
+			// Last ":" is a tag, remove it
+			namePart = namePart[:lastColon]
+		}
+		return namePart + "@sha256:" + digest, nil
 	default:
 		return "", errors.New("invalid image name, must only have one digest")
 	}
-
-	// Since the length is 2, imageName is either a digest-only image or both the tag and the digest have been provided.
-	tagSplit := strings.Split(digestSplit[0], ":")
-	switch len(tagSplit) {
-	case 0:
-		return "", errors.New("invalid image name, image must not be empty")
-	case 1:
-		// Since the length is 1, no tag has been found: imageName is a digest-only image.
-		return imageName, nil
-	case 2:
-	default:
-		return "", errors.New("invalid image name, image contains more than one digest or tag")
-	}
-	return tagSplit[0] + "@sha256:" + digestSplit[1], nil
 }
 
 func isBundleImage(image ociv1.ImageConfig) bool {
