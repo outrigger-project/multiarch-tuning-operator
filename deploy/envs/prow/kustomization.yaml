@@ -13,4 +13,14 @@ patches:
     patch: |-
       - op: replace
         path: /spec/image
-        value: quay.io/multi-arch/multiarch-tuning-operator:catalog
+        value: registry.ci.openshift.org/origin/multiarch-tuning-operator-catalog:main
+  - target:
+      group: operators.coreos.com
+      version: v1alpha1
+      kind: Subscription
+      name: openshift-multiarch-tuning-operator
+      namespace: openshift-multiarch-tuning-operator
+    patch: |-
+      - op: replace
+        path: /spec/channel
+        value: main
