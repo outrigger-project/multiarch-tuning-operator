@@ -1,8 +1,8 @@
 # The base image is expected to contain
 # /bin/opm (with a serve subcommand) and /bin/grpc_health_probe
-ARG BASE_IMAGE=registry.redhat.io/openshift4/ose-operator-registry-rhel9:v4.18
+ARG BASE_IMAGE=${BASE_IMAGE:-registry.redhat.io/openshift4/ose-operator-registry-rhel9:v4.19}
 FROM ${BASE_IMAGE}
-ARG OCP_VERSION=fbc-v4-18
+ARG OCP_VERSION=${OCP_VERSION:-fbc-v4-19}
 
 # Configure the entrypoint and command
 ENTRYPOINT ["/bin/opm"]
