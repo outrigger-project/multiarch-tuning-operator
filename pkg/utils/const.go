@@ -1,6 +1,11 @@
 package utils
 
-import "k8s.io/apimachinery/pkg/util/sets"
+import (
+	"fmt"
+	"strings"
+
+	"k8s.io/apimachinery/pkg/util/sets"
+)
 
 const (
 	ControllerNameKey = "controller"
@@ -48,6 +53,43 @@ const (
 	PodPlacementWebhookName             = "pod-placement-web-hook"
 )
 
+const (
+	ExecFormatErrorFinalizerName = "finalizers.multiarch.openshift.io/enoexec-events"
+	ExecFormatErrorLabelKey      = "multiarch.openshift.io/exec-format-error"
+	True                         = "true"
+	False                        = "false"
+	ExecFormatErrorsDetected     = "ExecFormatErrorsDetected"
+	ExecFormatErrorEventReason   = "ExecFormatError"
+	UnknownContainer             = "unknown-container" // Used when the container name is not known or not provided
+	EnoexecControllerName        = "enoexec-event-handler-controller"
+	EnoexecDaemonSet             = "enoexec-event-daemon"
+)
+
 func AllSupportedArchitecturesSet() sets.Set[string] {
 	return sets.New(ArchitectureAmd64, ArchitectureArm64, ArchitecturePpc64le, ArchitectureS390x)
+}
+
+func ExecFormatErrorEventMessage(containerName, nodeArch, command string) string {
+	var b strings.Builder
+
+	if containerName == UnknownContainer {
+		b.WriteString("A container ")
+	} else {
+		b.WriteString(fmt.Sprintf("Container %q ", containerName))
+	}
+
+	b.WriteString("is running a binary")
+	if command != "" {
+		b.WriteString(fmt.Sprintf(" (%q)", command))
+	}
+	b.WriteString(" that is not compatible with the node architecture")
+	if nodeArch != "" {
+		b.WriteString(fmt.Sprintf(" (%s)", nodeArch))
+	}
+	b.WriteString(`. This is likely due to an error in the image build process or a misconfiguration 
+in the container's startup scripts. Please ensure that the container image is built 
+for the correct architecture and that all scripts and binaries are compatible with 
+the target node's architecture.`)
+
+	return b.String()
 }

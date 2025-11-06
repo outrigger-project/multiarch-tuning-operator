@@ -16,13 +16,36 @@ limitations under the License.
 
 package plugins
 
+import "github.com/openshift/multiarch-tuning-operator/apis/multiarch/common"
+
 // +k8s:deepcopy-gen=package
 
 // Plugins represents the plugins configuration.
+// +kubebuilder:object:generate=true
 type Plugins struct {
-	// +kubebuilder:"validation:Required
 	NodeAffinityScoring *NodeAffinityScoring `json:"nodeAffinityScoring,omitempty"`
-	// Future plugins can be added here.
+
+	ExecFormatErrorMonitor *ExecFormatErrorMonitor `json:"execFormatErrorMonitor,omitempty"`
+}
+
+// pluginChecks is a map that associates a plugin name with a function that can
+// safely check if that specific plugin is enabled on a Plugins struct.
+var pluginChecks = map[common.Plugin]func(p *Plugins) bool{
+	common.NodeAffinityScoringPluginName: func(p *Plugins) bool {
+		return p.NodeAffinityScoring != nil && p.NodeAffinityScoring.IsEnabled()
+	},
+	common.ExecFormatErrorMonitorPluginName: func(p *Plugins) bool {
+		return p.ExecFormatErrorMonitor != nil && p.ExecFormatErrorMonitor.IsEnabled()
+	},
+}
+
+// PluginEnabled provides a generic and safe way to check if a specific plugin is enabled.
+// It handles the case where the Plugins struct itself is nil.
+func (p *Plugins) PluginEnabled(plugin common.Plugin) bool {
+	if checkFunc, found := pluginChecks[plugin]; found {
+		return checkFunc(p)
+	}
+	return false
 }
 
 // IBasePlugin defines a basic interface for plugins.

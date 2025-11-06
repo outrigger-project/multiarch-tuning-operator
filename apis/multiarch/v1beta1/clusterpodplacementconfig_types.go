@@ -214,6 +214,13 @@ type ClusterPodPlacementConfig struct {
 	Status ClusterPodPlacementConfigStatus `json:"status,omitempty"`
 }
 
+func (c *ClusterPodPlacementConfig) PluginsEnabled(plugin common.Plugin) bool {
+	if c.Spec.Plugins != nil {
+		return c.Spec.Plugins.PluginEnabled(plugin)
+	}
+	return false
+}
+
 //+kubebuilder:object:root=true
 
 // ClusterPodPlacementConfigList contains a list of ClusterPodPlacementConfig

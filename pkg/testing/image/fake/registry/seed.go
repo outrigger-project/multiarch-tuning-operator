@@ -89,7 +89,7 @@ func GetMockImages() []MockImage {
 		Name:          ComputeNameByMediaType(imgspecv1.MediaTypeImageManifest, "bundle"),
 		Tag:           "latest",
 		Labels: map[string]string{
-			"operators.operatorframework.io.metrics.builder": "",
+			"operators.operatorframework.io.bundle.package.v1": "",
 		},
 	}, MockImage{
 		Architectures: sets.New[string](utils.ArchitecturePpc64le, utils.ArchitectureS390x),

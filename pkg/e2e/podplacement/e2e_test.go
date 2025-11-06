@@ -73,7 +73,7 @@ var _ = SynchronizedBeforeSuite(func() []byte {
 
 	Expect(err).NotTo(HaveOccurred())
 	Eventually(framework.ValidateCreation(client, ctx)).Should(Succeed())
-	updateGlobalPullSecret()
+	updateGlobalPullSecret("quay.io/multi-arch/tuning-test-global")
 	masterNodes, err = framework.GetNodesWithLabel(ctx, client, "node-role.kubernetes.io/master", "")
 	Expect(err).NotTo(HaveOccurred())
 	if len(masterNodes.Items) == 0 {
@@ -136,7 +136,7 @@ func defaultNodeAffinityScoring() *plugins.NodeAffinityScoring {
 // read-only credentials of the quay.io org. for testing images stored
 // in a repo for which credentials are expected to stay in the global pull secret.
 // NOTE: TODO: do we need to change the location of the secrets even here for testing non-OCP distributions?
-func updateGlobalPullSecret() {
+func updateGlobalPullSecret(registry string, isdelete ...bool) {
 	secret := corev1.Secret{}
 	err := client.Get(ctx, runtimeclient.ObjectKeyFromObject(&corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
@@ -150,12 +150,28 @@ func updateGlobalPullSecret() {
 	Expect(err).NotTo(HaveOccurred(), "failed to unmarshal dockerconfigjson", err)
 	auths := dockerConfigJSON["auths"].(map[string]interface{})
 	// Add new auth for quay.io/multi-arch/tuning-test-global to global pull secret
-	registry := "quay.io/multi-arch/tuning-test-global"
-	auth := map[string]string{
-		"auth": base64.StdEncoding.EncodeToString([]byte(fmt.Sprintf("%s:%s",
-			"multi-arch+mto_testing_global_ps", "NELK81COHVFAZHY49MXK9XJ02U7A85V0HY3NS14O4K2AFRN3EY39SH64MFU3U90W"))),
+	Expect(registry).NotTo(BeEmpty(), "registry string should not be empty")
+	if len(isdelete) > 0 && isdelete[0] {
+		// Delete the auth for quay.io/multi-arch/tuning-test-global from global pull secret
+		delete(auths, registry)
+	} else {
+		auth := map[string]string{}
+		switch registry {
+		case "quay.io/multi-arch/tuning-test-global":
+			auth["auth"] = base64.StdEncoding.EncodeToString([]byte(fmt.Sprintf("%s:%s",
+				"multi-arch+mto_testing_global_ps",
+				"NELK81COHVFAZHY49MXK9XJ02U7A85V0HY3NS14O4K2AFRN3EY39SH64MFU3U90W",
+			)))
+		case "quay.io/multi-arch/tuning-test-global-2":
+			auth["auth"] = base64.StdEncoding.EncodeToString([]byte(fmt.Sprintf("%s:%s",
+				"multi-arch+mto_testing_global_ps_2",
+				"T6VH4IEMN2N8JKWW0ZFY3372Y5BLVAH9Z9ASVWZZPG2RIDSV7UVMQT5MPFJEV59T",
+			)))
+		default:
+			Expect(false).To(BeTrue(), "registry name is invalid: %s", registry)
+		}
+		auths[registry] = auth
 	}
-	auths[registry] = auth
 	dockerConfigJSON["auths"] = auths
 	newDockerConfigJSONBytes, err := json.Marshal(dockerConfigJSON)
 	Expect(err).NotTo(HaveOccurred(), "failed to marshal dockerconfigjson", err)
@@ -191,6 +207,9 @@ func createRegistryConfigTestData() {
 		Name: trustedRegistryConfig.CertConfigmapName,
 	}
 	image.Spec.RegistrySources.BlockedRegistries = append(image.Spec.RegistrySources.BlockedRegistries, framework.GetImageRepository(e2e.PausePublicMultiarchImage))
+	By("Configuring containerRuntimeSearchRegistries in image.config")
+	image.Spec.RegistrySources.ContainerRuntimeSearchRegistries = append(image.Spec.RegistrySources.ContainerRuntimeSearchRegistries,
+		"quay.io", "registry.access.redhat.com", "docker.io")
 	err = client.Update(ctx, image)
 	Expect(err).NotTo(HaveOccurred())
 }

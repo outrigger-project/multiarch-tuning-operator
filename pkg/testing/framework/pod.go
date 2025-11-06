@@ -11,12 +11,13 @@ import (
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes"
 
+	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/selection"
+	"k8s.io/apimachinery/pkg/types"
 	runtimeclient "sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/openshift/multiarch-tuning-operator/pkg/testing/builder"
-	"github.com/openshift/multiarch-tuning-operator/pkg/utils"
 )
 
 func GetPodsWithLabel(ctx context.Context, client runtimeclient.Client, namespace, labelKey, labelInValue string) (*v1.PodList, error) {
@@ -66,20 +67,25 @@ func StorePodsLog(ctx context.Context, clientset *kubernetes.Clientset, client r
 	if err != nil {
 		return err
 	}
+
+	var errs []error
 	for _, pod := range pods.Items {
 		log.Printf("Getting logs for pod %s", pod.Name)
-		logs, err := GetPodLog(ctx, clientset, utils.Namespace(), pod.Name, containerName)
+		logs, err := GetPodLog(ctx, clientset, namespace, pod.Name, containerName)
 		if err != nil {
 			log.Printf("Failed to get logs for pod %s: %v", pod.Name, err)
+			errs = append(errs, fmt.Errorf("get logs for pod %s: %w", pod.Name, err))
 			continue
 		}
 		err = WriteToFile(dir, fmt.Sprintf("%s.log", pod.Name), logs)
 		if err != nil {
-			log.Printf("Failed to write logs to file: %v", err)
-			return err
-		} else {
-			return nil
+			log.Printf("Failed to write logs to file for pod %s: %v", pod.Name, err)
+			errs = append(errs, fmt.Errorf("write logs for pod %s: %w", pod.Name, err))
 		}
+	}
+
+	if len(errs) > 0 {
+		return fmt.Errorf("errors occurred while storing pod logs: %v", errs)
 	}
 	return nil
 }
@@ -243,6 +249,50 @@ func VerifyPodAnnotations(ctx context.Context, client runtimeclient.Client, ns *
 				return p.Annotations
 			}, And(Not(BeEmpty()), HaveKeyWithValue(k, v)))))
 		}
+	}
+}
+
+func VerifyPodsEvents(ctx context.Context, client runtimeclient.Client, ns *v1.Namespace, labelKey, labelInValue, eventReason string) func(g Gomega) {
+	return func(g Gomega) {
+		// Build label selector
+		r, err := labels.NewRequirement(labelKey, selection.In, []string{labelInValue})
+		g.Expect(err).NotTo(HaveOccurred())
+
+		pods := &v1.PodList{}
+		err = client.List(ctx, pods, &runtimeclient.ListOptions{
+			Namespace:     ns.Name,
+			LabelSelector: labels.NewSelector().Add(*r),
+		})
+		g.Expect(err).NotTo(HaveOccurred())
+		if len(pods.Items) == 0 {
+			fmt.Printf("No pods found with label %s=%s, skipping event verification\n", labelKey, labelInValue)
+			return
+		}
+
+		// List all events in the namespace
+		events := &v1.EventList{}
+		err = client.List(ctx, events, &runtimeclient.ListOptions{
+			Namespace: ns.Name,
+			FieldSelector: fields.AndSelectors(
+				fields.OneTermEqualSelector("involvedObject.kind", "Pod"),
+				fields.OneTermEqualSelector("reason", eventReason),
+			),
+		})
+		g.Expect(err).NotTo(HaveOccurred())
+
+		// Create a map for faster event lookup
+		eventMap := make(map[types.UID]bool)
+		for _, e := range events.Items {
+			eventMap[e.InvolvedObject.UID] = true
+		}
+		// Verify each pod has at least one matching event
+		g.Expect(pods.Items).Should(HaveEach(
+			WithTransform(func(p v1.Pod) bool {
+				return eventMap[p.UID]
+			}, BeTrue()),
+		), "not all pods in namespace %s received event with reason %q. "+
+			"Found %d pods but only %d matching events",
+			ns.Name, eventReason, len(pods.Items), len(events.Items))
 	}
 }
 

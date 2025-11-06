@@ -26,8 +26,8 @@ metadata:
     capabilities: Seamless Upgrades
     categories: OpenShift Optional, Other
     console.openshift.io/disable-operand-delete: "false"
-    containerImage: registry.ci.openshift.org/origin/multiarch-tuning-operator:main
-    createdAt: "2025-05-07T19:54:50Z"
+    containerImage: registry.ci.openshift.org/origin/multiarch-tuning-operator:v1.x
+    createdAt: "2025-11-12T04:49:47Z"
     features.operators.openshift.io/cnf: "false"
     features.operators.openshift.io/cni: "false"
     features.operators.openshift.io/csi: "false"
@@ -45,6 +45,7 @@ metadata:
     operators.openshift.io/valid-subscription: '["OpenShift Kubernetes Engine", "OpenShift
       Container Platform", "OpenShift Platform Plus"]'
     operators.operatorframework.io/builder: operator-sdk-v1.31.0
+    operators.operatorframework.io/internal-objects: '["enoexecevents.multiarch.openshift.io"]'
     operators.operatorframework.io/project_layout: go.kubebuilder.io/v3
     repository: https://github.com/openshift/multiarch-tuning-operator
     support: Red Hat
@@ -53,7 +54,7 @@ metadata:
     operatorframework.io/arch.arm64: supported
     operatorframework.io/arch.ppc64le: supported
     operatorframework.io/arch.s390x: supported
-  name: multiarch-tuning-operator.v1.1.1
+  name: multiarch-tuning-operator.v1.2.1
   namespace: openshift-multiarch-tuning-operator
 spec:
   apiservicedefinitions: {}
@@ -72,6 +73,11 @@ spec:
       displayName: Cluster Pod Placement Config
       kind: ClusterPodPlacementConfig
       name: clusterpodplacementconfigs.multiarch.openshift.io
+      version: v1beta1
+    - description: ENoExecEvent is the Schema for the enoexecevents API
+      displayName: ENo Exec Event
+      kind: ENoExecEvent
+      name: enoexecevents.multiarch.openshift.io
       version: v1beta1
   description: |
     The Multiarch Tuning Operator optimizes workload management within multi-architecture clusters and in
@@ -119,6 +125,13 @@ spec:
           verbs:
           - get
           - update
+        - apiGroups:
+          - ""
+          resources:
+          - nodes
+          verbs:
+          - get
+          - list
         - apiGroups:
           - ""
           resources:
@@ -184,6 +197,7 @@ spec:
         - apiGroups:
           - apps
           resources:
+          - daemonsets
           - deployments
           verbs:
           - create
@@ -222,6 +236,7 @@ spec:
           - multiarch.openshift.io
           resources:
           - clusterpodplacementconfigs
+          - enoexecevents
           verbs:
           - create
           - delete
@@ -234,12 +249,14 @@ spec:
           - multiarch.openshift.io
           resources:
           - clusterpodplacementconfigs/finalizers
+          - enoexecevents/finalizers
           verbs:
           - update
         - apiGroups:
           - multiarch.openshift.io
           resources:
           - clusterpodplacementconfigs/status
+          - enoexecevents/status
           verbs:
           - get
           - patch
@@ -316,7 +333,7 @@ spec:
             metadata:
               annotations:
                 kubectl.kubernetes.io/default-container: manager
-                multiarch.openshift.io/image: registry.ci.openshift.org/origin/multiarch-tuning-operator:main
+                multiarch.openshift.io/image: registry.ci.openshift.org/origin/multiarch-tuning-operator:v1.x
                 openshift.io/required-scc: restricted-v2
                 target.workload.openshift.io/management: |
                   {"effect": "PreferredDuringScheduling"}
@@ -357,7 +374,7 @@ spec:
                   valueFrom:
                     fieldRef:
                       fieldPath: metadata.annotations['multiarch.openshift.io/image']
-                image: registry.ci.openshift.org/origin/multiarch-tuning-operator:main
+                image: registry.ci.openshift.org/origin/multiarch-tuning-operator:v1.x
                 imagePullPolicy: Always
                 livenessProbe:
                   httpGet:
@@ -463,7 +480,7 @@ spec:
   provider:
     name: Red Hat
     url: https://github.com/openshift/multiarch-tuning-operator
-  version: 1.1.1
+  version: 1.2.1
   webhookdefinitions:
   - admissionReviewVersions:
     - v1

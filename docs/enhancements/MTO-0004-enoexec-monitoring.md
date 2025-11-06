@@ -244,6 +244,8 @@ In large-scale deployments spanning many nodes, the architecture is intentionall
 
 ### Open Questions
 
+- Is it actually possible to retrieve the name of the process' command that fails to run?
+
 ### Test Plan
 
 #### Unit Testing and Integration Test Suites
@@ -290,14 +292,8 @@ A new section will be added to the Multiarch Tuning Operator documentation to ex
 
 ## Implementation History
 
-In progress:
-  - ENoExecEvent CRD definition: https://github.com/openshift/multiarch-tuning-operator/pull/612, MULTIARCH-5416[^7]
-  - Exec Format Error plugin: https://github.com/openshift/multiarch-tuning-operator/pull/602, MULTIARCH-5420[^8]
-Not Started:
-  - Core controller and implementation logic: MULTIARCH-5417[^9], MULTIARCH-5419[^10], MULTIARCH-5421[^11]
-  - Metrics for ENoExecEvent: MULTIARCH-5418[^12]
-  - Integration and e2e tests: MULTIARCH-5422[^13]
-  - Documentation of feature: MULTIARCH-5423[^14]
+- Started
+- 2025/07/21: The initial implementation will not include the command name. It's still unsure if we can get this information in a reliable way for an already-dead process.
 
 ## Infrastructure Needed
 

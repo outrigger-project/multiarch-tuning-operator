@@ -28,9 +28,11 @@ import (
 	"k8s.io/client-go/tools/record"
 	ctrllog "sigs.k8s.io/controller-runtime/pkg/log"
 
+	"github.com/openshift/multiarch-tuning-operator/apis/multiarch/common"
 	"github.com/openshift/multiarch-tuning-operator/apis/multiarch/v1beta1"
 	"github.com/openshift/multiarch-tuning-operator/controllers/podplacement/metrics"
 	"github.com/openshift/multiarch-tuning-operator/pkg/image"
+	"github.com/openshift/multiarch-tuning-operator/pkg/models"
 	"github.com/openshift/multiarch-tuning-operator/pkg/utils"
 )
 
@@ -47,12 +49,36 @@ type containerImage struct {
 }
 
 type Pod struct {
-	corev1.Pod
-	ctx      context.Context
-	recorder record.EventRecorder
+	models.Pod
 }
 
-func (pod *Pod) GetPodImagePullSecrets() []string {
+func newPod(pod *corev1.Pod, ctx context.Context, recorder record.EventRecorder) *Pod {
+	return &Pod{
+		Pod: *models.NewPod(pod, ctx, recorder),
+	}
+}
+
+// HasSchedulingGate checks if the pod has the scheduling gate utils.SchedulingGateName.
+func (pod *Pod) HasSchedulingGate() bool {
+	return pod.HasGate(utils.SchedulingGateName)
+}
+
+// RemoveSchedulingGate removes the scheduling gate utils.SchedulingGateName from the pod.
+func (pod *Pod) RemoveSchedulingGate() {
+	pod.RemoveGate(utils.SchedulingGateName)
+	// The scheduling gate is removed. We also add a label to the pod to indicate that the scheduling gate was removed
+	// and this pod was processed by the operator. That's useful for testing and debugging, but also gives the user
+	// an indication that the pod was processed by the operator.
+	pod.EnsureLabel(utils.SchedulingGateLabel, utils.SchedulingGateLabelValueRemoved)
+}
+
+// ensureSchedulingGate ensures that the pod has the scheduling gate utils.SchedulingGateName.
+func (pod *Pod) ensureSchedulingGate() {
+	pod.AddGate(utils.SchedulingGateName)
+}
+
+// getPodImagePullSecrets returns the names of the image pull secrets used by the pod.
+func (pod *Pod) getPodImagePullSecrets() []string {
 	if pod.Spec.ImagePullSecrets == nil {
 		// If the imagePullSecrets array is nil, return emptylist
 		return []string{}
@@ -62,38 +88,6 @@ func (pod *Pod) GetPodImagePullSecrets() []string {
 		secretRefs[i] = secret.Name
 	}
 	return secretRefs
-}
-
-func (pod *Pod) HasSchedulingGate() bool {
-	if pod.Spec.SchedulingGates == nil {
-		// If the schedulingGates array is nil, we return false
-		return false
-	}
-	for _, condition := range pod.Spec.SchedulingGates {
-		if condition.Name == utils.SchedulingGateName {
-			return true
-		}
-	}
-	// the scheduling gate is not found.
-	return false
-}
-
-func (pod *Pod) RemoveSchedulingGate() {
-	if len(pod.Spec.SchedulingGates) == 0 {
-		// If the schedulingGates array is nil, we return
-		return
-	}
-	filtered := make([]corev1.PodSchedulingGate, 0, len(pod.Spec.SchedulingGates))
-	for _, schedulingGate := range pod.Spec.SchedulingGates {
-		if schedulingGate.Name != utils.SchedulingGateName {
-			filtered = append(filtered, schedulingGate)
-		}
-	}
-	pod.Spec.SchedulingGates = filtered
-	// The scheduling gate is removed. We also add a label to the pod to indicate that the scheduling gate was removed
-	// and this pod was processed by the operator. That's useful for testing and debugging, but also gives the user
-	// an indication that the pod was processed by the operator.
-	pod.ensureLabel(utils.SchedulingGateLabel, utils.SchedulingGateLabelValueRemoved)
 }
 
 // SetNodeAffinityArchRequirement wraps the logic to set the nodeAffinity for the pod.
@@ -109,9 +103,9 @@ func (pod *Pod) SetNodeAffinityArchRequirement(pullSecretDataList [][]byte) (boo
 	if err != nil {
 		return false, err
 	}
-	pod.ensureNoLabel(utils.ImageInspectionErrorLabel)
+	pod.EnsureNoLabel(utils.ImageInspectionErrorLabel)
 	if len(requirement.Values) == 0 {
-		pod.publishEvent(corev1.EventTypeNormal, NoSupportedArchitecturesFound, NoSupportedArchitecturesFoundMsg)
+		pod.PublishEvent(corev1.EventTypeNormal, NoSupportedArchitecturesFound, NoSupportedArchitecturesFoundMsg)
 	}
 	pod.ensureArchitectureLabels(requirement)
 
@@ -166,8 +160,8 @@ func (pod *Pod) setRequiredArchNodeAffinity(requirement corev1.NodeSelectorRequi
 	}
 	// if the nodeSelectorTerms were patched at least once, we set the nodeAffinity label to the set value, to keep
 	// track of the fact that the nodeAffinity was patched by the operator.
-	pod.ensureLabel(utils.NodeAffinityLabel, utils.NodeAffinityLabelValueSet)
-	pod.publishEvent(corev1.EventTypeNormal, ArchitectureAwareNodeAffinitySet,
+	pod.EnsureLabel(utils.NodeAffinityLabel, utils.NodeAffinityLabelValueSet)
+	pod.PublishEvent(corev1.EventTypeNormal, ArchitectureAwareNodeAffinitySet,
 		ArchitecturePredicateSetupMsg+fmt.Sprintf("{%s}", strings.Join(requirement.Values, ", ")))
 }
 
@@ -209,8 +203,8 @@ func (pod *Pod) SetPreferredArchNodeAffinity(cppc *v1beta1.ClusterPodPlacementCo
 
 	// if the nodeSelectorTerms were patched at least once, we set the nodeAffinity label to the set value, to keep
 	// track of the fact that the nodeAffinity was patched by the operator.
-	pod.ensureLabel(utils.PreferredNodeAffinityLabel, utils.NodeAffinityLabelValueSet)
-	pod.publishEvent(corev1.EventTypeNormal, ArchitectureAwareNodeAffinitySet, ArchitecturePreferredPredicateSetupMsg)
+	pod.EnsureLabel(utils.PreferredNodeAffinityLabel, utils.NodeAffinityLabelValueSet)
+	pod.PublishEvent(corev1.EventTypeNormal, ArchitectureAwareNodeAffinitySet, ArchitecturePreferredPredicateSetupMsg)
 }
 
 func (pod *Pod) getArchitecturePredicate(pullSecretDataList [][]byte) (corev1.NodeSelectorRequirement, error) {
@@ -247,7 +241,7 @@ func (pod *Pod) imagesNamesSet() sets.Set[containerImage] {
 // inspect returns the list of supported architectures for the images used by the pod.
 // if an error occurs, it returns the error and a nil slice of strings.
 func (pod *Pod) intersectImagesArchitecture(pullSecretDataList [][]byte) (supportedArchitectures []string, err error) {
-	log := ctrllog.FromContext(pod.ctx)
+	log := ctrllog.FromContext(pod.Ctx())
 	imageNamesSet := pod.imagesNamesSet()
 	log.V(1).Info("Images list for pod", "imageNamesSet", fmt.Sprintf("%+v", imageNamesSet))
 	// https://github.com/containers/skopeo/blob/v1.11.1/cmd/skopeo/inspect.go#L72
@@ -261,7 +255,7 @@ func (pod *Pod) intersectImagesArchitecture(pullSecretDataList [][]byte) (suppor
 		// We are collecting the time to inspect the image here to avoid implementing a metric in each of the
 		// cache implementations.
 		now := time.Now()
-		currentImageSupportedArchitectures, err := imageInspectionCache.GetCompatibleArchitecturesSet(pod.ctx,
+		currentImageSupportedArchitectures, err := imageInspectionCache.GetCompatibleArchitecturesSet(pod.Ctx(),
 			imageContainer.imageName, imageContainer.skipCache, pullSecretDataList)
 		utils.HistogramObserve(now, metrics.TimeToInspectImage)
 		if err != nil {
@@ -275,53 +269,6 @@ func (pod *Pod) intersectImagesArchitecture(pullSecretDataList [][]byte) (suppor
 		}
 	}
 	return sets.List(supportedArchitecturesSet), nil
-}
-
-func (pod *Pod) publishEvent(eventType, reason, message string) {
-	if pod.recorder != nil {
-		pod.recorder.Event(&pod.Pod, eventType, reason, message)
-	}
-}
-
-// ensureLabel ensures that the pod has the given label with the given value.
-func (pod *Pod) ensureLabel(label string, value string) {
-	if pod.Labels == nil {
-		pod.Labels = make(map[string]string)
-	}
-	pod.Labels[label] = value
-}
-
-func (pod *Pod) ensureNoLabel(label string) {
-	if pod.Labels == nil {
-		return
-	}
-	delete(pod.Labels, label)
-}
-
-// ensureLabel ensures that the pod has the given label with the given value.
-func (pod *Pod) ensureAnnotation(annotation string, value string) {
-	if pod.Annotations == nil {
-		pod.Annotations = make(map[string]string)
-	}
-	pod.Annotations[annotation] = value
-}
-
-// ensureAndIncrementLabel ensures that the pod has the given label with the given value.
-// If the label is already set, it increments the value.
-func (pod *Pod) ensureAndIncrementLabel(label string) {
-	if pod.Labels == nil {
-		pod.Labels = make(map[string]string)
-	}
-	if _, ok := pod.Labels[label]; !ok {
-		pod.Labels[label] = "1"
-		return
-	}
-	cur, err := strconv.ParseInt(pod.Labels[label], 10, 32)
-	if err != nil {
-		pod.Labels[label] = "1"
-	} else {
-		pod.Labels[label] = fmt.Sprintf("%d", cur+1)
-	}
 }
 
 func (pod *Pod) maxRetries() bool {
@@ -348,29 +295,15 @@ func (pod *Pod) ensureArchitectureLabels(requirement corev1.NodeSelectorRequirem
 		// if the requirement has no values, we set the NoSupportedArchLabel as a label for the node. That's a dummy
 		// and non-available-by-default label that we use to prevent the pod from being scheduled when it cannot run all
 		// the containers in at least one architecture.
-		pod.ensureLabel(utils.NoSupportedArchLabel, "")
+		pod.EnsureLabel(utils.NoSupportedArchLabel, "")
 	case 1:
-		pod.ensureLabel(utils.SingleArchLabel, "")
+		pod.EnsureLabel(utils.SingleArchLabel, "")
 	default:
-		pod.ensureLabel(utils.MultiArchLabel, "")
+		pod.EnsureLabel(utils.MultiArchLabel, "")
 	}
 	for _, value := range requirement.Values {
-		pod.ensureLabel(utils.ArchLabelValue(value), "")
+		pod.EnsureLabel(utils.ArchLabelValue(value), "")
 	}
-}
-
-// hasControlPlaneNodeSelector returns true if the pod has a node selector that matches the control plane nodes.
-func (pod *Pod) hasControlPlaneNodeSelector() bool {
-	if pod.Spec.NodeSelector == nil {
-		return false
-	}
-	requiredSelectors := []string{utils.MasterNodeSelectorLabel, utils.ControlPlaneNodeSelectorLabel}
-	for _, value := range requiredSelectors {
-		if _, ok := pod.Spec.NodeSelector[value]; ok {
-			return true
-		}
-	}
-	return false
 }
 
 // shouldIgnorePod returns true if the pod should be ignored by the operator.
@@ -384,24 +317,9 @@ func (pod *Pod) hasControlPlaneNodeSelector() bool {
 // - only the nodeSelector/nodeAffinity is set for the kubernetes.io/arch label and the NodeAffinityScoring plugin is disabled.
 func (pod *Pod) shouldIgnorePod(cppc *v1beta1.ClusterPodPlacementConfig) bool {
 	return utils.Namespace() == pod.Namespace || strings.HasPrefix(pod.Namespace, "kube-") ||
-		pod.Spec.NodeName != "" || pod.hasControlPlaneNodeSelector() || pod.isFromDaemonSet() ||
-		pod.isNodeSelectorConfiguredForArchitecture() && (cppc.Spec.Plugins == nil ||
-			!cppc.Spec.Plugins.NodeAffinityScoring.IsEnabled() || pod.isPreferredAffinityConfiguredForArchitecture())
-}
-
-// ensureSchedulingGate ensures that the pod has the scheduling gate utils.SchedulingGateName.
-func (pod *Pod) ensureSchedulingGate() {
-	// https://github.com/kubernetes/enhancements/tree/master/keps/sig-scheduling/3521-pod-scheduling-readiness
-	if pod.Spec.SchedulingGates == nil {
-		pod.Spec.SchedulingGates = []corev1.PodSchedulingGate{}
-	}
-	// if the gate is already present, do not try to patch (it would fail)
-	for _, schedulingGate := range pod.Spec.SchedulingGates {
-		if schedulingGate.Name == utils.SchedulingGateName {
-			return
-		}
-	}
-	pod.Spec.SchedulingGates = append(pod.Spec.SchedulingGates, corev1.PodSchedulingGate{Name: utils.SchedulingGateName})
+		pod.Spec.NodeName != "" || pod.HasControlPlaneNodeSelector() || pod.IsFromDaemonSet() ||
+		pod.isNodeSelectorConfiguredForArchitecture() &&
+			(!cppc.PluginsEnabled(common.NodeAffinityScoringPluginName) || pod.isPreferredAffinityConfiguredForArchitecture())
 }
 
 // isNodeSelectorConfiguredForArchitecture returns true if the pod has already a nodeSelector for the architecture label
@@ -449,34 +367,23 @@ func (pod *Pod) isNodeSelectorConfiguredForArchitecture() bool {
 	return true
 }
 
-// isPodFromDaemonSet returns true if the pod is from a daemonSet.
-func (pod *Pod) isFromDaemonSet() bool {
-	// Check all ownerRef
-	for _, ownerRef := range pod.OwnerReferences {
-		if ownerRef.Kind == "DaemonSet" && ownerRef.Controller != nil && *ownerRef.Controller {
-			return true
-		}
-	}
-	return false
-}
-
 func (pod *Pod) publishIgnorePod() {
-	log := ctrllog.FromContext(pod.ctx)
+	log := ctrllog.FromContext(pod.Ctx())
 	log.V(1).Info("The pod has the nodeSelector or all the nodeAffinityTerms set for the kubernetes.io/arch label. Ignoring the pod...")
-	pod.ensureLabel(utils.NodeAffinityLabel, utils.LabelValueNotSet)
-	pod.publishEvent(corev1.EventTypeNormal, ArchitecturePredicatesConflict, ArchitecturePredicatesConflictMsg)
+	pod.EnsureLabel(utils.NodeAffinityLabel, utils.LabelValueNotSet)
+	pod.PublishEvent(corev1.EventTypeNormal, ArchitecturePredicatesConflict, ArchitecturePredicatesConflictMsg)
 }
 
 func (pod *Pod) handleError(err error, s string) {
 	if err == nil {
 		return
 	}
-	log := ctrllog.FromContext(pod.ctx)
+	log := ctrllog.FromContext(pod.Ctx())
 	metrics.FailedInspectionCounter.Inc()
-	pod.ensureLabel(utils.ImageInspectionErrorLabel, "")
-	pod.ensureAnnotation(utils.ImageInspectionErrorLabel, err.Error())
-	pod.ensureAndIncrementLabel(utils.ImageInspectionErrorCountLabel)
-	pod.publishEvent(corev1.EventTypeWarning, ImageArchitectureInspectionError, ImageArchitectureInspectionErrorMsg+err.Error())
+	pod.EnsureLabel(utils.ImageInspectionErrorLabel, "")
+	pod.EnsureAnnotation(utils.ImageInspectionErrorLabel, err.Error())
+	pod.EnsureAndIncrementLabel(utils.ImageInspectionErrorCountLabel)
+	pod.PublishEvent(corev1.EventTypeWarning, ImageArchitectureInspectionError, ImageArchitectureInspectionErrorMsg+err.Error())
 	log.Error(err, s)
 }
 

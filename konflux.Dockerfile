@@ -13,7 +13,7 @@ COPY vendor/ vendor/
 #RUN go mod download
 
 # Copy the go source
-COPY main.go main.go
+COPY cmd/ cmd/
 COPY apis/ apis/
 COPY controllers/ controllers/
 COPY pkg/ pkg/
@@ -23,19 +23,21 @@ COPY pkg/ pkg/
 # was called. For example, if we call make docker-build in a local env which has the Apple Silicon M1 SO
 # the docker BUILDPLATFORM arg will be linux/arm64 when for Apple x86 it will be linux/amd64. Therefore,
 # by leaving it empty we can ensure that the container and binary shipped on it will have the same platform.
-RUN CGO_ENABLED=1 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -o manager main.go
+RUN CGO_ENABLED=1 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -o manager cmd/main-binary/main.go
+RUN CGO_ENABLED=1 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -o enoexec-daemon cmd/enoexec-daemon/main.go
 
 FROM registry.redhat.io/rhel9-2-els/rhel:9.2
 WORKDIR /
 COPY --from=builder /workspace/manager .
+COPY --from=builder /workspace/enoexec-daemon .
 COPY LICENSE /licenses/license.txt
 
 USER 65532:65532
 LABEL com.redhat.component="Multiarch Tuning Operator"
 LABEL distribution-scope="public"
 LABEL name="multiarch-tuning/multiarch-tuning-rhel9-operator"
-LABEL release="1.1.1"
-LABEL version="1.1.1"
+LABEL release="1.2.1"
+LABEL version="1.2.1"
 LABEL cpe="cpe:/a:redhat:multiarch_tuning_operator:1.1::el9"
 LABEL url="https://github.com/openshift/multiarch-tuning-operator"
 LABEL vendor="Red Hat, Inc."

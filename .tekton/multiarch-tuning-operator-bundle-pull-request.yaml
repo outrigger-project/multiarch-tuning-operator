@@ -7,66 +7,61 @@ metadata:
     build.appstudio.redhat.com/pull_request_number: '{{pull_request_number}}'
     build.appstudio.redhat.com/target_branch: '{{target_branch}}'
     pipelinesascode.tekton.dev/max-keep-runs: "3"
-    pipelinesascode.tekton.dev/on-cel-expression: event == "pull_request" && target_branch
-      == "main"  && ("bundle/***".pathChanged() || ".tekton/***".pathChanged() ||
-      "bundle.konflux.Dockerfile".pathChanged() || "trigger-konflux-builds.txt".pathChanged()
-      )
+    pipelinesascode.tekton.dev/on-cel-expression: event == "pull_request" && target_branch == "v1.x"  && ("bundle/***".pathChanged() || ".tekton/***".pathChanged() || "bundle.konflux.Dockerfile".pathChanged() || "trigger-konflux-builds.txt".pathChanged() )
   creationTimestamp: null
   labels:
-    appstudio.openshift.io/application: multiarch-tuning-operator
-    appstudio.openshift.io/component: multiarch-tuning-operator-bundle
+    appstudio.openshift.io/application: multiarch-tuning-operator-v1-x
+    appstudio.openshift.io/component: multiarch-tuning-operator-bundle-v1-x
     pipelines.appstudio.openshift.io/type: build
-  name: multiarch-tuning-operator-bundle-on-pull-request
+  name: multiarch-tuning-operator-bundle-v1-x-on-pull-request
   namespace: multiarch-tuning-ope-tenant
 spec:
   params:
-  - name: artifact-type
-    value: operatorbundle
-  - name: dockerfile
-    value: bundle.konflux.Dockerfile
-  - name: git-url
-    value: '{{source_url}}'
-  - name: image-expires-after
-    value: 5d
-  - name: output-image
-    value: quay.io/redhat-user-workloads/multiarch-tuning-ope-tenant/multiarch-tuning-operator/multiarch-tuning-operator-bundle:on-pr-{{revision}}
-  - name: path-context
-    value: .
-  - name: revision
-    value: '{{revision}}'
-  - name: build-platforms
-    value:
-    - linux/amd64
-  - name: hermetic
-    value: "true"
-  - name: prefetch-input
-    value: '{"packages": [{"type": "gomod"}], "flags": ["gomod-vendor-check"]}'
-  - name: build-source-image
-    value: "true"
+    - name: artifact-type
+      value: operatorbundle
+    - name: dockerfile
+      value: bundle.konflux.Dockerfile
+    - name: git-url
+      value: '{{source_url}}'
+    - name: image-expires-after
+      value: 5d
+    - name: output-image
+      value: quay.io/redhat-user-workloads/multiarch-tuning-ope-tenant/multiarch-tuning-operator-v1-x/multiarch-tuning-operator-bundle-v1-x:on-pr-{{revision}}
+    - name: path-context
+      value: .
+    - name: revision
+      value: '{{revision}}'
+    - name: build-platforms
+      value:
+        - linux/amd64
+    - name: hermetic
+      value: "true"
+    - name: prefetch-input
+      value: '{"packages": [{"type": "gomod"}], "flags": ["gomod-vendor-check"]}'
+    - name: build-source-image
+      value: "true"
   pipelineRef:
-    params:
-    - name: name
-      value: docker-build-oci-ta
-    - name: bundle
-      value: quay.io/konflux-ci/tekton-catalog/pipeline-docker-build-oci-ta:devel@sha256:0de22ff8cebba1d34bbd5f3ea07e45ed863d99a51d82119f9893946ddfbdd018
-    - name: kind
-      value: pipeline
     resolver: bundles
-  taskRunTemplate:
-    serviceAccountName: build-pipeline-multiarch-tuning-operator-bundle
+    params:
+      - name: name
+        value: docker-build-oci-ta
+      - name: bundle
+        value: quay.io/konflux-ci/tekton-catalog/pipeline-docker-build-oci-ta:devel@sha256:b24402e476665b242040b0f7cb6cd21b775e2e835192c1d03566eed6473afb20
+      - name: kind
+        value: pipeline
   workspaces:
-  - name: workspace
-    volumeClaimTemplate:
-      metadata:
-        creationTimestamp: null
-      spec:
-        accessModes:
-        - ReadWriteOnce
-        resources:
-          requests:
-            storage: 1Gi
-      status: {}
-  - name: git-auth
-    secret:
-      secretName: '{{ git_auth_secret }}'
+    - name: workspace
+      volumeClaimTemplate:
+        metadata:
+          creationTimestamp: null
+        spec:
+          accessModes:
+            - ReadWriteOnce
+          resources:
+            requests:
+              storage: 1Gi
+        status: {}
+    - name: git-auth
+      secret:
+        secretName: '{{ git_auth_secret }}'
 status: {}
