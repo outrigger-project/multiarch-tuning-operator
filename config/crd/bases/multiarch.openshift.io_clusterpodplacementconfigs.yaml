@@ -3,7 +3,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.17.2
+    controller-gen.kubebuilder.io/version: v0.19.0
   name: clusterpodplacementconfigs.multiarch.openshift.io
 spec:
   group: multiarch.openshift.io
@@ -286,6 +286,16 @@ spec:
                   Plugins defines the configurable plugins for this component.
                   This field is optional and will be omitted from the output if not set.
                 properties:
+                  execFormatErrorMonitor:
+                    description: ExecFormatErrorMonitor is a plugin that provides
+                      Exec Format Errors events reporting and monitoring
+                    properties:
+                      enabled:
+                        description: Enabled indicates whether the plugin is enabled.
+                        type: boolean
+                    required:
+                    - enabled
+                    type: object
                   nodeAffinityScoring:
                     description: NodeAffinityScoring is the plugin that implements
                       the ScorePlugin interface.

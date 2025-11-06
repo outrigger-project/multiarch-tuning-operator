@@ -18,7 +18,8 @@ func NewPreferredSchedulingTerm() *PreferredSchedulingTermBuilder {
 }
 
 func (p *PreferredSchedulingTermBuilder) WithKeyAndValues(weight int, nodeSelectorTerm v1.NodeSelectorTerm) *PreferredSchedulingTermBuilder {
-	p.preferredSchedulingTerm.Weight = int32(weight)
+	// Cast to int32 for kubernetes Weight field (valid range is typically 1-100)
+	p.preferredSchedulingTerm.Weight = int32(weight) // #nosec G115 -- weight values are controlled in test code
 	p.preferredSchedulingTerm.Preference = nodeSelectorTerm
 	return p
 }

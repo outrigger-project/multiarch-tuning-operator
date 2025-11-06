@@ -32,6 +32,7 @@ var (
 type Facade struct {
 	inspectionCache       ICache
 	storeGlobalPullSecret func(pullSecret []byte)
+	clearCache            func()
 }
 
 func (i *Facade) GetCompatibleArchitecturesSet(ctx context.Context, imageReference string, skipCache bool, secrets [][]byte) (architectures sets.Set[string], err error) {
@@ -40,6 +41,7 @@ func (i *Facade) GetCompatibleArchitecturesSet(ctx context.Context, imageReferen
 
 func (i *Facade) StoreGlobalPullSecret(pullSecret []byte) {
 	i.storeGlobalPullSecret(pullSecret)
+	i.clearCache()
 }
 
 func newImageFacade() *Facade {
@@ -47,6 +49,7 @@ func newImageFacade() *Facade {
 	return &Facade{
 		inspectionCache:       inspectionCache,
 		storeGlobalPullSecret: inspectionCache.registryInspector.storeGlobalPullSecret,
+		clearCache:            inspectionCache.clearCache,
 	}
 }
 

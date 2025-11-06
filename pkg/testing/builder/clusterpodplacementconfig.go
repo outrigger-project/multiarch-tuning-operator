@@ -1,9 +1,9 @@
 package builder
 
 import (
-	"github.com/openshift/multiarch-tuning-operator/apis/multiarch/common"
-	"github.com/openshift/multiarch-tuning-operator/apis/multiarch/common/plugins"
-	"github.com/openshift/multiarch-tuning-operator/apis/multiarch/v1beta1"
+	"github.com/openshift/multiarch-tuning-operator/api/common"
+	"github.com/openshift/multiarch-tuning-operator/api/common/plugins"
+	"github.com/openshift/multiarch-tuning-operator/api/v1beta1"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -40,6 +40,17 @@ func (p *ClusterPodPlacementConfigBuilder) WithPlugins() *ClusterPodPlacementCon
 	if p.Spec.Plugins == nil {
 		p.Spec.Plugins = &plugins.Plugins{}
 	}
+	return p
+}
+
+func (p *ClusterPodPlacementConfigBuilder) WithExecFormatErrorMonitor(enabled bool) *ClusterPodPlacementConfigBuilder {
+	if p.Spec.Plugins == nil {
+		p.Spec.Plugins = &plugins.Plugins{}
+	}
+	if p.Spec.Plugins.ExecFormatErrorMonitor == nil {
+		p.Spec.Plugins.ExecFormatErrorMonitor = &plugins.ExecFormatErrorMonitor{}
+	}
+	p.Spec.Plugins.ExecFormatErrorMonitor.Enabled = enabled
 	return p
 }
 
