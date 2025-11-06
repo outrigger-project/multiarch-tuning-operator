@@ -32,7 +32,7 @@ spec:
     value: '{{revision}}'
   - name: hermetic
     value: "true"
-  - name: BUILD_ARGS
+  - name: build-args
     value:
       - 'BASE_IMAGE=registry.redhat.io/openshift4/ose-operator-registry-rhel9:v4.18'
       - 'OCP_VERSION=fbc-v4-18'
@@ -43,7 +43,7 @@ spec:
       - name: name
         value: fbc-builder
       - name: bundle
-        value: quay.io/konflux-ci/tekton-catalog/pipeline-fbc-builder:devel@sha256:f023a063cb8e80661a9aa197cb183445bf5d4b4a2f794612f65221dd337e8c12
+        value: quay.io/konflux-ci/tekton-catalog/pipeline-fbc-builder:devel@sha256:885257d2ba590496838755017439095c99bac5f57fef7cfc816696bedd2e769b
       - name: kind
         value: pipeline
   workspaces:
