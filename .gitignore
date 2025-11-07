@@ -38,6 +38,7 @@ go.work
 *.swp
 *.swo
 *~
+*.iml
 
 # a tmp folder fratch scratches
 tmp/

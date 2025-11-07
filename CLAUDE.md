@@ -4,7 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-The Multiarch Tuning Operator enhances operational experience within multi-architecture clusters by providing architecture-aware pod placement. It is a Kubernetes operator built with Kubebuilder that manages the pod placement operand consisting of a controller and webhook.
+The Multiarch Tuning Operator enhances operational experience within multi-architecture clusters and single-architecture clusters migrating to multi-architecture compute configurations. It provides architecture-aware scheduling of workloads by automatically adding node affinity requirements based on container image architectures.
+
+This is a Kubernetes operator built with Kubebuilder and operator-sdk, primarily targeting OpenShift clusters.
 
 ## Development Commands
 
@@ -28,16 +30,30 @@ touch .persistent-buildx
 # Run all checks and tests (includes manifests, generate, fmt, vet, goimports, gosec, lint, and unit tests)
 make test
 
-# Individual checks (all run in containerized environment by default)
-make lint          # golangci-lint
-make gosec         # SAST security scanning
-make vet           # go vet
-make goimports     # import formatting
-make fmt           # go fmt
-make unit          # unit tests only
+# Unit tests only
+make unit
 
-# Run tests locally (without Docker)
-NO_DOCKER=1 make test
+# E2E tests (requires deployed operator)
+KUBECONFIG=/path/to/kubeconfig NAMESPACE=openshift-multiarch-tuning-operator make e2e
+
+# Individual checks
+make lint        # golangci-lint
+make gosec       # SAST security scanning
+make vet         # go vet
+make goimports   # goimports check
+make fmt         # gofmt
+```
+
+**Running tests locally vs containerized:**
+- By default, tests run in a containerized environment using BUILD_IMAGE
+- To run locally: `NO_DOCKER=1 make test`
+- Or add `NO_DOCKER=1` to a `.env` file (see dotenv.example)
+
+**Running a single test:**
+```bash
+# Set GINKGO_ARGS to target specific tests
+GINKGO_ARGS="-v --focus='your test pattern'" make unit
+```
 
 # Run e2e tests (requires deployed operator)
 KUBECONFIG=/path/to/cluster/kubeconfig NAMESPACE=openshift-multiarch-tuning-operator make e2e
@@ -80,6 +96,15 @@ make undeploy
 # Uninstall CRDs
 make uninstall
 ```
+### API Changes
+
+```bash
+# Generate manifests (CRDs, RBAC, etc.) after editing API definitions
+make manifests
+
+# Generate DeepCopy implementations
+make generate
+```
 
 ### Bundle and Catalog Commands
 ```shell
@@ -100,9 +125,53 @@ make catalog-push CATALOG_IMG=<registry>/multiarch-tuning-operator-catalog:<vers
 
 ## Architecture
 
+### Binary Modes
+
+The operator runs in different modes controlled by flags (see bindFlags() function in cmd/main.go):
+
+1. **Operator mode** (`--enable-operator`): Manages ClusterPodPlacementConfig CR and deploys operands
+2. **Pod Placement Controllers** (`--enable-ppc-controllers`): Reconciles pods with scheduling gates
+3. **Pod Placement Webhook** (`--enable-ppc-webhook`): Mutating webhook that adds scheduling gates to pods
+4. **ENoExecEvent Controllers** (`--enable-enoexec-event-controllers`): Monitors exec format errors via eBPF
+
+Only one mode can be active at a time. Each mode has its own leader election ID.
+
+
+## Core Components
+
+**Operator Controller** (internal/controller/operator/):
+- Reconciles ClusterPodPlacementConfig singleton CR (name must be "cluster")
+- Deploys/manages pod placement operands (controllers, webhook, RBAC, etc.)
+- Handles ordered deletion to ensure pods are ungated before operand removal
+- Creates ServiceMonitor for metrics scraping
+
+**Pod Placement Operand** (intrenal/controller/podplacement/):
+- **PodReconciler**: Watches pods with scheduling gate, inspects container images, adds architecture-based nodeAffinity
+- **PodSchedulingGateMutatingWebHook**: Adds `multiarch.openshift.io/scheduling-gate` to new pods
+- **GlobalPullSecretSyncer**: Syncs pull secrets for image inspection
+
+**ENoExecEvent System** (/internal/controller/enoexecevent/):
+- **Daemon** (cmd/enoexec-daemon/): eBPF-based monitoring of exec format errors on nodes
+- **Handler Controller**: Processes ENoExecEvent CRs created by the daemon
+
+### Key Workflows
+
+**Pod Placement Flow:**
+1. Webhook adds scheduling gate to pod, preventing scheduling
+2. PodReconciler watches gated pods
+3. Inspects container images to determine supported architectures
+4. Adds nodeAffinity requirement for kubernetes.io/arch
+5. Removes scheduling gate, allowing scheduler to place pod
+
+**Image Inspection** (pkg/image/):
+- Supports multi-arch manifests (OCI, Docker v2.2)
+- Handles pull secrets and registry certificates
+- Uses caching to optimize repeated inspections
+- Metrics tracking for inspection operations
+
 ### Execution Modes
 
-The operator binary runs in three mutually exclusive modes (controlled by flags in main.go):
+The operator binary runs in four mutually exclusive modes (controlled by flags in main.go):
 
 1. **Operator Mode** (`--enable-operator`): Manages the ClusterPodPlacementConfig CR lifecycle. Deploys and manages the pod placement operand components (controller and webhook deployments).
 
@@ -110,14 +179,16 @@ The operator binary runs in three mutually exclusive modes (controlled by flags 
 
 3. **Pod Placement Webhook Mode** (`--enable-ppc-webhook`): Mutating webhook that adds the scheduling gate to new pods (except in excluded namespaces).
 
+4. **ENoExecEvent Controllers Mode** (`--enable-enoexec-event-controllers`): Monitors and handles exec format errors detected by the eBPF-based daemon running on cluster nodes.
+
 ### Key Components
 
-**Operator Controller** (`controllers/operator/clusterpodplacementconfig_controller.go`):
+**Operator Controller** (`internal/controller/operator/clusterpodplacementconfig_controller.go`):
 - Reconciles ClusterPodPlacementConfig singleton resource (name must be "cluster")
 - Manages deployment lifecycle of pod placement controller and webhook
 - Updates status conditions (Available, Progressing, Degraded, Deprovisioning)
 
-**Pod Placement Controller** (`controllers/podplacement/pod_reconciler.go`):
+**Pod Placement Controller** (`internal/controller/podplacement/pod_reconciler.go`):
 - Watches pods in Pending status with the `multiarch.openshift.io/scheduling-gate` scheduling gate
 - High concurrency: `MaxConcurrentReconciles = NumCPU * 4` (I/O bound image inspection)
 - Reconciliation flow:
@@ -130,14 +201,14 @@ The operator binary runs in three mutually exclusive modes (controlled by flags 
 - Max retries mechanism for image inspection failures
 - Cache optimization in pod field selector: only watches `status.phase=Pending`
 
-**Pod Model** (`controllers/podplacement/pod_model.go`):
+**Pod Model** (`internal/controller/podplacement/pod_model.go`):
 - Core logic for pod processing
 - Image architecture inspection (supports registry authentication)
 - NodeAffinity computation (required and preferred scheduling)
 - Scheduling gate management
 - Event publishing for audit trail
 
-**Mutating Webhook** (`controllers/podplacement/scheduling_gate_mutating_webhook.go`):
+**Mutating Webhook** (`internal/controller/podplacement/scheduling_gate_mutating_webhook.go`):
 - Adds `multiarch.openshift.io/scheduling-gate` to new pods
 - Respects namespace selector from ClusterPodPlacementConfig
 - Always excludes: `openshift-*`, `kube-*`, `hypershift-*` namespaces
@@ -156,11 +227,11 @@ The operator binary runs in three mutually exclusive modes (controlled by flags 
 
 ### API Versions
 
-The operator supports multiple API versions with conversion webhooks:
-- `v1alpha1`: Initial version (conversion webhook to v1beta1)
-- `v1beta1`: Storage version with Plugins support
+- **v1alpha1**: Original API version with conversion webhook
+- **v1beta1**: Current stable API (hub version for conversions)
+- Conversion webhooks in api/v1beta1/clusterpodplacementconfig_webhook.go
 
-**ClusterPodPlacementConfig** (`apis/multiarch/v1beta1/clusterpodplacementconfig_types.go`):
+**ClusterPodPlacementConfig** (`api/v1beta1/clusterpodplacementconfig_types.go`):
 - Singleton resource (only name "cluster" allowed)
 - Spec fields:
   - `logVerbosity`: Normal, Debug, Trace, TraceAll
@@ -168,9 +239,19 @@ The operator supports multiple API versions with conversion webhooks:
   - `plugins`: Optional plugins configuration (e.g., NodeAffinityScoring for preferred scheduling)
 - Status conditions: Available, Progressing, Degraded, Deprovisioning, PodPlacementControllerNotRolledOut, PodPlacementWebhookNotRolledOut, MutatingWebhookConfigurationNotAvailable
 
+
+### Namespace Exclusions
+
+System namespaces are excluded from pod placement by default (cannot be overridden):
+- `openshift-*`
+- `kube-*`
+- `hypershift-*`
+
+Additional namespaces can be excluded via namespaceSelector with label `multiarch.openshift.io/exclude-pod-placement`.
+
 ### Plugins System
 
-**NodeAffinityScoring Plugin** (`apis/multiarch/common/plugins/nodeaffinityscoring_plugin.go`):
+**NodeAffinityScoring Plugin** (`api/common/plugins/nodeaffinityscoring_plugin.go`):
 - Adds preferred (soft) nodeAffinity to influence scheduler scoring
 - Weights architectures based on cluster node distribution
 - Enables workload placement on preferred architectures while maintaining required constraints
@@ -178,13 +259,13 @@ The operator supports multiple API versions with conversion webhooks:
 ## Code Organization
 
 ```
-apis/multiarch/
+api/
 ├── common/              # Shared constants and types
 │   └── plugins/         # Plugin system (NodeAffinityScoring)
 ├── v1alpha1/            # Alpha API version with conversion
 └── v1beta1/             # Beta API version (storage version)
 
-controllers/
+internal/controller/
 ├── operator/            # Operator mode: ClusterPodPlacementConfig lifecycle
 └── podplacement/        # Operand modes: pod reconciler and webhook
     └── metrics/         # Prometheus metrics
@@ -200,21 +281,43 @@ config/                  # Kustomize configurations
 hack/                    # Build and test scripts
 ```
 
-## Testing
+### Testing Infrastructure
 
-### Unit Tests
-- Framework: Ginkgo v2 with Gomega matchers
-- Run with: `make unit` or `NO_DOCKER=1 make unit`
-- Test files: `*_test.go` throughout the codebase
-- Key test suites:
-  - `controllers/operator/suite_test.go`: Operator controller tests
-  - `controllers/podplacement/suite_test.go`: Pod placement tests
-  - `controllers/podplacement/pod_model_test.go`: Core pod processing logic tests
+**Unit Tests:**
+- Located alongside source files (*_test.go)
+- Use Ginkgo/Gomega framework
+- envtest provides fake API server
+- Test helpers in pkg/testing/builder/ (fluent builders for K8s objects)
+- Test framework utilities in pkg/testing/framework/
 
-### E2E Tests
-- Label: `e2e` (filtered via Ginkgo label-filter)
-- Run with: `KUBECONFIG=... NAMESPACE=openshift-multiarch-tuning-operator make e2e`
-- Test manifests in: `test/manifests/`
+**E2E Tests:**
+- Located in pkg/e2e/
+- Require deployed operator in cluster
+- Separate test suites for operator and pod placement
+
+## Environment Variables
+
+Create a `.env` file in the repository root to customize build settings:
+- `NO_DOCKER=1`: Run builds/tests locally instead of in container
+- `FORCE_DOCKER=1`: Force Docker instead of Podman
+- `BUILD_IMAGE`: Override builder image
+- `RUNTIME_IMAGE`: Override runtime base image
+
+## Important Implementation Notes
+
+### Image Inspection Dependencies
+
+Image inspection requires the containers/image library which has CGO dependencies on gpgme. This means:
+- Local builds require gpgme-devel (RHEL/Fedora) or libgpgme-dev (Debian)
+- CGO_ENABLED=1 is required
+- Multi-arch builds use platform-specific builder images with these dependencies
+
+### Vendoring
+
+This project uses Go vendoring (`GOFLAGS=-mod=vendor`). After modifying dependencies:
+```bash
+make vendor
+```
 
 ### Test Configuration
 - All tests run in containers by default using `BUILD_IMAGE`
@@ -267,3 +370,7 @@ See `docs/metrics.md` for example queries and monitoring setup.
 - [KEP-3521: Pod Scheduling Readiness](https://github.com/kubernetes/enhancements/blob/afad6f270c7ac2ae853f4d1b72c379a6c3c7c042/keps/sig-scheduling/3521-pod-scheduling-readiness/README.md)
 - [KEP-3838: Pod Mutable Scheduling Directives](https://github.com/kubernetes/enhancements/blob/afad6f270c7ac2ae853f4d1b72c379a6c3c7c042/keps/sig-scheduling/3838-pod-mutable-scheduling-directives/README.md)
 - [Kubebuilder Documentation](https://book.kubebuilder.io/introduction.html)
+
+### Konflux/CI Integration
+
+The repository includes .tekton/ pipeline definitions for Konflux CI/CD. Bundle Dockerfiles have konflux-specific variants (bundle.konflux.Dockerfile).

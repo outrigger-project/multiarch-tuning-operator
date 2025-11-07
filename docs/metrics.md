@@ -28,8 +28,17 @@ The following metrics are exposed by the Pod Placement Operand:
 | `mto_ppo_wh_pods_gated_total`                     | Counter   | mutating webhook         | The total number of pods gated by the webhook.                                                                  |
 | `mto_ppo_wh_response_time_seconds`                | Histogram | mutating webhook         | The response time of the webhook.                                                                               |
 
+## Exec Format Error Operand
 
-##-- Example queries
+The following metrics are exposed by the Exec Format Error Operand:
+
+| Metric                      | Type    | Controller      | Description                                                                                  |
+|-----------------------------|---------|-----------------|----------------------------------------------------------------------------------------------|
+| `mto_enoexecevents`         | Counter | enoexec handler | The total number of exec format error detected and reported                                  |
+| `mto_enoexecevents_invalid` | Counter | enoexec handler | The counter for ENoExecEvents objects that faled the reconciliation and report as pod events |
+
+
+## Example queries
 
 The following queries can be used to monitor the pod placement operand:
 
@@ -71,5 +80,8 @@ sum(scheduler_pending_pods) by (queue)
 
 -- Distribution of the time to inspect an image
 sum by(le) (rate(mto_ppo_ctrl_time_to_inspect_pod_images_seconds_bucket[5m]))
+
+-- Rate of increase of exec format errors in the last 6h
+irate(mto_enoexecevents_total[6h])
 
 ```

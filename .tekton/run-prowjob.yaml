@@ -1,4 +1,4 @@
-apiVersion: tekton.dev/v1beta1
+apiVersion: tekton.dev/v1
 kind: Pipeline
 metadata:
   name: run-prowjob
@@ -10,7 +10,7 @@ spec:
       taskSpec:
         steps:
           - name: hello
-            image: brew.registry.redhat.io/rh-osbs/openshift-golang-builder:rhel_9_1.23
+            image: brew.registry.redhat.io/rh-osbs/openshift-golang-builder:rhel_9_1.25
             script: |
               #!/bin/bash
               echo "Hello, world!"

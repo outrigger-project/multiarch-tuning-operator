@@ -6,8 +6,13 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-func NewEphemeralNamespace() *corev1.Namespace {
-	name := NormalizeNameString("t-" + uuid.NewString())
+func NewEphemeralNamespace(prefix ...string) *corev1.Namespace {
+	base := "t-" + uuid.NewString()
+	if len(prefix) > 0 {
+		base = prefix[0] + base
+	}
+	name := NormalizeNameString(base)
+
 	ns := &corev1.Namespace{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: name,

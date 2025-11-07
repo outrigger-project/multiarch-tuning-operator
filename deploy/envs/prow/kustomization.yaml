@@ -13,4 +13,4 @@ patches:
     patch: |-
       - op: replace
         path: /spec/image
-        value: quay.io/multi-arch/multiarch-tuning-operator:catalog
+        value: quay.io/multi-arch/multiarch-tuning-operator:catalog-1.1
