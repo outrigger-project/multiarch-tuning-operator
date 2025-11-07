@@ -3,7 +3,7 @@
 FROM registry.redhat.io/openshift4/ose-operator-registry:v4.13 as builder
 USER 0
 COPY index.base.yaml /tmp/index.yaml
-RUN opm render registry.ci.openshift.org/origin/multiarch-tuning-op-bundle:v1.x  --output=yaml >> /tmp/index.yaml
+RUN opm render registry.ci.openshift.org/ocp/multiarch-tuning-op-bundle:v1.x  --output=yaml >> /tmp/index.yaml
 #RUN cat /tmp/index.yaml
 
 FROM registry.redhat.io/openshift4/ose-operator-registry-rhel9:v4.16
