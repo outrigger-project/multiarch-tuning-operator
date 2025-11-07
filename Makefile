@@ -9,15 +9,15 @@ ARTIFACT_DIR ?= ./_output
 # To re-generate a bundle for another specific version without changing the standard setup, you can:
 # - use the VERSION as arg of the bundle target (e.g make bundle VERSION=0.0.2)
 # - use environment variables to overwrite this value (e.g export VERSION=0.0.2)
-VERSION ?= 1.1.1
+VERSION ?= 1.2.1
 
 # CHANNELS define the bundle channels used in the bundle.
 # Add a new line here if you would like to change its default config. (E.g CHANNELS = "candidate,fast,stable")
 # To re-generate a bundle for other specific channels without changing the standard setup, you can:
 # - use the CHANNELS as arg of the bundle target (e.g make bundle CHANNELS=candidate,fast,stable)
 # - use environment variables to overwrite this value (e.g export CHANNELS="candidate,fast,stable")
-CHANNELS=tech-preview
-DEFAULT_CHANNEL=tech-preview
+CHANNELS=stable
+DEFAULT_CHANNEL=stable
 ifneq ($(origin CHANNELS), undefined)
 BUNDLE_CHANNELS := --channels=$(CHANNELS)
 endif
@@ -66,7 +66,7 @@ ifeq ($(USE_IMAGE_DIGESTS), true)
 endif
 
 # Image URL to use all building/pushing image targets
-IMG ?= registry.ci.openshift.org/origin/multiarch-tuning-operator:main
+IMG ?= registry.ci.openshift.org/origin/multiarch-tuning-operator:v1.x
 
 #### Tool Versions ####
 ### TODO: NOTE: Update these values to match the versions of the K8S API when pivoting to a new version of K8S.
@@ -125,7 +125,7 @@ ifeq ($(NO_DOCKER), 1)
   DOCKER_CMD =
   IMAGE_BUILD_CMD = imagebuilder
 else
-  DOCKER_CMD := $(ENGINE) run --env GO111MODULE=$(GO111MODULE) --env GOFLAGS=$(GOFLAGS) --env GOLINT_VERSION=$(GOLINT_VERSION) --rm -v "$(PWD)":/go/src/github.com/openshift/multiarch-tuning-operator:Z -w /go/src/github.com/openshift/multiarch-tuning-operator $(BUILD_IMAGE)
+  DOCKER_CMD := $(ENGINE) run --env GO111MODULE=$(GO111MODULE) --env GOFLAGS=$(GOFLAGS) --env GOLINT_VERSION=$(GOLINT_VERSION) --rm  -v "$(PWD)":/go/src/github.com/outrigger-project/multiarch-tuning-operator:Z -v "$(PWD)":/go/src/github.com/openshift/multiarch-tuning-operator:Z -w /go/src/github.com/openshift/multiarch-tuning-operator $(BUILD_IMAGE)
   IMAGE_BUILD_CMD = $(ENGINE) build
 endif
 
@@ -159,6 +159,7 @@ manifests: controller-gen ## Generate WebhookConfiguration, ClusterRole and Cust
 .PHONY: generate
 generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations.
 	$(CONTROLLER_GEN) object:headerFile="hack/boilerplate.go.txt" paths="./..."
+	$(MAKE) fmt
 
 .PHONY: fmt
 fmt: ## Run go fmt against code.
@@ -171,7 +172,7 @@ vet: ## Run go vet against code.
 
 .PHONY: lint
 lint:
-	GOLINT_VERSION=$(GOLINT_VERSION) $(DOCKER_CMD) hack/golangci-lint.sh ./...
+	GOLINT_VERSION=$(GOLINT_VERSION) $(DOCKER_CMD) hack/golangci-lint.sh
 
 .PHONY: goimports
 goimports: ## Goimports against code
@@ -404,3 +405,7 @@ clean:
 
 version:
 	VERSION=$(VERSION) ./hack/bump-version.sh
+
+.PHONY: verify-snapshots
+verify-snapshots:  ## Verify snapshots for given [SNAPSHOT=..] [VERSION=..]
+	./hack/check-snapshots.sh $(filter-out $@,$(MAKECMDGOALS))

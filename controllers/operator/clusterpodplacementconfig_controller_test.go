@@ -317,7 +317,7 @@ var _ = Describe("Controllers/ClusterPodPlacementConfig/ClusterPodPlacementConfi
 					g.Expect(mw.Webhooks[0].NamespaceSelector).To(Equal(ppc.Spec.NamespaceSelector))
 				}).Should(Succeed(), "the deployment "+utils.PodPlacementControllerName+" should be updated")
 			})
-			It("Should have finalizers", func() {
+			It("Should have ClusterPodPlacementConfig finalizers", func() {
 				ppc := &v1beta1.ClusterPodPlacementConfig{}
 				err := k8sClient.Get(ctx, crclient.ObjectKeyFromObject(&v1beta1.ClusterPodPlacementConfig{
 					ObjectMeta: metav1.ObjectMeta{
@@ -395,6 +395,18 @@ var _ = Describe("Controllers/ClusterPodPlacementConfig/ClusterPodPlacementConfi
 				err = k8sClient.Delete(ctx, pod)
 				Expect(err).NotTo(HaveOccurred(), "failed to delete pod", err)
 				By("The pod has been deleted and the ClusterPodPlacementConfig should now be collected")
+				Eventually(framework.ValidateDeletion(k8sClient, ctx)).Should(Succeed(), "the ClusterPodPlacementConfig should be deleted")
+			})
+		})
+		Context("the ClusterPodPlacementConfig is deleted within 1s after creation", func() {
+			It("Should cleanup all finalizers", func() {
+				By("Creating the ClusterPodPlacementConfig")
+				err := k8sClient.Create(ctx, builder.NewClusterPodPlacementConfig().WithName(common.SingletonResourceObjectName).Build())
+				Expect(err).NotTo(HaveOccurred(), "failed to create ClusterPodPlacementConfig", err)
+				By("imeditately deleting it after creation")
+				err = k8sClient.Delete(ctx, builder.NewClusterPodPlacementConfig().WithName(common.SingletonResourceObjectName).Build())
+				Expect(err).NotTo(HaveOccurred(), "failed to delete ClusterPodPlacementConfig", err)
+				By("Verify all corresponding resources are deleted")
 				Eventually(framework.ValidateDeletion(k8sClient, ctx)).Should(Succeed(), "the ClusterPodPlacementConfig should be deleted")
 			})
 		})
@@ -619,6 +631,40 @@ var _ = Describe("Controllers/ClusterPodPlacementConfig/ClusterPodPlacementConfi
 			})
 		})
 	})
+	Context("is handling the cleanup lifecycle of the ClusterPodPlacementConfig with the ExecFormatErrorMonitor enabled", func() {
+		BeforeEach(func() {
+			By("Creating the ClusterPodPlacementConfig with ExecFormatErrorMonitor enabled")
+			err := k8sClient.Create(ctx, builder.NewClusterPodPlacementConfig().WithName(common.SingletonResourceObjectName).
+				WithExecFormatErrorMonitor(true).Build())
+			Expect(err).NotTo(HaveOccurred(), "failed to create ClusterPodPlacementConfig", err)
+			validateReconcile(framework.MainPlugin, framework.ENoExecPlugin)
+		})
+		AfterEach(func() {
+			By("Deleting the ClusterPodPlacementConfig")
+			err := k8sClient.Delete(ctx, builder.NewClusterPodPlacementConfig().WithName(common.SingletonResourceObjectName).Build())
+			Expect(err).NotTo(HaveOccurred(), "failed to delete ClusterPodPlacementConfig", err)
+			Eventually(framework.ValidateDeletion(k8sClient, ctx, framework.MainPlugin, framework.ENoExecPlugin)).Should(Succeed(), "the ClusterPodPlacementConfig should be deleted")
+		})
+		It("ensure the finalizers exist", func() {
+			By("Verifying the cppc has the correct finalizer")
+			cppc := &v1beta1.ClusterPodPlacementConfig{}
+			err := k8sClient.Get(ctx, crclient.ObjectKey{
+				Name: common.SingletonResourceObjectName,
+			}, cppc)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(cppc.Finalizers).To(ContainElement(utils.ExecFormatErrorFinalizerName))
+			By("Verifying the enoexec Deployment has the correct finalizer")
+			d := appsv1.Deployment{}
+			err = k8sClient.Get(ctx, crclient.ObjectKeyFromObject(&appsv1.Deployment{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      utils.EnoexecControllerName,
+					Namespace: utils.Namespace(),
+				},
+			}), &d)
+			Expect(err).NotTo(HaveOccurred(), "failed to get deployment "+utils.EnoexecControllerName, err)
+			Expect(d.Finalizers).To(ContainElement(utils.ExecFormatErrorFinalizerName))
+		})
+	})
 })
 
 func patchDeploymentStatus(name string, g Gomega, patch func(*appsv1.Deployment)) {
@@ -647,12 +693,12 @@ func setDeploymentReady(name string, g Gomega) {
 
 // validateReconcile
 // NOTE: this can be used only in integratoin tests as it changes the status of deployments
-func validateReconcile() {
+func validateReconcile(pluginObjectsSet ...framework.PluginObjectsSet) {
 	for _, name := range []string{utils.PodPlacementControllerName, utils.PodPlacementWebhookName} {
 		Eventually(func(g Gomega) {
 			setDeploymentReady(name, g)
 		}).Should(Succeed(), "the deployment "+name+" should be ready")
 	}
-	Eventually(framework.ValidateCreation(k8sClient, ctx)).Should(Succeed(), "the ClusterPodPlacementConfig should be created")
+	Eventually(framework.ValidateCreation(k8sClient, ctx, pluginObjectsSet...)).Should(Succeed(), "the ClusterPodPlacementConfig should be created")
 	By("The ClusterPodPlacementConfig is ready")
 }

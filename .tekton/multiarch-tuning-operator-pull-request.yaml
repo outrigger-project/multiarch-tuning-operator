@@ -8,97 +8,96 @@ metadata:
     build.appstudio.redhat.com/target_branch: '{{target_branch}}'
     pipelinesascode.tekton.dev/max-keep-runs: "3"
     pipelinesascode.tekton.dev/on-cel-expression: |
-      event == "pull_request" && target_branch == "main" && (".tekton/***".pathChanged() || "apis/***".pathChanged() || "controllers/***".pathChanged() || "pkg/***".pathChanged() || "test/***".pathChanged() || "konflux.Dockerfile".pathChanged() || "go.mod".pathChanged() || "main.go".pathChanged() || "go.sum".pathChanged() || "trigger-konflux-builds.txt".pathChanged() )
+      event == "pull_request" && target_branch == "v1.x" && (".tekton/***".pathChanged() || "apis/***".pathChanged() || "controllers/***".pathChanged() || "pkg/***".pathChanged() || "test/***".pathChanged() || "konflux.Dockerfile".pathChanged() || "go.mod".pathChanged() || "main.go".pathChanged() || "go.sum".pathChanged() || "trigger-konflux-builds.txt".pathChanged() )
   creationTimestamp: null
   labels:
-    appstudio.openshift.io/application: multiarch-tuning-operator
-    appstudio.openshift.io/component: multiarch-tuning-operator
+    appstudio.openshift.io/application: multiarch-tuning-operator-v1-x
+    appstudio.openshift.io/component: multiarch-tuning-operator-v1-x
     pipelines.appstudio.openshift.io/type: build
-  name: multiarch-tuning-operator-on-pull-request
+  name: multiarch-tuning-operator-v1-x-on-pull-request
   namespace: multiarch-tuning-ope-tenant
 spec:
   params:
-  - name: dockerfile
-    value: konflux.Dockerfile
-  - name: git-url
-    value: '{{source_url}}'
-  - name: image-expires-after
-    value: 5d
-  - name: output-image
-    value: quay.io/redhat-user-workloads/multiarch-tuning-ope-tenant/multiarch-tuning-operator/multiarch-tuning-operator:on-pr-{{revision}}
-  - name: path-context
-    value: .
-  - name: revision
-    value: '{{revision}}'
-  - name: build-platforms
-    value:
-    - localhost
-    - linux/arm64
-    - linux/ppc64le
-    - linux/s390x
-  - name: hermetic
-    value: "true"
-  - name: prefetch-input
-    value: '{"packages": [{"type": "gomod"}], "flags": ["gomod-vendor-check"]}'
-  - name: build-source-image
-    value: "true"
+    - name: dockerfile
+      value: konflux.Dockerfile
+      # TODO: change to Dockerfile when https://issues.redhat.com/browse/KONFLUX-2361
+    - name: git-url
+      value: '{{source_url}}'
+    - name: image-expires-after
+      value: 5d
+    - name: output-image
+      value: quay.io/redhat-user-workloads/multiarch-tuning-ope-tenant/multiarch-tuning-operator-v1-x/multiarch-tuning-operator-v1-x:on-pr-{{revision}}
+    - name: path-context
+      value: .
+    - name: revision
+      value: '{{revision}}'
+    - name: build-platforms
+      value:
+        - linux/amd64
+        - linux/arm64
+        - linux/ppc64le
+        - linux/s390x
+    - name: hermetic
+      value: "true"
+    - name: prefetch-input
+      value: '{"packages": [{"type": "gomod"}], "flags": ["gomod-vendor-check"]}'
+    - name: build-source-image
+      value: "true"
   pipelineRef:
-    params:
-    - name: name
-      value: docker-build-multi-platform-oci-ta
-    - name: bundle
-      value: quay.io/konflux-ci/tekton-catalog/pipeline-docker-build-multi-platform-oci-ta:devel@sha256:be3169c5e3361a7c25e87ca25e381a4be470a38105bb25aeeb088a3d6b30a9a0
-    - name: kind
-      value: pipeline
     resolver: bundles
-  taskRunTemplate:
-    serviceAccountName: build-pipeline-multiarch-tuning-operator
+    params:
+      - name: name
+        value: docker-build-multi-platform-oci-ta
+      - name: bundle
+        value: quay.io/konflux-ci/tekton-catalog/pipeline-docker-build-multi-platform-oci-ta:devel@sha256:33727f2c1da1e1563e2b3108fb620c3ed64acfcc9830e53666b9789758b3ff9c
+      - name: kind
+        value: pipeline
   workspaces:
-  - name: workspace
-    volumeClaimTemplate:
-      metadata:
-        creationTimestamp: null
-      spec:
-        accessModes:
-        - ReadWriteOnce
-        resources:
-          requests:
-            storage: 1Gi
-      status: {}
-  - name: workspace-arm64
-    volumeClaimTemplate:
-      metadata:
-        creationTimestamp: null
-      spec:
-        accessModes:
-        - ReadWriteOnce
-        resources:
-          requests:
-            storage: 1Gi
-      status: {}
-  - name: workspace-s390x
-    volumeClaimTemplate:
-      metadata:
-        creationTimestamp: null
-      spec:
-        accessModes:
-        - ReadWriteOnce
-        resources:
-          requests:
-            storage: 1Gi
-      status: {}
-  - name: workspace-ppc64le
-    volumeClaimTemplate:
-      metadata:
-        creationTimestamp: null
-      spec:
-        accessModes:
-        - ReadWriteOnce
-        resources:
-          requests:
-            storage: 1Gi
-      status: {}
-  - name: git-auth
-    secret:
-      secretName: '{{ git_auth_secret }}'
+    - name: workspace
+      volumeClaimTemplate:
+        metadata:
+          creationTimestamp: null
+        spec:
+          accessModes:
+            - ReadWriteOnce
+          resources:
+            requests:
+              storage: 1Gi
+        status: {}
+    - name: workspace-arm64
+      volumeClaimTemplate:
+        metadata:
+          creationTimestamp: null
+        spec:
+          accessModes:
+            - ReadWriteOnce
+          resources:
+            requests:
+              storage: 1Gi
+        status: {}
+    - name: workspace-s390x
+      volumeClaimTemplate:
+        metadata:
+          creationTimestamp: null
+        spec:
+          accessModes:
+            - ReadWriteOnce
+          resources:
+            requests:
+              storage: 1Gi
+        status: {}
+    - name: workspace-ppc64le
+      volumeClaimTemplate:
+        metadata:
+          creationTimestamp: null
+        spec:
+          accessModes:
+            - ReadWriteOnce
+          resources:
+            requests:
+              storage: 1Gi
+        status: {}
+    - name: git-auth
+      secret:
+        secretName: '{{ git_auth_secret }}'
 status: {}

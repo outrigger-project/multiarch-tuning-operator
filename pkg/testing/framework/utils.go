@@ -11,6 +11,8 @@ import (
 	"sync"
 	"unicode"
 
+	"github.com/google/uuid"
+
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
@@ -195,4 +197,9 @@ func GetImageRepository(image string) string {
 		image = image[:colonIndex]
 	}
 	return image
+}
+
+func GenerateName() string {
+	// Generate a random name using UUID
+	return NormalizeNameString("t-" + uuid.NewString())
 }

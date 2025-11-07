@@ -37,3 +37,11 @@ func TestNodeAffinityScoring_Name(t *testing.T) {
 		t.Errorf("Expected plugin name %s, but got %s", NodeAffinityScoringPluginName, plugin.Name())
 	}
 }
+
+func TestExecFormatErrorMonitor_Name(t *testing.T) {
+	plugin := &ExecFormatErrorMonitor{}
+
+	if plugin.Name() != ExecFormatErrorMonitorPluginName {
+		t.Errorf("Expected plugin name %s, but got %s", ExecFormatErrorMonitorPluginName, plugin.Name())
+	}
+}

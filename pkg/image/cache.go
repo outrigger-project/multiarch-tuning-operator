@@ -70,6 +70,11 @@ func (c *cacheProxy) GetRegistryInspector() IRegistryInspector {
 	return c.registryInspector
 }
 
+// clearCache purges the image metadata cache
+func (c *cacheProxy) clearCache() {
+	c.imageRefsCache.Purge()
+}
+
 func newCacheProxy() *cacheProxy {
 	return &cacheProxy{
 		registryInspector: newRegistryInspector(),

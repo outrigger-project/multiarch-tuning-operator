@@ -25,6 +25,7 @@ var (
 	dockerCertsDir,
 	registriesCertsDir,
 	registriesConfPath,
+	registriesConfDir,
 	policyConfPath string
 	rwMutex sync.RWMutex
 )
@@ -75,6 +76,22 @@ func RegistriesConfPath() string {
 		registriesConfPath = lookupEnvOr("REGISTRIES_CONF_PATH", "/etc/containers/registries.conf")
 	}
 	return registriesConfPath
+}
+
+func RegistriesConfDir() string {
+	rwMutex.RLock()
+	if registriesConfDir != "" {
+		defer rwMutex.RUnlock()
+		return registriesConfDir
+	}
+	rwMutex.RUnlock()
+	rwMutex.Lock()
+	defer rwMutex.Unlock()
+	if registriesConfDir == "" {
+		// avoid race condition in-between rwMutex.RUnlock and rwMutex.Lock
+		registriesConfDir = lookupEnvOr("REGISTRIES_CONF_DIR", "/etc/containers/registries.conf.d")
+	}
+	return registriesConfDir
 }
 
 func PolicyConfPath() string {

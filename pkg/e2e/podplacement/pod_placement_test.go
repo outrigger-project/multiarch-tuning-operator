@@ -11,6 +11,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/openshift/multiarch-tuning-operator/pkg/e2e"
 	. "github.com/openshift/multiarch-tuning-operator/pkg/testing/builder"
@@ -20,12 +21,14 @@ import (
 
 const (
 	helloOpenshiftPublicMultiarchImage        = "quay.io/openshifttest/hello-openshift:1.2.0"
+	helloOpenshiftImageShortname              = "openshifttest/hello-openshift:1.2.0"
 	helloOpenshiftPublicArmImage              = "quay.io/openshifttest/hello-openshift:arm-1.2.0"
 	helloOpenshiftPublicArmAmdImage           = "quay.io/openshifttest/hello-openshift:arm-amd-1.2.0"
 	helloOpenshiftPublicArmPpcImage           = "quay.io/openshifttest/hello-openshift:arm-ppc64le-1.2.0"
 	helloOpenshiftPrivateMultiarchImageGlobal = "quay.io/multi-arch/tuning-test-global:1.1.0"
 	helloOpenshiftPrivateArmImageGlobal       = "quay.io/multi-arch/tuning-test-global:arm-1.1.0"
 	helloOpenshiftPrivateArmPpcImageGlobal    = "quay.io/multi-arch/tuning-test-global:arm-ppc64le-1.1.0"
+	helloOpenshiftPrivateArmPpcImageGlobal2   = "quay.io/multi-arch/tuning-test-global-2:arm-ppc64le-1.1.0"
 	helloOpenshiftPrivateMultiarchImageLocal  = "quay.io/multi-arch/tuning-test-local:1.1.0"
 	helloOpenshiftPrivateArmImageLocal        = "quay.io/multi-arch/tuning-test-local:arm-1.1.0"
 	helloOpenshiftPrivateArmPpcImageLocal     = "quay.io/multi-arch/tuning-test-local:arm-ppc64le-1.1.0"
@@ -37,6 +40,7 @@ const (
 var _ = Describe("The Pod Placement Operand", func() {
 	var (
 		podLabel                  = map[string]string{"app": "test"}
+		podLabelPullSecretUpdate  = map[string]string{"app": "test-post-update"}
 		schedulingGateLabel       = map[string]string{utils.SchedulingGateLabel: utils.SchedulingGateLabelValueRemoved}
 		schedulingGateNotSetLabel = map[string]string{utils.SchedulingGateLabel: utils.LabelValueNotSet}
 	)
@@ -556,6 +560,72 @@ var _ = Describe("The Pod Placement Operand", func() {
 			By("The pod should not have preferred affinities from the ClusterPodPlacementConfig")
 			Eventually(framework.VerifyPodPreferredNodeAffinity(ctx, client, ns, "app", "test", nil), e2e.WaitShort).Should(Succeed())
 		})
+		It("should neither set node affinity nor gate pods in the operator namespace.", func() {
+			var err error
+			By("Create a Deployment in the operator's namespace")
+			ns := &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: utils.Namespace(),
+				},
+			}
+			ps := NewPodSpec().
+				WithContainersImages(helloOpenshiftPublicMultiarchImage).
+				Build()
+			d := NewDeployment().
+				WithSelectorAndPodLabels(podLabel).
+				WithPodSpec(ps).
+				WithReplicas(utils.NewPtr(int32(1))).
+				WithName("test-deployment").
+				WithNamespace(ns.Name).
+				Build()
+			err = client.Create(ctx, d)
+			Expect(err).NotTo(HaveOccurred())
+			//nolint:errcheck
+			defer client.Delete(ctx, d)
+			By("The pod should not have been processed by the webhook and the scheduling gate label should set as not-set")
+			Eventually(framework.VerifyPodLabels(ctx, client, ns, "app", "test", e2e.Present, schedulingGateNotSetLabel), e2e.WaitShort).Should(Succeed())
+			By("Verify node affinity label are set correct")
+			Eventually(framework.VerifyPodLabelsAreSet(ctx, client, ns, "app", "test",
+				utils.NodeAffinityLabel, utils.LabelValueNotSet,
+				utils.PreferredNodeAffinityLabel, utils.LabelValueNotSet,
+			), e2e.WaitShort).Should(Succeed())
+			By("The pod should keep the same node affinity provided by the users. No node affinity is added by the controller.")
+			Eventually(framework.VerifyPodNodeAffinity(ctx, client, ns, "app", "test"), e2e.WaitShort).Should(Succeed())
+			By("The pod should not have preferred affinities from the ClusterPodPlacementConfig")
+			Eventually(framework.VerifyPodPreferredNodeAffinity(ctx, client, ns, "app", "test", nil), e2e.WaitShort).Should(Succeed())
+		})
+		It("should neither set node affinity nor gate pods in namespaces with the kube- prefix.", func() {
+			var err error
+			By("Create an ephemeral namespace wirh kube- prefix")
+			ns := framework.NewEphemeralNamespace("kube-")
+			err = client.Create(ctx, ns)
+			Expect(err).NotTo(HaveOccurred())
+			//nolint:errcheck
+			defer client.Delete(ctx, ns)
+			ps := NewPodSpec().
+				WithContainersImages(helloOpenshiftPublicMultiarchImage).
+				Build()
+			d := NewDeployment().
+				WithSelectorAndPodLabels(podLabel).
+				WithPodSpec(ps).
+				WithReplicas(utils.NewPtr(int32(1))).
+				WithName("test-deployment").
+				WithNamespace(ns.Name).
+				Build()
+			err = client.Create(ctx, d)
+			Expect(err).NotTo(HaveOccurred())
+			By("The pod should not have been processed by the webhook and the scheduling gate label should set as not-set")
+			Eventually(framework.VerifyPodLabels(ctx, client, ns, "app", "test", e2e.Present, schedulingGateNotSetLabel), e2e.WaitShort).Should(Succeed())
+			By("Verify node affinity label are set correct")
+			Eventually(framework.VerifyPodLabelsAreSet(ctx, client, ns, "app", "test",
+				utils.NodeAffinityLabel, utils.LabelValueNotSet,
+				utils.PreferredNodeAffinityLabel, utils.LabelValueNotSet,
+			), e2e.WaitShort).Should(Succeed())
+			By("The pod should keep the same node affinity provided by the users. No node affinity is added by the controller.")
+			Eventually(framework.VerifyPodNodeAffinity(ctx, client, ns, "app", "test"), e2e.WaitShort).Should(Succeed())
+			By("The pod should not have preferred affinities from the ClusterPodPlacementConfig")
+			Eventually(framework.VerifyPodPreferredNodeAffinity(ctx, client, ns, "app", "test", nil), e2e.WaitShort).Should(Succeed())
+		})
 	})
 	Context("When a statefulset is deployed with single vs multi container images", func() {
 		It("should set the node affinity when with a single container and a singlearch image", func() {
@@ -1014,6 +1084,84 @@ var _ = Describe("The Pod Placement Operand", func() {
 			Eventually(framework.VerifyPodPreferredNodeAffinity(ctx, client, ns, "app", "test",
 				defaultExpectedAffinityTerms()), e2e.WaitShort).Should(Succeed())
 		})
+		It("should set the node affinity in pods with images requiring credentials set in the global pull secret. When the credentials are removed, the node affinity should not be set", func() {
+			if len(masterNodes.Items) == 0 {
+				Skip("The current cluster is a hosted cluster, skipping global pull secret tests")
+			}
+			// delete the pullsecret from the global pull secret
+			By("Update the global pull secret to add the credentials for the private image tuning-test-global-2")
+			updateGlobalPullSecret("quay.io/multi-arch/tuning-test-global-2")
+			var err error
+			By("Create an ephemeral namespace")
+			ns := framework.NewEphemeralNamespace()
+			err = client.Create(ctx, ns)
+			Expect(err).NotTo(HaveOccurred())
+			//nolint:errcheck
+			defer client.Delete(ctx, ns)
+			By("Create a deployment using the container with private images requiring credentials set in the global pull secret")
+			ps := NewPodSpec().
+				WithContainersImages(helloOpenshiftPrivateArmPpcImageGlobal2).
+				Build()
+			d := NewDeployment().
+				WithSelectorAndPodLabels(podLabel).
+				WithPodSpec(ps).
+				WithReplicas(utils.NewPtr(int32(1))).
+				WithName("test-deployment").
+				WithNamespace(ns.Name).
+				Build()
+			err = client.Create(ctx, d)
+			Expect(err).NotTo(HaveOccurred())
+			archLabelNSR := NewNodeSelectorRequirement().
+				WithKeyAndValues(utils.ArchLabel, corev1.NodeSelectorOpIn, utils.ArchitectureArm64, utils.ArchitecturePpc64le).
+				Build()
+			expectedNSTs := NewNodeSelectorTerm().WithMatchExpressions(archLabelNSR).Build()
+			By("The pod should have been processed by the webhook and the scheduling gate label should be added")
+			Eventually(framework.VerifyPodLabels(ctx, client, ns, "app", "test", e2e.Present, schedulingGateLabel), e2e.WaitShort).Should(Succeed())
+			By("Verify arch label are set")
+			Eventually(framework.VerifyPodLabelsAreSet(ctx, client, ns, "app", "test",
+				utils.MultiArchLabel, "",
+				utils.ArchLabelValue(utils.ArchitectureArm64), "",
+				utils.ArchLabelValue(utils.ArchitecturePpc64le), "",
+			), e2e.WaitShort).Should(Succeed())
+			By("Verify node affinity label are set correct")
+			Eventually(framework.VerifyPodLabelsAreSet(ctx, client, ns, "app", "test",
+				utils.NodeAffinityLabel, utils.NodeAffinityLabelValueSet,
+				utils.PreferredNodeAffinityLabel, utils.NodeAffinityLabelValueSet,
+			), e2e.WaitShort).Should(Succeed())
+			By("The pod should have been set node affinity of arch info.")
+			Eventually(framework.VerifyPodNodeAffinity(ctx, client, ns, "app", "test", *expectedNSTs), e2e.WaitShort).Should(Succeed())
+			By("The pod should have the preferred affinities set in the ClusterPodPlacementConfig")
+			Eventually(framework.VerifyPodPreferredNodeAffinity(ctx, client, ns, "app", "test",
+				defaultExpectedAffinityTerms()), e2e.WaitShort).Should(Succeed())
+			// delete the pullsecret from the global pull secret
+			By("Update the global pull secret to remove the credentials for the private image tuning-test-global-2")
+			updateGlobalPullSecret("quay.io/multi-arch/tuning-test-global-2", true)
+			By("Create a second deployment using the container with private images requiring credentials set in the global pull secret")
+			ps = NewPodSpec().
+				WithContainersImages(helloOpenshiftPrivateArmPpcImageGlobal2).
+				Build()
+			d = NewDeployment().
+				WithSelectorAndPodLabels(podLabelPullSecretUpdate).
+				WithPodSpec(ps).
+				WithReplicas(utils.NewPtr(int32(1))).
+				WithName("test-deployment-post-update").
+				WithNamespace(ns.Name).
+				Build()
+			err = client.Create(ctx, d)
+			Expect(err).NotTo(HaveOccurred())
+			By("The pod should have been processed by the webhook and the scheduling gate label should be added")
+			Eventually(framework.VerifyPodLabels(ctx, client, ns, "app", "test-post-update", e2e.Present, schedulingGateLabel), e2e.WaitShort).Should(Succeed())
+			By("Verify node affinity label is set to not-set")
+			Eventually(framework.VerifyPodLabelsAreSet(ctx, client, ns, "app", "test-post-update",
+				utils.NodeAffinityLabel, utils.LabelValueNotSet,
+				utils.PreferredNodeAffinityLabel, utils.NodeAffinityLabelValueSet,
+			), e2e.WaitShort).Should(Succeed())
+			By("The pod should not get node affinity of arch info because the cache should be cleared and auth should fail.")
+			Eventually(framework.VerifyPodNodeAffinity(ctx, client, ns, "app", "test-post-update"), e2e.WaitShort).Should(Succeed())
+			By("The pod should have the preferred affinities set in the ClusterPodPlacementConfig")
+			Eventually(framework.VerifyPodPreferredNodeAffinity(ctx, client, ns, "app", "test-post-update",
+				defaultExpectedAffinityTerms()), e2e.WaitShort).Should(Succeed())
+		})
 		It("should set the node affinity in pods with images requiring credentials set in pods imagePullSecrets", func() {
 			var err error
 			By("Create an ephemeral namespace")
@@ -1373,6 +1521,62 @@ var _ = Describe("The Pod Placement Operand", func() {
 				defaultExpectedAffinityTerms()), e2e.WaitShort).Should(Succeed())
 		})
 	})
+	Context("When deploying workloads running images with shortname", func() {
+		BeforeEach(func() {
+			if len(masterNodes.Items) == 0 {
+				Skip("The current cluster is a hosted cluster, skipping registry config tests")
+			}
+		})
+		It("Should set node affinity if shortname is resolved via the unqualified-search-registries list", func() {
+			var err error
+			By("Create an ephemeral namespace")
+			ns := framework.NewEphemeralNamespace()
+			err = client.Create(ctx, ns)
+			Expect(err).NotTo(HaveOccurred())
+			//nolint:errcheck
+			defer client.Delete(ctx, ns)
+			By("Create a deployment running image with shortname")
+			ps := NewPodSpec().
+				WithContainersImages(helloOpenshiftImageShortname).
+				Build()
+			d := NewDeployment().
+				WithSelectorAndPodLabels(podLabel).
+				WithPodSpec(ps).
+				WithReplicas(utils.NewPtr(int32(1))).
+				WithName("test-deployment").
+				WithNamespace(ns.Name).
+				Build()
+			err = client.Create(ctx, d)
+			Expect(err).NotTo(HaveOccurred())
+			archLabelNSR := NewNodeSelectorRequirement().
+				WithKeyAndValues(utils.ArchLabel, corev1.NodeSelectorOpIn, utils.ArchitectureAmd64,
+					utils.ArchitectureArm64, utils.ArchitectureS390x, utils.ArchitecturePpc64le).
+				Build()
+			expectedNSTs := NewNodeSelectorTerm().WithMatchExpressions(archLabelNSR).Build()
+			By("The pod should have been processed by the webhook and the scheduling gate label should be added")
+			Eventually(framework.VerifyPodLabels(ctx, client, ns, "app", "test", e2e.Present, schedulingGateLabel), e2e.WaitShort).Should(Succeed())
+			By("Verify arch label are set")
+			Eventually(framework.VerifyPodLabelsAreSet(ctx, client, ns, "app", "test",
+				utils.MultiArchLabel, "",
+				utils.ArchLabelValue(utils.ArchitectureAmd64), "",
+				utils.ArchLabelValue(utils.ArchitectureArm64), "",
+				utils.ArchLabelValue(utils.ArchitectureS390x), "",
+				utils.ArchLabelValue(utils.ArchitecturePpc64le), "",
+			), e2e.WaitShort).Should(Succeed())
+			By("Verify node affinity label are set correct")
+			Eventually(framework.VerifyPodLabelsAreSet(ctx, client, ns, "app", "test",
+				utils.NodeAffinityLabel, utils.NodeAffinityLabelValueSet,
+				utils.PreferredNodeAffinityLabel, utils.NodeAffinityLabelValueSet,
+			), e2e.WaitShort).Should(Succeed())
+			By("The pod should get node affinity of arch info because the mirror registries are functional.")
+			Eventually(framework.VerifyPodNodeAffinity(ctx, client, ns, "app", "test", *expectedNSTs), e2e.WaitShort).Should(Succeed())
+			By("The pod should have the preferred affinities set in the ClusterPodPlacementConfig")
+			Eventually(framework.VerifyPodPreferredNodeAffinity(ctx, client, ns, "app", "test",
+				defaultExpectedAffinityTerms()), e2e.WaitShort).Should(Succeed())
+			By("The pod should be running")
+			Eventually(framework.VerifyPodsAreRunning(ctx, client, ns, "app", "test"), e2e.WaitShort).Should(Succeed())
+		})
+	})
 	Context("When deploying workloads running images in registries that have mirrors configuration", func() {
 		BeforeEach(func() {
 			if len(masterNodes.Items) == 0 {
@@ -1559,6 +1763,202 @@ var _ = Describe("The Pod Placement Operand", func() {
 			By("The pod should have the preferred affinities set in the ClusterPodPlacementConfig")
 			Eventually(framework.VerifyPodPreferredNodeAffinity(ctx, client, ns, "app", "test",
 				defaultExpectedAffinityTerms()), e2e.WaitShort).Should(Succeed())
+		})
+		It("Should set node affinity when image has tag and sha", func() {
+			var err error
+			By("Create an ephemeral namespace")
+			ns := framework.NewEphemeralNamespace()
+			err = client.Create(ctx, ns)
+			Expect(err).NotTo(HaveOccurred())
+			//nolint:errcheck
+			defer client.Delete(ctx, ns)
+			By("Create a deployment running image in source registry")
+			ps := NewPodSpec().
+				WithContainersImages(e2e.HelloopenshiftPublicMultiarchImageTagDigest).
+				Build()
+			d := NewDeployment().
+				WithSelectorAndPodLabels(podLabel).
+				WithPodSpec(ps).
+				WithReplicas(utils.NewPtr(int32(1))).
+				WithName("test-deployment").
+				WithNamespace(ns.Name).
+				Build()
+			err = client.Create(ctx, d)
+			Expect(err).NotTo(HaveOccurred())
+			archLabelNSR := NewNodeSelectorRequirement().
+				WithKeyAndValues(utils.ArchLabel, corev1.NodeSelectorOpIn, utils.ArchitectureAmd64,
+					utils.ArchitectureArm64, utils.ArchitectureS390x, utils.ArchitecturePpc64le).
+				Build()
+			expectedNSTs := NewNodeSelectorTerm().WithMatchExpressions(archLabelNSR).Build()
+			By("The pod should have been processed by the webhook and the scheduling gate label should be added")
+			Eventually(framework.VerifyPodLabels(ctx, client, ns, "app", "test", e2e.Present, schedulingGateLabel), e2e.WaitShort).Should(Succeed())
+			By("Verify arch label are set")
+			Eventually(framework.VerifyPodLabelsAreSet(ctx, client, ns, "app", "test",
+				utils.MultiArchLabel, "",
+				utils.ArchLabelValue(utils.ArchitectureAmd64), "",
+				utils.ArchLabelValue(utils.ArchitectureArm64), "",
+				utils.ArchLabelValue(utils.ArchitectureS390x), "",
+				utils.ArchLabelValue(utils.ArchitecturePpc64le), "",
+			), e2e.WaitShort).Should(Succeed())
+			By("Verify node affinity label are set correct")
+			Eventually(framework.VerifyPodLabelsAreSet(ctx, client, ns, "app", "test",
+				utils.NodeAffinityLabel, utils.NodeAffinityLabelValueSet,
+				utils.PreferredNodeAffinityLabel, utils.NodeAffinityLabelValueSet,
+			), e2e.WaitShort).Should(Succeed())
+			By("The pod should get node affinity of arch info because the mirror registries are functional.")
+			Eventually(framework.VerifyPodNodeAffinity(ctx, client, ns, "app", "test", *expectedNSTs), e2e.WaitShort).Should(Succeed())
+			By("The pod should have the preferred affinities set in the ClusterPodPlacementConfig")
+			Eventually(framework.VerifyPodPreferredNodeAffinity(ctx, client, ns, "app", "test",
+				defaultExpectedAffinityTerms()), e2e.WaitShort).Should(Succeed())
+			By("The pod should be running")
+			Eventually(framework.VerifyPodsAreRunning(ctx, client, ns, "app", "test"), e2e.WaitShort).Should(Succeed())
+		})
+		It("Should set node affinity when image has digest and port", func() {
+			var err error
+			By("Create an ephemeral namespace")
+			ns := framework.NewEphemeralNamespace()
+			err = client.Create(ctx, ns)
+			Expect(err).NotTo(HaveOccurred())
+			//nolint:errcheck
+			defer client.Delete(ctx, ns)
+			By("Create a deployment running image in source registry")
+			ps := NewPodSpec().
+				WithContainersImages(e2e.HelloopenshiftPublicMultiarchImageWithPortDigest).
+				Build()
+			d := NewDeployment().
+				WithSelectorAndPodLabels(podLabel).
+				WithPodSpec(ps).
+				WithReplicas(utils.NewPtr(int32(1))).
+				WithName("test-deployment").
+				WithNamespace(ns.Name).
+				Build()
+			err = client.Create(ctx, d)
+			Expect(err).NotTo(HaveOccurred())
+			archLabelNSR := NewNodeSelectorRequirement().
+				WithKeyAndValues(utils.ArchLabel, corev1.NodeSelectorOpIn, utils.ArchitectureAmd64,
+					utils.ArchitectureArm64, utils.ArchitectureS390x, utils.ArchitecturePpc64le).
+				Build()
+			expectedNSTs := NewNodeSelectorTerm().WithMatchExpressions(archLabelNSR).Build()
+			By("The pod should have been processed by the webhook and the scheduling gate label should be added")
+			Eventually(framework.VerifyPodLabels(ctx, client, ns, "app", "test", e2e.Present, schedulingGateLabel), e2e.WaitShort).Should(Succeed())
+			By("Verify arch label are set")
+			Eventually(framework.VerifyPodLabelsAreSet(ctx, client, ns, "app", "test",
+				utils.MultiArchLabel, "",
+				utils.ArchLabelValue(utils.ArchitectureAmd64), "",
+				utils.ArchLabelValue(utils.ArchitectureArm64), "",
+				utils.ArchLabelValue(utils.ArchitectureS390x), "",
+				utils.ArchLabelValue(utils.ArchitecturePpc64le), "",
+			), e2e.WaitShort).Should(Succeed())
+			By("Verify node affinity label are set correct")
+			Eventually(framework.VerifyPodLabelsAreSet(ctx, client, ns, "app", "test",
+				utils.NodeAffinityLabel, utils.NodeAffinityLabelValueSet,
+				utils.PreferredNodeAffinityLabel, utils.NodeAffinityLabelValueSet,
+			), e2e.WaitShort).Should(Succeed())
+			By("The pod should get node affinity of arch info because the mirror registries are functional.")
+			Eventually(framework.VerifyPodNodeAffinity(ctx, client, ns, "app", "test", *expectedNSTs), e2e.WaitShort).Should(Succeed())
+			By("The pod should have the preferred affinities set in the ClusterPodPlacementConfig")
+			Eventually(framework.VerifyPodPreferredNodeAffinity(ctx, client, ns, "app", "test",
+				defaultExpectedAffinityTerms()), e2e.WaitShort).Should(Succeed())
+			By("The pod should be running")
+			Eventually(framework.VerifyPodsAreRunning(ctx, client, ns, "app", "test"), e2e.WaitShort).Should(Succeed())
+		})
+		It("Should set node affinity when image has tag and port", func() {
+			var err error
+			By("Create an ephemeral namespace")
+			ns := framework.NewEphemeralNamespace()
+			err = client.Create(ctx, ns)
+			Expect(err).NotTo(HaveOccurred())
+			//nolint:errcheck
+			defer client.Delete(ctx, ns)
+			By("Create a deployment running image in source registry")
+			ps := NewPodSpec().
+				WithContainersImages(e2e.HelloopenshiftPublicMultiarchImageWithPortTag).
+				Build()
+			d := NewDeployment().
+				WithSelectorAndPodLabels(podLabel).
+				WithPodSpec(ps).
+				WithReplicas(utils.NewPtr(int32(1))).
+				WithName("test-deployment").
+				WithNamespace(ns.Name).
+				Build()
+			err = client.Create(ctx, d)
+			Expect(err).NotTo(HaveOccurred())
+			archLabelNSR := NewNodeSelectorRequirement().
+				WithKeyAndValues(utils.ArchLabel, corev1.NodeSelectorOpIn, utils.ArchitectureAmd64,
+					utils.ArchitectureArm64, utils.ArchitectureS390x, utils.ArchitecturePpc64le).
+				Build()
+			expectedNSTs := NewNodeSelectorTerm().WithMatchExpressions(archLabelNSR).Build()
+			By("The pod should have been processed by the webhook and the scheduling gate label should be added")
+			Eventually(framework.VerifyPodLabels(ctx, client, ns, "app", "test", e2e.Present, schedulingGateLabel), e2e.WaitShort).Should(Succeed())
+			By("Verify arch label are set")
+			Eventually(framework.VerifyPodLabelsAreSet(ctx, client, ns, "app", "test",
+				utils.MultiArchLabel, "",
+				utils.ArchLabelValue(utils.ArchitectureAmd64), "",
+				utils.ArchLabelValue(utils.ArchitectureArm64), "",
+				utils.ArchLabelValue(utils.ArchitectureS390x), "",
+				utils.ArchLabelValue(utils.ArchitecturePpc64le), "",
+			), e2e.WaitShort).Should(Succeed())
+			By("Verify node affinity label are set correct")
+			Eventually(framework.VerifyPodLabelsAreSet(ctx, client, ns, "app", "test",
+				utils.NodeAffinityLabel, utils.NodeAffinityLabelValueSet,
+				utils.PreferredNodeAffinityLabel, utils.NodeAffinityLabelValueSet,
+			), e2e.WaitShort).Should(Succeed())
+			By("The pod should get node affinity of arch info because the mirror registries are functional.")
+			Eventually(framework.VerifyPodNodeAffinity(ctx, client, ns, "app", "test", *expectedNSTs), e2e.WaitShort).Should(Succeed())
+			By("The pod should have the preferred affinities set in the ClusterPodPlacementConfig")
+			Eventually(framework.VerifyPodPreferredNodeAffinity(ctx, client, ns, "app", "test",
+				defaultExpectedAffinityTerms()), e2e.WaitShort).Should(Succeed())
+			By("The pod should be running")
+			Eventually(framework.VerifyPodsAreRunning(ctx, client, ns, "app", "test"), e2e.WaitShort).Should(Succeed())
+		})
+		It("Should set node affinity when image has digest and tag and port", func() {
+			var err error
+			By("Create an ephemeral namespace")
+			ns := framework.NewEphemeralNamespace()
+			err = client.Create(ctx, ns)
+			Expect(err).NotTo(HaveOccurred())
+			//nolint:errcheck
+			defer client.Delete(ctx, ns)
+			By("Create a deployment running image in source registry")
+			ps := NewPodSpec().
+				WithContainersImages(e2e.HelloopenshiftPublicMultiarchImageWithPortTagDigest).
+				Build()
+			d := NewDeployment().
+				WithSelectorAndPodLabels(podLabel).
+				WithPodSpec(ps).
+				WithReplicas(utils.NewPtr(int32(1))).
+				WithName("test-deployment").
+				WithNamespace(ns.Name).
+				Build()
+			err = client.Create(ctx, d)
+			Expect(err).NotTo(HaveOccurred())
+			archLabelNSR := NewNodeSelectorRequirement().
+				WithKeyAndValues(utils.ArchLabel, corev1.NodeSelectorOpIn, utils.ArchitectureAmd64,
+					utils.ArchitectureArm64, utils.ArchitectureS390x, utils.ArchitecturePpc64le).
+				Build()
+			expectedNSTs := NewNodeSelectorTerm().WithMatchExpressions(archLabelNSR).Build()
+			By("The pod should have been processed by the webhook and the scheduling gate label should be added")
+			Eventually(framework.VerifyPodLabels(ctx, client, ns, "app", "test", e2e.Present, schedulingGateLabel), e2e.WaitShort).Should(Succeed())
+			By("Verify arch label are set")
+			Eventually(framework.VerifyPodLabelsAreSet(ctx, client, ns, "app", "test",
+				utils.MultiArchLabel, "",
+				utils.ArchLabelValue(utils.ArchitectureAmd64), "",
+				utils.ArchLabelValue(utils.ArchitectureArm64), "",
+				utils.ArchLabelValue(utils.ArchitectureS390x), "",
+				utils.ArchLabelValue(utils.ArchitecturePpc64le), "",
+			), e2e.WaitShort).Should(Succeed())
+			By("Verify node affinity label are set correct")
+			Eventually(framework.VerifyPodLabelsAreSet(ctx, client, ns, "app", "test",
+				utils.NodeAffinityLabel, utils.NodeAffinityLabelValueSet,
+				utils.PreferredNodeAffinityLabel, utils.NodeAffinityLabelValueSet,
+			), e2e.WaitShort).Should(Succeed())
+			By("The pod should get node affinity of arch info because the mirror registries are functional.")
+			Eventually(framework.VerifyPodNodeAffinity(ctx, client, ns, "app", "test", *expectedNSTs), e2e.WaitShort).Should(Succeed())
+			By("The pod should have the preferred affinities set in the ClusterPodPlacementConfig")
+			Eventually(framework.VerifyPodPreferredNodeAffinity(ctx, client, ns, "app", "test",
+				defaultExpectedAffinityTerms()), e2e.WaitShort).Should(Succeed())
+			By("The pod should be running")
+			Eventually(framework.VerifyPodsAreRunning(ctx, client, ns, "app", "test"), e2e.WaitShort).Should(Succeed())
 		})
 	})
 })

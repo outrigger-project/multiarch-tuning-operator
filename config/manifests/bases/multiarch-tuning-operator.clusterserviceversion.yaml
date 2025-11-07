@@ -6,7 +6,7 @@ metadata:
     capabilities: Seamless Upgrades
     categories: OpenShift Optional, Other
     console.openshift.io/disable-operand-delete: "false"
-    containerImage: registry.ci.openshift.org/origin/multiarch-tuning-operator:main
+    containerImage: registry.ci.openshift.org/origin/multiarch-tuning-operator:v1.x
     features.operators.openshift.io/cnf: "false"
     features.operators.openshift.io/cni: "false"
     features.operators.openshift.io/csi: "false"
@@ -23,6 +23,7 @@ metadata:
     operatorframework.io/suggested-namespace: openshift-multiarch-tuning-operator
     operators.openshift.io/valid-subscription: '["OpenShift Kubernetes Engine", "OpenShift
       Container Platform", "OpenShift Platform Plus"]'
+    operators.operatorframework.io/internal-objects: '["enoexecevents.multiarch.openshift.io"]'
     repository: https://github.com/openshift/multiarch-tuning-operator
     support: Red Hat
   labels:
@@ -30,7 +31,7 @@ metadata:
     operatorframework.io/arch.arm64: supported
     operatorframework.io/arch.ppc64le: supported
     operatorframework.io/arch.s390x: supported
-  name: multiarch-tuning-operator.v1.1.1
+  name: multiarch-tuning-operator.v1.2.1
   namespace: openshift-multiarch-tuning-operator
 spec:
   apiservicedefinitions: {}
@@ -50,6 +51,11 @@ spec:
       kind: ClusterPodPlacementConfig
       name: clusterpodplacementconfigs.multiarch.openshift.io
       version: v1alpha1
+    - description: ENoExecEvent is the Schema for the enoexecevents API
+      displayName: ENo Exec Event
+      kind: ENoExecEvent
+      name: enoexecevents.multiarch.openshift.io
+      version: v1beta1
   description: |
     The Multiarch Tuning Operator optimizes workload management within multi-architecture clusters and in
     single-architecture clusters transitioning to multi-architecture environments.
@@ -96,4 +102,4 @@ spec:
   provider:
     name: Red Hat
     url: https://github.com/openshift/multiarch-tuning-operator
-  version: 1.1.1
+  version: 1.2.1

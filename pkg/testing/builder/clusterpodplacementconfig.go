@@ -43,6 +43,17 @@ func (p *ClusterPodPlacementConfigBuilder) WithPlugins() *ClusterPodPlacementCon
 	return p
 }
 
+func (p *ClusterPodPlacementConfigBuilder) WithExecFormatErrorMonitor(enabled bool) *ClusterPodPlacementConfigBuilder {
+	if p.Spec.Plugins == nil {
+		p.Spec.Plugins = &plugins.Plugins{}
+	}
+	if p.Spec.Plugins.ExecFormatErrorMonitor == nil {
+		p.Spec.Plugins.ExecFormatErrorMonitor = &plugins.ExecFormatErrorMonitor{}
+	}
+	p.Spec.Plugins.ExecFormatErrorMonitor.Enabled = enabled
+	return p
+}
+
 func (p *ClusterPodPlacementConfigBuilder) WithNodeAffinityScoring(enabled bool) *ClusterPodPlacementConfigBuilder {
 	if p.Spec.Plugins == nil {
 		p.Spec.Plugins = &plugins.Plugins{}
