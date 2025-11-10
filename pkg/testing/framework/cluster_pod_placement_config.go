@@ -13,8 +13,8 @@ import (
 
 	"github.com/openshift/library-go/pkg/operator/v1helpers"
 
-	"github.com/openshift/multiarch-tuning-operator/apis/multiarch/common"
-	"github.com/openshift/multiarch-tuning-operator/apis/multiarch/v1beta1"
+	"github.com/openshift/multiarch-tuning-operator/api/common"
+	"github.com/openshift/multiarch-tuning-operator/api/v1beta1"
 	"github.com/openshift/multiarch-tuning-operator/pkg/testing/builder"
 	"github.com/openshift/multiarch-tuning-operator/pkg/utils"
 )
