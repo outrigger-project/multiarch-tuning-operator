@@ -24,7 +24,13 @@ LABEL io.k8s.display-name="Multiarch Tuning Operator"
 LABEL io.openshift.tags="openshift,operator,multiarch,scheduling"'
 
 # Remove the content of the bundle.konflux.Dockerfile starting from the line with the comment "# Labels from hack/patch-bundle-dockerfile.sh"
-sed -i '/# Labels from hack\/patch-bundle-dockerfile.sh/,$d' bundle.konflux.Dockerfile
+if [[ "$(uname)" == "Darwin" ]]; then
+    # macOS BSD sed
+    sed -i '' '/# Labels from hack\/patch-bundle-dockerfile.sh/,$d' bundle.konflux.Dockerfile
+else
+    # Linux GNU sed
+    sed -i '/# Labels from hack\/patch-bundle-dockerfile.sh/,$d' bundle.konflux.Dockerfile
+fi
 # Append the content to the bundle.Dockerfile and bundle.konflux.Dockerfile
 cat <<EOF >>bundle.Dockerfile
 
