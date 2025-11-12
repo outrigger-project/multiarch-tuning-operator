@@ -549,7 +549,7 @@ func TestPod_SetPreferredArchNodeAffinityWithCPPC(t *testing.T) {
 				WithName(common.SingletonResourceObjectName).
 				WithNodeAffinityScoring(true).
 				WithNodeAffinityScoringTerm(utils.ArchitectureAmd64, 1).Build()
-			pod.SetPreferredArchNodeAffinity(cppc.Spec.Plugins.NodeAffinityScoring)
+			pod.SetPreferredArchNodeAffinity(cppc.Spec.Plugins.NodeAffinityScoring, v1beta1.ClusterPodPlacementConfigKind)
 			g.Expect(pod.Spec.Affinity).Should(Equal(tt.want.Spec.Affinity))
 			imageInspectionCache = mmoimage.FacadeSingleton()
 		})
@@ -599,13 +599,13 @@ func TestPod_SetPreferredArchNodeAffinityPPC(t *testing.T) {
 				WithNodeAffinityScoring(true).
 				WithPriority(10).
 				WithNodeAffinityScoringTerm(utils.ArchitectureAmd64, 1).Build()
-			pod.SetPreferredArchNodeAffinity(ppc.Spec.Plugins.NodeAffinityScoring)
+			pod.SetPreferredArchNodeAffinity(ppc.Spec.Plugins.NodeAffinityScoring, "PodPlacementConfig/test-high-priority")
 			ppc = NewPodPlacementConfig().
 				WithName("test-low-priority").
 				WithNodeAffinityScoring(true).
 				WithPriority(5).
 				WithNodeAffinityScoringTerm(utils.ArchitectureAmd64, 5).Build()
-			pod.SetPreferredArchNodeAffinity(ppc.Spec.Plugins.NodeAffinityScoring)
+			pod.SetPreferredArchNodeAffinity(ppc.Spec.Plugins.NodeAffinityScoring, "PodPlacementConfig/test-low-priority")
 			g.Expect(pod.Spec.Affinity).Should(Equal(tt.want.Spec.Affinity))
 			imageInspectionCache = mmoimage.FacadeSingleton()
 		})
@@ -644,7 +644,7 @@ func TestPod_SetPreferredArchNodeAffinity(t *testing.T) {
 					},
 				},
 			}
-			pod.SetPreferredArchNodeAffinity(cppc.Spec.Plugins.NodeAffinityScoring)
+			pod.SetPreferredArchNodeAffinity(cppc.Spec.Plugins.NodeAffinityScoring, v1beta1.ClusterPodPlacementConfigKind)
 			g.Expect(pod.Spec.Affinity).Should(Equal(tt.want.Spec.Affinity))
 			imageInspectionCache = mmoimage.FacadeSingleton()
 		})
