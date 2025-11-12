@@ -120,10 +120,16 @@ func (r *PodReconciler) processPod(ctx context.Context, pod *Pod) {
 		return
 	}
 
-	r.applyPodPlacementConfigs(ctx, pod)
+	// Skip preferred affinity processing if the user has already configured architecture-related preferred affinity
+	// or if the reconcile loop has already applied the PPCs/CPPC (e.g., due to a retry or re-reconciliation)
+	if !pod.isPreferredAffinityConfiguredForArchitecture() {
+		r.applyPodPlacementConfigs(ctx, pod)
 
-	if cppc != nil && cppc.PluginsEnabled(common.NodeAffinityScoringPluginName) {
-		pod.SetPreferredArchNodeAffinity(cppc.Spec.Plugins.NodeAffinityScoring)
+		if cppc != nil && cppc.PluginsEnabled(common.NodeAffinityScoringPluginName) {
+			pod.SetPreferredArchNodeAffinity(cppc.Spec.Plugins.NodeAffinityScoring, multiarchv1beta1.ClusterPodPlacementConfigKind)
+		}
+	} else {
+		log.V(2).Info("Pod already has architecture-related preferred affinity. This could be user-defined or from a previous reconcile loop. Skipping PPC/CPPC preferred affinity processing.")
 	}
 
 	// Prepare the requirement for the node affinity.
@@ -145,9 +151,11 @@ func (r *PodReconciler) processPod(ctx context.Context, pod *Pod) {
 	}
 	// If the pod has been processed successfully or the max retries have been reached, remove the scheduling gate.
 	if err == nil || pod.maxRetries() {
+		// If no preferred node affinity was set by any config, log and publish an event
 		if pod.Labels[utils.PreferredNodeAffinityLabel] == utils.LabelValueNotSet {
 			pod.PublishEvent(corev1.EventTypeNormal, ArchitectureAwareNodeAffinitySet,
 				ArchitecturePreferredPredicateSkippedMsg)
+			log.V(2).Info("No preferred node affinity was set")
 		}
 
 		log.V(1).Info("Removing the scheduling gate from pod.")
@@ -189,7 +197,8 @@ func (r *PodReconciler) applyPodPlacementConfigs(ctx context.Context, pod *Pod) 
 		if selector == labels.Nothing() || selector.Matches(labels.Set(pod.Labels)) {
 			log.Info("Applying namespace-scoped config", "PodPlacementConfig", ppc.Name)
 			// Apply the configuration, checking for overlaps
-			pod.SetPreferredArchNodeAffinity(ppc.Spec.Plugins.NodeAffinityScoring)
+			configSource := fmt.Sprintf("%s-%s", multiarchv1beta1.PodPlacementConfigKind, ppc.Name)
+			pod.SetPreferredArchNodeAffinity(ppc.Spec.Plugins.NodeAffinityScoring, configSource)
 		}
 	}
 }
