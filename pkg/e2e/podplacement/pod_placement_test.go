@@ -8,16 +8,14 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	crclient "sigs.k8s.io/controller-runtime/pkg/client"
-
-	corev1 "k8s.io/api/core/v1"
-	rbacv1 "k8s.io/api/rbac/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
 	"github.com/openshift/multiarch-tuning-operator/pkg/e2e"
 	. "github.com/openshift/multiarch-tuning-operator/pkg/testing/builder"
 	"github.com/openshift/multiarch-tuning-operator/pkg/testing/framework"
 	"github.com/openshift/multiarch-tuning-operator/pkg/utils"
+	corev1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	runtimeclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 const (
@@ -297,7 +295,7 @@ var _ = Describe("The Pod Placement Operand", func() {
 			Eventually(framework.VerifyPodPreferredNodeAffinity(ctx, client, ns, "app", "test",
 				expectedPSTs), e2e.WaitShort).Should(Succeed())
 		})
-		It("should set the required node affinity when users provide only arch-related preferred affinities", func() {
+		It("should only set the required node affinity when user preference conflicts with CPPC preferred node affinity", func() {
 			var err error
 			By("Create an ephemeral namespace")
 			ns := framework.NewEphemeralNamespace()
@@ -341,6 +339,21 @@ var _ = Describe("The Pod Placement Operand", func() {
 				utils.NodeAffinityLabel, utils.NodeAffinityLabelValueSet,
 				utils.PreferredNodeAffinityLabel, utils.LabelValueNotSet,
 			), e2e.WaitShort).Should(Succeed())
+			By("Verify annotation shows CPPC preferences were skipped due to user conflict")
+			Eventually(func(g Gomega) {
+				pods := &corev1.PodList{}
+				err := client.List(ctx, pods, runtimeclient.InNamespace(ns.Name), runtimeclient.MatchingLabels{"app": "test"})
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(pods.Items).To(HaveLen(1))
+				pod := pods.Items[0]
+				g.Expect(pod.Annotations).To(HaveKey(utils.PreferredNodeAffinitySourcesAnnotation),
+					"should have affinity sources annotation")
+				annotation := pod.Annotations[utils.PreferredNodeAffinitySourcesAnnotation]
+				g.Expect(annotation).To(ContainSubstring("skipped"),
+					"should show CPPC preferences were skipped due to user-defined conflict")
+				g.Expect(annotation).To(ContainSubstring("ClusterPodPlacementConfig"),
+					"should mention CPPC as the source")
+			}, e2e.WaitShort).Should(Succeed())
 			By("The pod should have been set node affinity of arch info.")
 			Eventually(framework.VerifyPodNodeAffinity(ctx, client, ns, "app", "test", *expectedNSTs), e2e.WaitShort).Should(Succeed())
 			By("The pod should have the preferred affinities set in the ClusterPodPlacementConfig")
@@ -1997,45 +2010,292 @@ var _ = Describe("The Pod Placement Operand", func() {
 				WithNodeAffinityScoringTerm(utils.ArchitecturePpc64le, 40).
 				Build()
 			Expect(client.Create(ctx, ppc3)).To(Succeed())
-			By("Creating a matching pod")
-			pod := NewPod().
+			By("Creating a matching deployment")
+			ps := NewPodSpec().
 				WithContainersImages(helloOpenshiftPublicMultiarchImage).
-				WithGenerateName("test-pod-").
+				Build()
+			d := NewDeployment().
+				WithSelectorAndPodLabels(podLabel).
+				WithPodSpec(ps).
+				WithReplicas(utils.NewPtr(int32(1))).
+				WithName("test-deployment").
 				WithNamespace(ns.Name).
 				Build()
-			Expect(client.Create(ctx, pod)).To(Succeed())
+			Expect(client.Create(ctx, d)).To(Succeed())
 			By("Verifying the preferred affinity is correctly set")
-			Eventually(func(g Gomega) {
-				// Get pod from the API server
-				err := client.Get(ctx, crclient.ObjectKeyFromObject(pod), pod)
-				g.Expect(err).NotTo(HaveOccurred(), "failed to get pod", err)
-				g.Expect(pod.Spec.SchedulingGates).NotTo(ContainElement(corev1.PodSchedulingGate{
-					Name: utils.SchedulingGateName,
-				}), "scheduling gate not removed")
-				g.Expect(pod.Labels).To(HaveKeyWithValue(utils.SchedulingGateLabel, utils.SchedulingGateLabelValueRemoved),
-					"scheduling gate annotation not found")
-				g.Expect(pod.Labels).To(HaveKeyWithValue(utils.PreferredNodeAffinityLabel, utils.NodeAffinityLabelValueSet),
-					"preferred node affinity label not found")
-				g.Expect(pod.Labels).To(HaveKeyWithValue(utils.NodeAffinityLabel, utils.NodeAffinityLabelValueSet),
-					"node affinity label not found")
-			}).Should(Succeed(), "failed to remove scheduling gate from pod")
-			Eventually(func(g Gomega) {
-				g.Expect(pod.Spec.Affinity).NotTo(BeNil(), "pod.Spec.Affinity should not be nil")
-				g.Expect(pod.Spec.Affinity.NodeAffinity).NotTo(BeNil(), "pod.Spec.Affinity.NodeAffinity should not be nil")
-				g.Expect(pod.Spec.Affinity.NodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution).NotTo(BeNil(),
-					"PreferredDuringSchedulingIgnoredDuringExecution should not be nil")
-				g.Expect(len(pod.Spec.Affinity.NodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution)).To(BeNumerically(">", 0),
-					"PreferredDuringSchedulingIgnoredDuringExecution should have at least one entry")
-				preferences := []NodeAffinityTerm{
-					{Arch: []string{utils.ArchitectureArm64}, Weight: 30},
-					{Arch: []string{utils.ArchitectureS390x}, Weight: 10},
-					{Arch: []string{utils.ArchitecturePpc64le}, Weight: 40},
-					{Arch: []string{utils.ArchitectureAmd64}, Weight: 50},
-				}
-				g.Expect(*pod).To(framework.HaveEquivalentPreferredNodeAffinity(
-					NewNodeAffinityBuilder().WithPreferredNodeAffinity(preferences).Build()),
-					"unexpected preferred node affinity")
-			}).Should(Succeed(), "failed to set preferred node affinity in pod")
+			Eventually(framework.VerifyPodLabelsAreSet(ctx, client, ns, "app", "test",
+				utils.SchedulingGateLabel, utils.SchedulingGateLabelValueRemoved,
+				utils.PreferredNodeAffinityLabel, utils.NodeAffinityLabelValueSet,
+				utils.NodeAffinityLabel, utils.NodeAffinityLabelValueSet,
+			), e2e.WaitShort).Should(Succeed())
+			By("Verifying the preferred node affinity terms are set correctly")
+			arm64Term := NewPreferredSchedulingTerm().
+				WithArchitecture(utils.ArchitectureArm64).WithWeight(30).Build()
+			s390xTerm := NewPreferredSchedulingTerm().
+				WithArchitecture(utils.ArchitectureS390x).WithWeight(10).Build()
+			ppc64leTerm := NewPreferredSchedulingTerm().
+				WithArchitecture(utils.ArchitecturePpc64le).WithWeight(40).Build()
+			amd64Term := NewPreferredSchedulingTerm().
+				WithArchitecture(utils.ArchitectureAmd64).WithWeight(50).Build()
+			Eventually(framework.VerifyPodPreferredNodeAffinity(ctx, client, ns, "app", "test",
+				NewPreferredSchedulingTerms().
+					WithPreferredSchedulingTerm(arm64Term).
+					WithPreferredSchedulingTerm(s390xTerm).
+					WithPreferredSchedulingTerm(ppc64leTerm).
+					WithPreferredSchedulingTerm(amd64Term).
+					Build()), e2e.WaitShort).Should(Succeed())
+		})
+		It("Should only apply PPC to pods matching label selector", func() {
+			By("Create an ephemeral namespace")
+			ns := framework.NewEphemeralNamespace()
+			err := client.Create(ctx, ns)
+			Expect(err).NotTo(HaveOccurred())
+			//nolint:errcheck
+			defer client.Delete(ctx, ns)
+			By("Creating a PodPlacementConfig with label selector app=backend")
+			ppc := NewPodPlacementConfig().
+				WithName("test-ppc-backend").
+				WithNamespace(ns.Name).
+				WithPriority(100).
+				WithNodeAffinityScoring(true).
+				WithNodeAffinityScoringTerm(utils.ArchitecturePpc64le, 60).
+				WithLabelSelector(&metav1.LabelSelector{
+					MatchLabels: map[string]string{"app": "backend"},
+				}).
+				Build()
+			Expect(client.Create(ctx, ppc)).To(Succeed())
+			By("Creating a backend deployment that matches the selector")
+			backendPs := NewPodSpec().
+				WithContainersImages(helloOpenshiftPublicMultiarchImage).
+				Build()
+			backendDeployment := NewDeployment().
+				WithSelectorAndPodLabels(map[string]string{"app": "backend"}).
+				WithPodSpec(backendPs).
+				WithReplicas(utils.NewPtr(int32(1))).
+				WithName("backend-deployment").
+				WithNamespace(ns.Name).
+				Build()
+			Expect(client.Create(ctx, backendDeployment)).To(Succeed())
+			By("Creating a frontend deployment that does NOT match the selector")
+			frontendPs := NewPodSpec().
+				WithContainersImages(helloOpenshiftPublicMultiarchImage).
+				Build()
+			frontendDeployment := NewDeployment().
+				WithSelectorAndPodLabels(map[string]string{"app": "frontend"}).
+				WithPodSpec(frontendPs).
+				WithReplicas(utils.NewPtr(int32(1))).
+				WithName("frontend-deployment").
+				WithNamespace(ns.Name).
+				Build()
+			Expect(client.Create(ctx, frontendDeployment)).To(Succeed())
+			Eventually(framework.VerifyPodLabelsAreSet(ctx, client, ns, "app", "backend",
+				utils.SchedulingGateLabel, utils.SchedulingGateLabelValueRemoved,
+				utils.PreferredNodeAffinityLabel, utils.NodeAffinityLabelValueSet,
+				utils.NodeAffinityLabel, utils.NodeAffinityLabelValueSet,
+			), e2e.WaitShort).Should(Succeed())
+			By("Verifying backend deployment pods get PPC ppc64le and CPPC arm64 preferences")
+			ppc64leTerm := NewPreferredSchedulingTerm().
+				WithArchitecture(utils.ArchitecturePpc64le).WithWeight(60).Build()
+			amd64Term := NewPreferredSchedulingTerm().
+				WithArchitecture(utils.ArchitectureAmd64).WithWeight(50).Build()
+			Eventually(framework.VerifyPodPreferredNodeAffinity(ctx, client, ns, "app", "backend",
+				NewPreferredSchedulingTerms().
+					WithPreferredSchedulingTerm(ppc64leTerm).
+					WithPreferredSchedulingTerm(amd64Term).
+					Build()), e2e.WaitShort).Should(Succeed())
+			Eventually(framework.VerifyPodLabelsAreSet(ctx, client, ns, "app", "frontend",
+				utils.SchedulingGateLabel, utils.SchedulingGateLabelValueRemoved,
+				utils.PreferredNodeAffinityLabel, utils.NodeAffinityLabelValueSet,
+				utils.NodeAffinityLabel, utils.NodeAffinityLabelValueSet,
+			), e2e.WaitShort).Should(Succeed())
+			By("Verifying frontend deployment pods get only CPPC amd64 preferences")
+			frontendAmd64Term := NewPreferredSchedulingTerm().
+				WithArchitecture(utils.ArchitectureAmd64).WithWeight(50).
+				Build()
+			Eventually(framework.VerifyPodPreferredNodeAffinity(ctx, client, ns, "app", "frontend",
+				NewPreferredSchedulingTerms().WithPreferredSchedulingTerm(frontendAmd64Term).Build()), e2e.WaitShort).Should(Succeed())
+
+		})
+		It("Should respect priority when multiple PPCs configure the same architecture", func() {
+			By("Create an ephemeral namespace")
+			ns := framework.NewEphemeralNamespace()
+			err := client.Create(ctx, ns)
+			Expect(err).NotTo(HaveOccurred())
+			//nolint:errcheck
+			defer client.Delete(ctx, ns)
+			By("Creating a lower-priority PodPlacementConfig with amd64")
+			ppcLow := NewPodPlacementConfig().
+				WithName("test-ppc-low").
+				WithNamespace(ns.Name).
+				WithPriority(30).
+				WithNodeAffinityScoring(true).
+				WithNodeAffinityScoringTerm(utils.ArchitectureArm64, 60).
+				Build()
+			Expect(client.Create(ctx, ppcLow)).To(Succeed())
+			By("Creating a higher-priority PodPlacementConfig with amd64")
+			ppcHigh := NewPodPlacementConfig().
+				WithName("test-ppc-high").
+				WithNamespace(ns.Name).
+				WithPriority(60).
+				WithNodeAffinityScoring(true).
+				WithNodeAffinityScoringTerm(utils.ArchitectureArm64, 30).
+				Build()
+			Expect(client.Create(ctx, ppcHigh)).To(Succeed())
+			By("Creating a matching deployment")
+			ps := NewPodSpec().
+				WithContainersImages(helloOpenshiftPublicMultiarchImage).
+				Build()
+			d := NewDeployment().
+				WithSelectorAndPodLabels(podLabel).
+				WithPodSpec(ps).
+				WithReplicas(utils.NewPtr(int32(1))).
+				WithName("test-deployment").
+				WithNamespace(ns.Name).
+				Build()
+			Expect(client.Create(ctx, d)).To(Succeed())
+			By("Verifying the preferred affinity uses higher-priority PPC's weight (30)")
+			Eventually(framework.VerifyPodLabelsAreSet(ctx, client, ns, "app", "test",
+				utils.SchedulingGateLabel, utils.SchedulingGateLabelValueRemoved,
+				utils.PreferredNodeAffinityLabel, utils.NodeAffinityLabelValueSet,
+				utils.NodeAffinityLabel, utils.NodeAffinityLabelValueSet,
+			), e2e.WaitShort).Should(Succeed())
+			By("Verifying annotations track PPC sources")
+			Eventually(framework.VerifyPodAnnotationsAreSet(ctx, client, ns, "app", "test",
+				utils.PreferredNodeAffinitySourcesAnnotation, "arm64:30:PodPlacementConfig-test-ppc-high,arm64:60:PodPlacementConfig-test-ppc-low:skipped,amd64:50:ClusterPodPlacementConfig",
+			), e2e.WaitShort).Should(Succeed())
+			By("Verifying affinity uses CPPC amd64 and higher-priority PPC arm64")
+			amd64Term := NewPreferredSchedulingTerm().
+				WithArchitecture(utils.ArchitectureAmd64).WithWeight(50).Build()
+			arm64Term := NewPreferredSchedulingTerm().
+				WithArchitecture(utils.ArchitectureArm64).WithWeight(30).Build()
+			Eventually(framework.VerifyPodPreferredNodeAffinity(ctx, client, ns, "app", "test",
+				NewPreferredSchedulingTerms().
+					WithPreferredSchedulingTerm(amd64Term).
+					WithPreferredSchedulingTerm(arm64Term).
+					Build()), e2e.WaitShort).Should(Succeed())
+		})
+		It("Should merge multiple PPCs with priority-based deduplication when architectures overlap", func() {
+			By("Create an ephemeral namespace")
+			ns := framework.NewEphemeralNamespace()
+			err := client.Create(ctx, ns)
+			Expect(err).NotTo(HaveOccurred())
+			//nolint:errcheck
+			defer client.Delete(ctx, ns)
+			By("Creating a high-priority PPC that sets amd64 and arm64")
+			ppcHigh := NewPodPlacementConfig().
+				WithName("test-ppc-high").
+				WithNamespace(ns.Name).
+				WithPriority(100).
+				WithNodeAffinityScoring(true).
+				WithNodeAffinityScoringTerm(utils.ArchitectureAmd64, 20).
+				WithNodeAffinityScoringTerm(utils.ArchitectureArm64, 60).
+				Build()
+			Expect(client.Create(ctx, ppcHigh)).To(Succeed())
+			By("Creating a lower-priority PPC that tries to set arm64 (duplicate) and ppc64le (new)")
+			ppcLow := NewPodPlacementConfig().
+				WithName("test-ppc-low").
+				WithNamespace(ns.Name).
+				WithPriority(50).
+				WithNodeAffinityScoring(true).
+				WithNodeAffinityScoringTerm(utils.ArchitectureArm64, 30).
+				WithNodeAffinityScoringTerm(utils.ArchitecturePpc64le, 40).
+				Build()
+			Expect(client.Create(ctx, ppcLow)).To(Succeed())
+			By("Creating a matching deployment")
+			ps := NewPodSpec().
+				WithContainersImages(helloOpenshiftPublicMultiarchImage).
+				Build()
+			d := NewDeployment().
+				WithSelectorAndPodLabels(podLabel).
+				WithPodSpec(ps).
+				WithReplicas(utils.NewPtr(int32(1))).
+				WithName("test-deployment").
+				WithNamespace(ns.Name).
+				Build()
+			Expect(client.Create(ctx, d)).To(Succeed())
+			By("Verifying labels are set correctly")
+			Eventually(framework.VerifyPodLabelsAreSet(ctx, client, ns, "app", "test",
+				utils.SchedulingGateLabel, utils.SchedulingGateLabelValueRemoved,
+				utils.PreferredNodeAffinityLabel, utils.NodeAffinityLabelValueSet,
+				utils.NodeAffinityLabel, utils.NodeAffinityLabelValueSet,
+			), e2e.WaitShort).Should(Succeed())
+			By("Verifying annotations track both PPCs with deduplication")
+			Eventually(framework.VerifyPodAnnotationsAreSet(ctx, client, ns, "app", "test",
+				utils.PreferredNodeAffinitySourcesAnnotation, "amd64:20:PodPlacementConfig-test-ppc-high,arm64:60:PodPlacementConfig-test-ppc-high,arm64:30:PodPlacementConfig-test-ppc-low:skipped,ppc64le:40:PodPlacementConfig-test-ppc-low,amd64:50:ClusterPodPlacementConfig:skipped",
+			), e2e.WaitShort).Should(Succeed())
+			By("Verifying affinity includes both PPCs where applicable")
+			amd64Term := NewPreferredSchedulingTerm().
+				WithArchitecture(utils.ArchitectureAmd64).WithWeight(20).Build()
+			arm64Term := NewPreferredSchedulingTerm().
+				WithArchitecture(utils.ArchitectureArm64).WithWeight(60).Build()
+			ppc64leTerm := NewPreferredSchedulingTerm().
+				WithArchitecture(utils.ArchitecturePpc64le).WithWeight(40).Build()
+			Eventually(framework.VerifyPodPreferredNodeAffinity(ctx, client, ns, "app", "test",
+				NewPreferredSchedulingTerms().
+					WithPreferredSchedulingTerm(amd64Term).
+					WithPreferredSchedulingTerm(arm64Term).
+					WithPreferredSchedulingTerm(ppc64leTerm).
+					Build()), e2e.WaitShort).Should(Succeed())
+		})
+		It("should not set PPC/CPPC preferred affinity when user affinity is defined", func() {
+			var err error
+			By("Create an ephemeral namespace")
+			ns := framework.NewEphemeralNamespace()
+			err = client.Create(ctx, ns)
+			Expect(err).NotTo(HaveOccurred())
+			//nolint:errcheck
+			defer client.Delete(ctx, ns)
+			By("Creating a PodPlacementConfig with preferred node affinity")
+			ppc := NewPodPlacementConfig().
+				WithName("test-ppc-conflict").
+				WithNamespace(ns.Name).
+				WithPriority(100).
+				WithNodeAffinityScoring(true).
+				WithNodeAffinityScoringTerm(utils.ArchitectureAmd64, 50).
+				WithNodeAffinityScoringTerm(utils.ArchitectureArm64, 20).
+				Build()
+			Expect(client.Create(ctx, ppc)).To(Succeed())
+			By("Creating a deployment with user-defined preferred node affinity for amd64")
+			archLabelPST := NewPreferredSchedulingTerm().WithArchitecture(utils.ArchitectureAmd64).WithWeight(5).Build()
+			ps := NewPodSpec().
+				WithContainersImages(helloOpenshiftPublicMultiarchImage).
+				WithPreferredNodeAffinities(*archLabelPST).
+				Build()
+			d := NewDeployment().
+				WithSelectorAndPodLabels(podLabel).
+				WithPodSpec(ps).
+				WithReplicas(utils.NewPtr(int32(1))).
+				WithName("test-deployment").
+				WithNamespace(ns.Name).
+				Build()
+			err = client.Create(ctx, d)
+			Expect(err).NotTo(HaveOccurred())
+			archLabelNSR := NewNodeSelectorRequirement().
+				WithKeyAndValues(utils.ArchLabel, corev1.NodeSelectorOpIn, utils.ArchitectureAmd64,
+					utils.ArchitectureArm64, utils.ArchitectureS390x, utils.ArchitecturePpc64le).
+				Build()
+			expectedNSTs := NewNodeSelectorTerm().WithMatchExpressions(archLabelNSR).Build()
+			By("The pod should have been processed by the webhook and the scheduling gate label should be added")
+			Eventually(framework.VerifyPodLabels(ctx, client, ns, "app", "test", e2e.Present, schedulingGateLabel), e2e.WaitShort).Should(Succeed())
+			By("Verify arch labels are set")
+			Eventually(framework.VerifyPodLabelsAreSet(ctx, client, ns, "app", "test",
+				utils.MultiArchLabel, "",
+				utils.ArchLabelValue(utils.ArchitectureAmd64), "",
+				utils.ArchLabelValue(utils.ArchitectureArm64), "",
+				utils.ArchLabelValue(utils.ArchitectureS390x), "",
+				utils.ArchLabelValue(utils.ArchitecturePpc64le), "",
+			), e2e.WaitShort).Should(Succeed())
+			By("Verify node affinity labels are set correctly - preferred affinity label should be not-set because operator skips all PPC/CPPC processing")
+			Eventually(framework.VerifyPodLabelsAreSet(ctx, client, ns, "app", "test",
+				utils.NodeAffinityLabel, utils.NodeAffinityLabelValueSet,
+				utils.PreferredNodeAffinityLabel, utils.LabelValueNotSet,
+			), e2e.WaitShort).Should(Succeed())
+			By("The pod should have required node affinity set with arch info")
+			Eventually(framework.VerifyPodNodeAffinity(ctx, client, ns, "app", "test", *expectedNSTs), e2e.WaitShort).Should(Succeed())
+			By("The pod should keep only the user-defined amd64 preference and not apply any PPC/CPPC preferences")
+			archLabelPST = NewPreferredSchedulingTerm().WithArchitecture(utils.ArchitectureAmd64).WithWeight(5).Build()
+			Eventually(framework.VerifyPodPreferredNodeAffinity(ctx, client, ns, "app", "test",
+				NewPreferredSchedulingTerms().WithPreferredSchedulingTerm(archLabelPST).Build()), e2e.WaitShort).Should(Succeed())
 		})
 	})
 })

@@ -13,6 +13,7 @@ import (
 	. "github.com/onsi/gomega"
 
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	crclient "sigs.k8s.io/controller-runtime/pkg/client"
 
 	imgspecv1 "github.com/opencontainers/image-spec/specs-go/v1"
@@ -580,7 +581,7 @@ var _ = Describe("Internal/Controller/Podplacement/PodReconciler", func() {
 					g.Expect(pod.Labels).To(HaveKeyWithValue(utils.SchedulingGateLabel, utils.SchedulingGateLabelValueRemoved),
 						"scheduling gate annotation not found")
 					g.Expect(pod.Labels).To(HaveKeyWithValue(utils.ImageInspectionErrorCountLabel, strconv.Itoa(MaxRetryCount)), "image inspection error count not found")
-					g.Expect(pod.Labels).To(HaveKeyWithValue(utils.PreferredNodeAffinityLabel, utils.NodeAffinityLabelValueSet),
+					g.Expect(pod.Labels).NotTo(HaveKeyWithValue(utils.PreferredNodeAffinityLabel, utils.LabelValueNotSet),
 						"preferred node affinity label not found")
 					g.Expect(pod.Labels).To(HaveKeyWithValue(utils.NodeAffinityLabel, utils.LabelValueNotSet),
 						"node affinity label not found")
@@ -647,6 +648,16 @@ var _ = Describe("Internal/Controller/Podplacement/PodReconciler", func() {
 						"scheduling gate annotation not found")
 					g.Expect(pod.Labels).To(HaveKeyWithValue(utils.PreferredNodeAffinityLabel, utils.NodeAffinityLabelValueSet),
 						"preferred node affinity label not found")
+					// Verify annotation tracks all sources
+					g.Expect(pod.Annotations).To(HaveKey(utils.PreferredNodeAffinitySourcesAnnotation),
+						"should have affinity sources annotation")
+					annotation := pod.Annotations[utils.PreferredNodeAffinitySourcesAnnotation]
+					g.Expect(annotation).To(ContainSubstring("amd64:50:PodPlacementConfig-test-ppc1"),
+						"should show PPC1 applied amd64")
+					g.Expect(annotation).To(ContainSubstring("arm64:10:PodPlacementConfig-test-ppc2"),
+						"should show PPC2 applied arm64")
+					g.Expect(annotation).To(ContainSubstring("arm64:50:ClusterPodPlacementConfig:skipped"),
+						"should show CPPC skipped arm64 since PPC2 already set it")
 					g.Expect(pod.Labels).To(HaveKeyWithValue(utils.NodeAffinityLabel, utils.NodeAffinityLabelValueSet),
 						"node affinity label not found")
 				}).Should(Succeed(), "failed to remove scheduling gate from pod")
@@ -704,6 +715,20 @@ var _ = Describe("Internal/Controller/Podplacement/PodReconciler", func() {
 						"scheduling gate annotation not found")
 					g.Expect(pod.Labels).To(HaveKeyWithValue(utils.PreferredNodeAffinityLabel, utils.NodeAffinityLabelValueSet),
 						"preferred node affinity label not found")
+					// Verify annotation shows all architectures applied cleanly (no conflicts)
+					g.Expect(pod.Annotations).To(HaveKey(utils.PreferredNodeAffinitySourcesAnnotation),
+						"should have affinity sources annotation")
+					annotation := pod.Annotations[utils.PreferredNodeAffinitySourcesAnnotation]
+					g.Expect(annotation).To(ContainSubstring("amd64:100:PodPlacementConfig-test-ppc1"),
+						"should show PPC applied amd64")
+					g.Expect(annotation).To(ContainSubstring("ppc64le:10:PodPlacementConfig-test-ppc1"),
+						"should show PPC applied ppc64le")
+					g.Expect(annotation).To(ContainSubstring("s390x:50:PodPlacementConfig-test-ppc1"),
+						"should show PPC applied s390x")
+					g.Expect(annotation).To(ContainSubstring("arm64:50:ClusterPodPlacementConfig"),
+						"should show CPPC applied arm64")
+					g.Expect(annotation).NotTo(ContainSubstring("skipped"),
+						"should have no skipped entries - all applied cleanly")
 					g.Expect(pod.Labels).To(HaveKeyWithValue(utils.NodeAffinityLabel, utils.NodeAffinityLabelValueSet),
 						"node affinity label not found")
 				}).Should(Succeed(), "failed to remove scheduling gate from pod")
@@ -842,7 +867,7 @@ var _ = Describe("Internal/Controller/Podplacement/PodReconciler", func() {
 					}), "scheduling gate not removed")
 					g.Expect(pod.Labels).To(HaveKeyWithValue(utils.SchedulingGateLabel, utils.SchedulingGateLabelValueRemoved),
 						"scheduling gate annotation not found")
-					g.Expect(pod.Labels).To(HaveKeyWithValue(utils.PreferredNodeAffinityLabel, utils.NodeAffinityLabelValueSet),
+					g.Expect(pod.Labels).To(HaveKeyWithValue(utils.PreferredNodeAffinityLabel, utils.LabelValueNotSet),
 						"preferred node affinity label not found")
 					g.Expect(pod.Labels).To(HaveKeyWithValue(utils.NodeAffinityLabel, utils.NodeAffinityLabelValueSet),
 						"node affinity label not found")
@@ -856,14 +881,460 @@ var _ = Describe("Internal/Controller/Podplacement/PodReconciler", func() {
 						"PreferredDuringSchedulingIgnoredDuringExecution should have at least one entry")
 					preferences := []NodeAffinityTerm{
 						{Arch: []string{utils.ArchitectureAmd64}, Weight: 20},
-						{Arch: []string{utils.ArchitectureArm64}, Weight: 50},
+					}
+					g.Expect(*pod).To(HaveEquivalentPreferredNodeAffinity(
+						NewNodeAffinityBuilder().WithPreferredNodeAffinity(preferences).Build()),
+						"should keep only user's amd64 preference, skipping all PPC/CPPC processing")
+				}).Should(Succeed(), "failed to set preferred node affinity in pod")
+
+			})
+			It("should merge multiple PPCs with priority-based deduplication when architectures overlap", func() {
+				By("Create an ephemeral namespace")
+				ns := NewEphemeralNamespace()
+				err := k8sClient.Create(ctx, ns)
+				Expect(err).NotTo(HaveOccurred())
+				//nolint:errcheck
+				defer k8sClient.Delete(ctx, ns)
+				By("Creating high-priority PPC that sets amd64 and arm64")
+				ppcHigh := NewPodPlacementConfig().
+					WithName("test-ppc-high").
+					WithNamespace(ns.Name).
+					WithPriority(100).
+					WithNodeAffinityScoring(true).
+					WithNodeAffinityScoringTerm(utils.ArchitectureAmd64, 50).
+					WithNodeAffinityScoringTerm(utils.ArchitectureArm64, 60).
+					Build()
+				Expect(k8sClient.Create(ctx, ppcHigh)).To(Succeed())
+				By("Creating lower-priority PPC that tries to set arm64 (duplicate) and ppc64le (new)")
+				ppcLow := NewPodPlacementConfig().
+					WithName("test-ppc-low").
+					WithNamespace(ns.Name).
+					WithPriority(50).
+					WithNodeAffinityScoring(true).
+					WithNodeAffinityScoringTerm(utils.ArchitectureArm64, 30).
+					WithNodeAffinityScoringTerm(utils.ArchitecturePpc64le, 40).
+					Build()
+				Expect(k8sClient.Create(ctx, ppcLow)).To(Succeed())
+				By("Creating a matching pod")
+				pod := NewPod().
+					WithContainersImages(fmt.Sprintf("%s/%s/%s:latest", registryAddress,
+						registry.PublicRepo, registry.ComputeNameByMediaType(imgspecv1.MediaTypeImageManifest))).
+					WithGenerateName("test-pod-").
+					WithNamespace(ns.Name).
+					Build()
+				Expect(k8sClient.Create(ctx, pod)).To(Succeed())
+				By("Waiting for the pod to be reconciled")
+				Eventually(func(g Gomega) {
+					err := k8sClient.Get(ctx, crclient.ObjectKeyFromObject(pod), pod)
+					g.Expect(err).NotTo(HaveOccurred())
+					g.Expect(pod.Spec.SchedulingGates).NotTo(ContainElement(corev1.PodSchedulingGate{
+						Name: utils.SchedulingGateName,
+					}), "scheduling gate not removed")
+				}).Should(Succeed())
+				By("Verifying labels and annotations track both PPCs with priority-based deduplication")
+				Eventually(func(g Gomega) {
+					err := k8sClient.Get(ctx, crclient.ObjectKeyFromObject(pod), pod)
+					g.Expect(err).NotTo(HaveOccurred(), "failed to get pod", err)
+					g.Expect(pod.Spec.SchedulingGates).NotTo(ContainElement(corev1.PodSchedulingGate{
+						Name: utils.SchedulingGateName,
+					}), "scheduling gate not removed")
+					g.Expect(pod.Labels).To(HaveKeyWithValue(utils.SchedulingGateLabel, utils.SchedulingGateLabelValueRemoved),
+						"scheduling gate annotation not found")
+					g.Expect(pod.Labels).To(HaveKeyWithValue(utils.PreferredNodeAffinityLabel, utils.NodeAffinityLabelValueSet),
+						"preferred node affinity label not found")
+					g.Expect(pod.Labels).To(HaveKeyWithValue(utils.NodeAffinityLabel, utils.NodeAffinityLabelValueSet),
+						"node affinity label not found")
+					annotation := pod.Annotations[utils.PreferredNodeAffinitySourcesAnnotation]
+					g.Expect(annotation).To(ContainSubstring("amd64:50:PodPlacementConfig-test-ppc-high"),
+						"should show high-priority PPC applied amd64")
+					g.Expect(annotation).To(ContainSubstring("arm64:60:PodPlacementConfig-test-ppc-high"),
+						"should show high-priority PPC applied arm64")
+					g.Expect(annotation).To(ContainSubstring("arm64:30:PodPlacementConfig-test-ppc-low:skipped"),
+						"should show low-priority PPC skipped arm64 due to higher priority")
+					g.Expect(annotation).To(ContainSubstring("ppc64le:40:PodPlacementConfig-test-ppc-low"),
+						"should show low-priority PPC applied ppc64le")
+					g.Expect(annotation).To(ContainSubstring("arm64:50:ClusterPodPlacementConfig:skipped"),
+						"should show CPPC skipped arm64 since PPCs already set it")
+				}).Should(Succeed(), "failed to remove scheduling gate from pod")
+				Eventually(func(g Gomega) {
+					g.Expect(pod.Spec.Affinity).NotTo(BeNil(), "pod.Spec.Affinity should not be nil")
+					g.Expect(pod.Spec.Affinity.NodeAffinity).NotTo(BeNil(), "pod.Spec.Affinity.NodeAffinity should not be nil")
+					g.Expect(pod.Spec.Affinity.NodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution).NotTo(BeNil(),
+						"PreferredDuringSchedulingIgnoredDuringExecution should not be nil")
+					g.Expect(len(pod.Spec.Affinity.NodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution)).To(BeNumerically(">", 0),
+						"PreferredDuringSchedulingIgnoredDuringExecution should have at least one entry")
+					preferences := []NodeAffinityTerm{
+						{Arch: []string{utils.ArchitectureAmd64}, Weight: 50},
+						{Arch: []string{utils.ArchitectureArm64}, Weight: 60},
+						{Arch: []string{utils.ArchitecturePpc64le}, Weight: 40},
+					}
+					g.Expect(*pod).To(HaveEquivalentPreferredNodeAffinity(
+						NewNodeAffinityBuilder().WithPreferredNodeAffinity(preferences).Build()),
+						"should have amd64 and arm64 from high-priority PPC, ppc64le from low-priority PPC (arm64 skipped)")
+				}).Should(Succeed(), "failed to set preferred node affinity in pod")
+			})
+			It("should not set PPC/CPPC when user defined preferred affinity is present", func() {
+				By("Create an ephemeral namespace")
+				ns := NewEphemeralNamespace()
+				err := k8sClient.Create(ctx, ns)
+				Expect(err).NotTo(HaveOccurred())
+				//nolint:errcheck
+				defer k8sClient.Delete(ctx, ns)
+				By("Creating a PPC that sets ppc64le")
+				ppc := NewPodPlacementConfig().
+					WithName("test-ppc-user-conflict").
+					WithNamespace(ns.Name).
+					WithPriority(100).
+					WithNodeAffinityScoring(true).
+					WithNodeAffinityScoringTerm(utils.ArchitecturePpc64le, 50).
+					Build()
+				Expect(k8sClient.Create(ctx, ppc)).To(Succeed())
+				By("Creating a pod with user-defined ppc64le preference")
+				preferredSchedulingTerm := corev1.PreferredSchedulingTerm{
+					Weight: int32(10),
+					Preference: corev1.NodeSelectorTerm{
+						MatchExpressions: []corev1.NodeSelectorRequirement{
+							{
+								Key:      utils.ArchLabel,
+								Operator: corev1.NodeSelectorOpIn,
+								Values:   []string{utils.ArchitecturePpc64le},
+							},
+						},
+					},
+				}
+				pod := NewPod().
+					WithContainersImages(fmt.Sprintf("%s/%s/%s:latest", registryAddress,
+						registry.PublicRepo, registry.ComputeNameByMediaType(imgspecv1.MediaTypeImageManifest))).
+					WithGenerateName("test-pod-").
+					WithNamespace(ns.Name).
+					WithPreferredDuringSchedulingIgnoredDuringExecution(&preferredSchedulingTerm).
+					Build()
+				err = k8sClient.Create(ctx, pod)
+				Expect(err).NotTo(HaveOccurred(), "failed to create pod", err)
+				By("Waiting for the pod to be reconciled")
+				Eventually(func(g Gomega) {
+					err := k8sClient.Get(ctx, crclient.ObjectKeyFromObject(pod), pod)
+					g.Expect(err).NotTo(HaveOccurred())
+					g.Expect(pod.Spec.SchedulingGates).NotTo(ContainElement(corev1.PodSchedulingGate{
+						Name: utils.SchedulingGateName,
+					}), "scheduling gate not removed")
+				}).Should(Succeed())
+				By("Verifying labels are set correctly since user-defined ppc64le skips all PPC/CPPC processing")
+				Eventually(func(g Gomega) {
+					err := k8sClient.Get(ctx, crclient.ObjectKeyFromObject(pod), pod)
+					g.Expect(err).NotTo(HaveOccurred(), "failed to get pod")
+					g.Expect(pod.Spec.SchedulingGates).NotTo(ContainElement(corev1.PodSchedulingGate{
+						Name: utils.SchedulingGateName,
+					}), "scheduling gate not removed")
+					g.Expect(pod.Labels).To(HaveKeyWithValue(utils.SchedulingGateLabel, utils.SchedulingGateLabelValueRemoved),
+						"scheduling gate annotation not found")
+					g.Expect(pod.Labels).To(HaveKeyWithValue(utils.PreferredNodeAffinityLabel, utils.LabelValueNotSet),
+						"preferred node affinity label not found")
+					g.Expect(pod.Labels).To(HaveKeyWithValue(utils.NodeAffinityLabel, utils.NodeAffinityLabelValueSet),
+						"node affinity label not found")
+				}).Should(Succeed(), "failed to remove scheduling gate from pod")
+				Eventually(func(g Gomega) {
+					g.Expect(pod.Spec.Affinity).NotTo(BeNil(), "pod.Spec.Affinity should not be nil")
+					g.Expect(pod.Spec.Affinity.NodeAffinity).NotTo(BeNil(), "pod.Spec.Affinity.NodeAffinity should not be nil")
+					g.Expect(pod.Spec.Affinity.NodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution).NotTo(BeNil(),
+						"PreferredDuringSchedulingIgnoredDuringExecution should not be nil")
+					g.Expect(len(pod.Spec.Affinity.NodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution)).To(BeNumerically(">", 0),
+						"PreferredDuringSchedulingIgnoredDuringExecution should have at least one entry")
+					preferences := []NodeAffinityTerm{
+						{Arch: []string{utils.ArchitecturePpc64le}, Weight: 10},
+					}
+					g.Expect(*pod).To(HaveEquivalentPreferredNodeAffinity(
+						NewNodeAffinityBuilder().WithPreferredNodeAffinity(preferences).Build()),
+						"should keep only user's ppc64le preference, skipping all PPC/CPPC processing")
+				}).Should(Succeed(), "failed to set preferred node affinity in pod")
+			})
+			It("should skip all PPC/CPPC processing when user defines arch preference", func() {
+				By("Creating a pod with user-defined arm64 preference that conflicts with CPPC")
+				preferredSchedulingTerm := corev1.PreferredSchedulingTerm{
+					Weight: int32(10),
+					Preference: corev1.NodeSelectorTerm{
+						MatchExpressions: []corev1.NodeSelectorRequirement{
+							{
+								Key:      utils.ArchLabel,
+								Operator: corev1.NodeSelectorOpIn,
+								Values:   []string{utils.ArchitectureArm64},
+							},
+						},
+					},
+				}
+				pod := NewPod().
+					WithContainersImages(fmt.Sprintf("%s/%s/%s:latest", registryAddress,
+						registry.PublicRepo, registry.ComputeNameByMediaType(imgspecv1.MediaTypeImageManifest))).
+					WithGenerateName("test-pod-").
+					WithNamespace("test-namespace").
+					WithPreferredDuringSchedulingIgnoredDuringExecution(&preferredSchedulingTerm).
+					Build()
+				err := k8sClient.Create(ctx, pod)
+				Expect(err).NotTo(HaveOccurred(), "failed to create pod", err)
+				By("Waiting for the pod to be reconciled")
+				Eventually(func(g Gomega) {
+					err := k8sClient.Get(ctx, crclient.ObjectKeyFromObject(pod), pod)
+					g.Expect(err).NotTo(HaveOccurred())
+					g.Expect(pod.Spec.SchedulingGates).NotTo(ContainElement(corev1.PodSchedulingGate{
+						Name: utils.SchedulingGateName,
+					}), "scheduling gate not removed")
+				}).Should(Succeed())
+				By("Verifying labels are set correctly since user-defined arm64 skips all PPC/CPPC processing")
+				Eventually(func(g Gomega) {
+					err := k8sClient.Get(ctx, crclient.ObjectKeyFromObject(pod), pod)
+					g.Expect(err).NotTo(HaveOccurred(), "failed to get pod", err)
+					g.Expect(pod.Spec.SchedulingGates).NotTo(ContainElement(corev1.PodSchedulingGate{
+						Name: utils.SchedulingGateName,
+					}), "scheduling gate not removed")
+					g.Expect(pod.Labels).To(HaveKeyWithValue(utils.SchedulingGateLabel, utils.SchedulingGateLabelValueRemoved),
+						"scheduling gate annotation not found")
+					g.Expect(pod.Labels).To(HaveKeyWithValue(utils.PreferredNodeAffinityLabel, utils.LabelValueNotSet),
+						"preferred node affinity label not found")
+					g.Expect(pod.Labels).To(HaveKeyWithValue(utils.NodeAffinityLabel, utils.NodeAffinityLabelValueSet),
+						"node affinity label not found")
+				}).Should(Succeed(), "failed to remove scheduling gate from pod")
+				Eventually(func(g Gomega) {
+					g.Expect(pod.Spec.Affinity).NotTo(BeNil(), "pod.Spec.Affinity should not be nil")
+					g.Expect(pod.Spec.Affinity.NodeAffinity).NotTo(BeNil(), "pod.Spec.Affinity.NodeAffinity should not be nil")
+					g.Expect(pod.Spec.Affinity.NodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution).NotTo(BeNil(),
+						"PreferredDuringSchedulingIgnoredDuringExecution should not be nil")
+					g.Expect(len(pod.Spec.Affinity.NodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution)).To(BeNumerically(">", 0),
+						"PreferredDuringSchedulingIgnoredDuringExecution should have at least one entry")
+					preferences := []NodeAffinityTerm{
+						{Arch: []string{utils.ArchitectureArm64}, Weight: 10},
+					}
+					g.Expect(*pod).To(HaveEquivalentPreferredNodeAffinity(
+						NewNodeAffinityBuilder().WithPreferredNodeAffinity(preferences).Build()),
+						"should keep only user's arm64 preference")
+				}).Should(Succeed(), "failed to set preferred node affinity in pod")
+			})
+			It("should handle three PPCs with cascading priorities and overlapping architectures", func() {
+				By("Create an ephemeral namespace")
+				ns := NewEphemeralNamespace()
+				err := k8sClient.Create(ctx, ns)
+				Expect(err).NotTo(HaveOccurred())
+				//nolint:errcheck
+				defer k8sClient.Delete(ctx, ns)
+				By("Creating highest-priority PPC that sets amd64")
+				ppc1 := NewPodPlacementConfig().
+					WithName("test-ppc1").
+					WithNamespace(ns.Name).
+					WithPriority(100).
+					WithNodeAffinityScoring(true).
+					WithNodeAffinityScoringTerm(utils.ArchitectureAmd64, 100).
+					Build()
+				Expect(k8sClient.Create(ctx, ppc1)).To(Succeed())
+				By("Creating mid-priority PPC that sets amd64 (duplicate) and arm64 (new)")
+				ppc2 := NewPodPlacementConfig().
+					WithName("test-ppc2").
+					WithNamespace(ns.Name).
+					WithPriority(50).
+					WithNodeAffinityScoring(true).
+					WithNodeAffinityScoringTerm(utils.ArchitectureAmd64, 50).
+					WithNodeAffinityScoringTerm(utils.ArchitectureArm64, 60).
+					Build()
+				Expect(k8sClient.Create(ctx, ppc2)).To(Succeed())
+				By("Creating lowest-priority PPC that sets arm64 (duplicate) and ppc64le (new)")
+				ppc3 := NewPodPlacementConfig().
+					WithName("test-ppc3").
+					WithNamespace(ns.Name).
+					WithPriority(25).
+					WithNodeAffinityScoring(true).
+					WithNodeAffinityScoringTerm(utils.ArchitectureArm64, 25).
+					WithNodeAffinityScoringTerm(utils.ArchitecturePpc64le, 30).
+					Build()
+				Expect(k8sClient.Create(ctx, ppc3)).To(Succeed())
+				By("Creating a matching pod")
+				pod := NewPod().
+					WithContainersImages(fmt.Sprintf("%s/%s/%s:latest", registryAddress,
+						registry.PublicRepo, registry.ComputeNameByMediaType(imgspecv1.MediaTypeImageManifest))).
+					WithGenerateName("test-pod-").
+					WithNamespace(ns.Name).
+					Build()
+				Expect(k8sClient.Create(ctx, pod)).To(Succeed())
+				By("Waiting for the pod to be reconciled")
+				Eventually(func(g Gomega) {
+					err := k8sClient.Get(ctx, crclient.ObjectKeyFromObject(pod), pod)
+					g.Expect(err).NotTo(HaveOccurred())
+					g.Expect(pod.Spec.SchedulingGates).NotTo(ContainElement(corev1.PodSchedulingGate{
+						Name: utils.SchedulingGateName,
+					}), "scheduling gate not removed")
+				}).Should(Succeed())
+				By("Verifying labels are set correctly with cascading priorities")
+				Eventually(func(g Gomega) {
+					err := k8sClient.Get(ctx, crclient.ObjectKeyFromObject(pod), pod)
+					g.Expect(err).NotTo(HaveOccurred(), "failed to get pod", err)
+					g.Expect(pod.Spec.SchedulingGates).NotTo(ContainElement(corev1.PodSchedulingGate{
+						Name: utils.SchedulingGateName,
+					}), "scheduling gate not removed")
+					g.Expect(pod.Labels).To(HaveKeyWithValue(utils.SchedulingGateLabel, utils.SchedulingGateLabelValueRemoved),
+						"scheduling gate annotation not found")
+					g.Expect(pod.Labels).To(HaveKeyWithValue(utils.PreferredNodeAffinityLabel, utils.NodeAffinityLabelValueSet),
+						"preferred node affinity label not found")
+					g.Expect(pod.Labels).To(HaveKeyWithValue(utils.NodeAffinityLabel, utils.NodeAffinityLabelValueSet),
+						"node affinity label not found")
+					annotation := pod.Annotations[utils.PreferredNodeAffinitySourcesAnnotation]
+					g.Expect(annotation).To(ContainSubstring("amd64:100:PodPlacementConfig-test-ppc1"),
+						"should show PPC1 applied amd64:100")
+					g.Expect(annotation).To(ContainSubstring("amd64:50:PodPlacementConfig-test-ppc2:skipped"),
+						"should show PPC2 skipped amd64:50 due to higher priority")
+					g.Expect(annotation).To(ContainSubstring("arm64:60:PodPlacementConfig-test-ppc2"),
+						"should show PPC2 applied arm64:60")
+					g.Expect(annotation).To(ContainSubstring("arm64:25:PodPlacementConfig-test-ppc3:skipped"),
+						"should show PPC3 skipped arm64:25 due to higher priority")
+					g.Expect(annotation).To(ContainSubstring("ppc64le:30:PodPlacementConfig-test-ppc3"),
+						"should show PPC3 applied ppc64le:30")
+					g.Expect(annotation).To(ContainSubstring("arm64:50:ClusterPodPlacementConfig:skipped"),
+						"should show CPPC skipped arm64:50 since PPCs already set it")
+				}).Should(Succeed(), "failed to remove scheduling gate from pod")
+				Eventually(func(g Gomega) {
+					g.Expect(pod.Spec.Affinity).NotTo(BeNil(), "pod.Spec.Affinity should not be nil")
+					g.Expect(pod.Spec.Affinity.NodeAffinity).NotTo(BeNil(), "pod.Spec.Affinity.NodeAffinity should not be nil")
+					g.Expect(pod.Spec.Affinity.NodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution).NotTo(BeNil(),
+						"PreferredDuringSchedulingIgnoredDuringExecution should not be nil")
+					g.Expect(len(pod.Spec.Affinity.NodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution)).To(BeNumerically(">", 0),
+						"PreferredDuringSchedulingIgnoredDuringExecution should have at least one entry")
+					preferences := []NodeAffinityTerm{
+						{Arch: []string{utils.ArchitectureAmd64}, Weight: 100},
+						{Arch: []string{utils.ArchitectureArm64}, Weight: 60},
 						{Arch: []string{utils.ArchitecturePpc64le}, Weight: 30},
 					}
 					g.Expect(*pod).To(HaveEquivalentPreferredNodeAffinity(
 						NewNodeAffinityBuilder().WithPreferredNodeAffinity(preferences).Build()),
-						"unexpected preferred node affinity")
+						"should have amd64 from PPC1, arm64 from PPC2, ppc64le from PPC3")
 				}).Should(Succeed(), "failed to set preferred node affinity in pod")
-
+			})
+			It("should apply PPC only to pods matching label selector", func() {
+				By("Create an ephemeral namespace")
+				ns := NewEphemeralNamespace()
+				err := k8sClient.Create(ctx, ns)
+				Expect(err).NotTo(HaveOccurred())
+				//nolint:errcheck
+				defer k8sClient.Delete(ctx, ns)
+				By("Creating a PPC with label selector app=backend")
+				ppc := NewPodPlacementConfig().
+					WithName("test-ppc-selector").
+					WithNamespace(ns.Name).
+					WithPriority(100).
+					WithNodeAffinityScoring(true).
+					WithNodeAffinityScoringTerm(utils.ArchitecturePpc64le, 60).
+					WithLabelSelector(&metav1.LabelSelector{
+						MatchLabels: map[string]string{"app": "backend"},
+					}).
+					Build()
+				Expect(k8sClient.Create(ctx, ppc)).To(Succeed())
+				By("Creating a matching pod with app=backend label")
+				matchingPod := NewPod().
+					WithContainersImages(fmt.Sprintf("%s/%s/%s:latest", registryAddress,
+						registry.PublicRepo, registry.ComputeNameByMediaType(imgspecv1.MediaTypeImageManifest))).
+					WithGenerateName("matching-pod-").
+					WithNamespace(ns.Name).
+					WithLabels("app", "backend").
+					Build()
+				Expect(k8sClient.Create(ctx, matchingPod)).To(Succeed())
+				By("Creating a non-matching pod with app=frontend label")
+				nonMatchingPod := NewPod().
+					WithContainersImages(fmt.Sprintf("%s/%s/%s:latest", registryAddress,
+						registry.PublicRepo, registry.ComputeNameByMediaType(imgspecv1.MediaTypeImageManifest))).
+					WithGenerateName("non-matching-pod-").
+					WithNamespace(ns.Name).
+					WithLabels("app", "frontend").
+					Build()
+				Expect(k8sClient.Create(ctx, nonMatchingPod)).To(Succeed())
+				By("Waiting for matching pod to be reconciled")
+				Eventually(func(g Gomega) {
+					err := k8sClient.Get(ctx, crclient.ObjectKeyFromObject(matchingPod), matchingPod)
+					g.Expect(err).NotTo(HaveOccurred())
+					g.Expect(matchingPod.Spec.SchedulingGates).NotTo(ContainElement(corev1.PodSchedulingGate{
+						Name: utils.SchedulingGateName,
+					}), "scheduling gate not removed")
+				}).Should(Succeed())
+				By("Verifying matching pod gets PPC ppc64le and CPPC arm64 preferences")
+				Eventually(func(g Gomega) {
+					err := k8sClient.Get(ctx, crclient.ObjectKeyFromObject(matchingPod), matchingPod)
+					g.Expect(err).NotTo(HaveOccurred())
+					matchingPreferences := []NodeAffinityTerm{
+						{Arch: []string{utils.ArchitecturePpc64le}, Weight: 60},
+						{Arch: []string{utils.ArchitectureArm64}, Weight: 50},
+					}
+					g.Expect(*matchingPod).To(HaveEquivalentPreferredNodeAffinity(
+						NewNodeAffinityBuilder().WithPreferredNodeAffinity(matchingPreferences).Build()),
+						"should have PPC ppc64le and CPPC arm64")
+					g.Expect(matchingPod.Labels).To(HaveKeyWithValue(utils.SchedulingGateLabel, utils.SchedulingGateLabelValueRemoved),
+						"scheduling gate annotation not found")
+					g.Expect(matchingPod.Labels).To(HaveKeyWithValue(utils.PreferredNodeAffinityLabel, utils.NodeAffinityLabelValueSet),
+						"preferred node affinity label not found")
+					g.Expect(matchingPod.Labels).To(HaveKeyWithValue(utils.NodeAffinityLabel, utils.NodeAffinityLabelValueSet),
+						"node affinity label not found")
+				}).Should(Succeed())
+				By("Verifying non-matching pod gets only CPPC arm64 preferences")
+				Eventually(func(g Gomega) {
+					err := k8sClient.Get(ctx, crclient.ObjectKeyFromObject(nonMatchingPod), nonMatchingPod)
+					g.Expect(err).NotTo(HaveOccurred())
+					nonMatchingPreferences := []NodeAffinityTerm{
+						{Arch: []string{utils.ArchitectureArm64}, Weight: 50},
+					}
+					g.Expect(*nonMatchingPod).To(HaveEquivalentPreferredNodeAffinity(
+						NewNodeAffinityBuilder().WithPreferredNodeAffinity(nonMatchingPreferences).Build()),
+						"should only have CPPC arm64")
+					g.Expect(nonMatchingPod.Labels).To(HaveKeyWithValue(utils.SchedulingGateLabel, utils.SchedulingGateLabelValueRemoved),
+						"scheduling gate annotation not found")
+					g.Expect(nonMatchingPod.Labels).To(HaveKeyWithValue(utils.PreferredNodeAffinityLabel, utils.NodeAffinityLabelValueSet),
+						"preferred node affinity label not found")
+					g.Expect(nonMatchingPod.Labels).To(HaveKeyWithValue(utils.NodeAffinityLabel, utils.NodeAffinityLabelValueSet),
+						"node affinity label not found")
+				}).Should(Succeed())
+			})
+			It("should apply PPC with empty label selector to all pods in namespace", func() {
+				By("Create an ephemeral namespace")
+				ns := NewEphemeralNamespace()
+				err := k8sClient.Create(ctx, ns)
+				Expect(err).NotTo(HaveOccurred())
+				//nolint:errcheck
+				defer k8sClient.Delete(ctx, ns)
+				By("Creating a PPC with nil label selector")
+				ppc := NewPodPlacementConfig().
+					WithName("test-ppc-empty-selector").
+					WithNamespace(ns.Name).
+					WithPriority(100).
+					WithNodeAffinityScoring(true).
+					WithNodeAffinityScoringTerm(utils.ArchitecturePpc64le, 70).
+					Build()
+				Expect(k8sClient.Create(ctx, ppc)).To(Succeed())
+				By("Creating a pod without specific labels")
+				pod := NewPod().
+					WithContainersImages(fmt.Sprintf("%s/%s/%s:latest", registryAddress,
+						registry.PublicRepo, registry.ComputeNameByMediaType(imgspecv1.MediaTypeImageManifest))).
+					WithGenerateName("test-pod-").
+					WithNamespace(ns.Name).
+					Build()
+				Expect(k8sClient.Create(ctx, pod)).To(Succeed())
+				By("Waiting for the pod to be reconciled")
+				Eventually(func(g Gomega) {
+					err := k8sClient.Get(ctx, crclient.ObjectKeyFromObject(pod), pod)
+					g.Expect(err).NotTo(HaveOccurred())
+					g.Expect(pod.Spec.SchedulingGates).NotTo(ContainElement(corev1.PodSchedulingGate{
+						Name: utils.SchedulingGateName,
+					}), "scheduling gate not removed")
+				}).Should(Succeed())
+				By("Verifying pod gets PPC preferences (empty selector matches all)")
+				Eventually(func(g Gomega) {
+					err := k8sClient.Get(ctx, crclient.ObjectKeyFromObject(pod), pod)
+					g.Expect(err).NotTo(HaveOccurred())
+					preferences := []NodeAffinityTerm{
+						{Arch: []string{utils.ArchitecturePpc64le}, Weight: 70},
+						{Arch: []string{utils.ArchitectureArm64}, Weight: 50},
+					}
+					g.Expect(*pod).To(HaveEquivalentPreferredNodeAffinity(
+						NewNodeAffinityBuilder().WithPreferredNodeAffinity(preferences).Build()),
+						"should have PPC and CPPC preferences")
+					g.Expect(pod.Labels).To(HaveKeyWithValue(utils.SchedulingGateLabel, utils.SchedulingGateLabelValueRemoved),
+						"scheduling gate annotation not found")
+					g.Expect(pod.Labels).To(HaveKeyWithValue(utils.PreferredNodeAffinityLabel, utils.NodeAffinityLabelValueSet),
+						"preferred node affinity label not found")
+					g.Expect(pod.Labels).To(HaveKeyWithValue(utils.NodeAffinityLabel, utils.NodeAffinityLabelValueSet),
+						"node affinity label not found")
+				}).Should(Succeed())
 			})
 		})
 	})
