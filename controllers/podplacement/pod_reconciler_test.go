@@ -580,7 +580,7 @@ var _ = Describe("Controllers/Podplacement/PodReconciler", func() {
 					g.Expect(pod.Labels).To(HaveKeyWithValue(utils.SchedulingGateLabel, utils.SchedulingGateLabelValueRemoved),
 						"scheduling gate annotation not found")
 					g.Expect(pod.Labels).To(HaveKeyWithValue(utils.ImageInspectionErrorCountLabel, strconv.Itoa(MaxRetryCount)), "image inspection error count not found")
-					g.Expect(pod.Labels).To(HaveKeyWithValue(utils.PreferredNodeAffinityLabel, utils.NodeAffinityLabelValueSet),
+					g.Expect(pod.Labels).To(HaveKeyWithValue(utils.PreferredNodeAffinityLabel, utils.LabelValueAllDuplicates),
 						"preferred node affinity label not found")
 					g.Expect(pod.Labels).To(HaveKeyWithValue(utils.NodeAffinityLabel, utils.LabelValueNotSet),
 						"node affinity label not found")

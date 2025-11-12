@@ -122,7 +122,7 @@ func (r *PodReconciler) processPod(ctx context.Context, pod *Pod) {
 	r.applyPodPlacementConfigs(ctx, pod)
 
 	if cppc != nil && cppc.PluginsEnabled(common.NodeAffinityScoringPluginName) {
-		pod.SetPreferredArchNodeAffinity(cppc.Spec.Plugins.NodeAffinityScoring)
+		pod.SetPreferredArchNodeAffinity(cppc.Spec.Plugins.NodeAffinityScoring, multiarchv1beta1.ClusterPodPlacementConfigKind)
 	}
 
 	// Prepare the requirement for the node affinity.
@@ -145,8 +145,15 @@ func (r *PodReconciler) processPod(ctx context.Context, pod *Pod) {
 	// If the pod has been processed successfully or the max retries have been reached, remove the scheduling gate.
 	if err == nil || pod.maxRetries() {
 		if pod.Labels[utils.PreferredNodeAffinityLabel] == utils.LabelValueNotSet {
-			pod.PublishEvent(corev1.EventTypeNormal, ArchitectureAwareNodeAffinitySet,
-				ArchitecturePreferredPredicateSkippedMsg)
+			if pod.Labels[utils.LabelValueSetWithDuplicates] == utils.LabelValueSetWithDuplicates {
+				pod.PublishEvent(corev1.EventTypeNormal, ArchitectureAwareNodeAffinitySet,
+					ArchitecturePreferredAffinityAllDuplicatesMsg)
+				log.V(2).Info("All provided preferred node affinity was already set.")
+			} else {
+				pod.PublishEvent(corev1.EventTypeNormal, ArchitectureAwareNodeAffinitySet,
+					ArchitecturePreferredPredicateSkippedMsg)
+				log.V(2).Info("No preferred node affinity was set")
+			}
 		}
 
 		log.V(1).Info("Removing the scheduling gate from pod.")
@@ -188,7 +195,8 @@ func (r *PodReconciler) applyPodPlacementConfigs(ctx context.Context, pod *Pod) 
 		if selector == labels.Nothing() || selector.Matches(labels.Set(pod.Labels)) {
 			log.Info("Applying namespace-scoped config", "PodPlacementConfig", ppc.Name)
 			// Apply the configuration, checking for overlaps
-			pod.SetPreferredArchNodeAffinity(ppc.Spec.Plugins.NodeAffinityScoring)
+			configSource := fmt.Sprintf("%s-%s", multiarchv1beta1.PodPlacementConfigResource, ppc.Name)
+			pod.SetPreferredArchNodeAffinity(ppc.Spec.Plugins.NodeAffinityScoring, configSource)
 		}
 	}
 }
