@@ -319,7 +319,7 @@ var _ = Describe("The Multiarch Tuning Operator", Serial, func() {
 			Entry(utils.MasterNodeSelectorLabel, utils.MasterNodeSelectorLabel),
 		)
 	})
-	Context("When a pod placement config is created", func() {
+	Context("When a cluster pod placement config is created", func() {
 		It("should create a v1beta1 CPPC with plugins and succeed getting the v1alpha1 version of the CPPC", func() {
 			By("Creating the ClusterPodPlacementConfig")
 			err := client.Create(ctx,
