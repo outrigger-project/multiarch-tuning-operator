@@ -167,7 +167,8 @@ func (pod *Pod) setRequiredArchNodeAffinity(requirement corev1.NodeSelectorRequi
 }
 
 // SetPreferredArchNodeAffinity sets the node affinity for the pod to the preferences given in the ClusterPodPlacementConfig.
-func (pod *Pod) SetPreferredArchNodeAffinity(nodeAffinity *plugins.NodeAffinityScoring) {
+// The configSource parameter identifies which configuration is setting the preferences (e.g., "ClusterPodPlacementConfig" or "PodPlacementConfig/my-ppc").
+func (pod *Pod) SetPreferredArchNodeAffinity(nodeAffinity *plugins.NodeAffinityScoring, configSource string) {
 	log := ctrllog.FromContext(pod.Ctx())
 	if pod.Spec.Affinity == nil {
 		pod.Spec.Affinity = &corev1.Affinity{}
@@ -183,6 +184,7 @@ func (pod *Pod) SetPreferredArchNodeAffinity(nodeAffinity *plugins.NodeAffinityS
 
 	seenArchitectures := pod.getExistingPreferredArchitectures()
 	var preferredSchedulingTerms []corev1.PreferredSchedulingTerm
+	var skippedArchitectures []string
 	for _, nodeAffinityScoringPlatformTerm := range nodeAffinity.Platforms {
 		if !seenArchitectures[nodeAffinityScoringPlatformTerm.Architecture] {
 			preferredSchedulingTerm := corev1.PreferredSchedulingTerm{
@@ -199,18 +201,40 @@ func (pod *Pod) SetPreferredArchNodeAffinity(nodeAffinity *plugins.NodeAffinityS
 			}
 			preferredSchedulingTerms = append(preferredSchedulingTerms, preferredSchedulingTerm)
 			seenArchitectures[nodeAffinityScoringPlatformTerm.Architecture] = true
+			// Track that this architecture was applied from this source
+			pod.trackAffinitySource(nodeAffinityScoringPlatformTerm.Architecture, nodeAffinityScoringPlatformTerm.Weight, configSource, true)
 		} else {
-			log.Info("Preferred affinity for pod is already set", "Architecture", nodeAffinityScoringPlatformTerm.Architecture, "Weight", nodeAffinityScoringPlatformTerm.Weight, "Pod.Name", pod.Name, "Pod.Namespace", pod.Namespace)
+			skippedArchitectures = append(skippedArchitectures, nodeAffinityScoringPlatformTerm.Architecture)
+			// Track that this architecture was skipped from this source
+			pod.trackAffinitySource(nodeAffinityScoringPlatformTerm.Architecture, nodeAffinityScoringPlatformTerm.Weight, configSource, false)
+			log.Info("Preferred affinity for pod is already set", "Architecture", nodeAffinityScoringPlatformTerm.Architecture, "Weight", nodeAffinityScoringPlatformTerm.Weight, "Pod.Name", pod.Name, "Pod.Namespace", pod.Namespace, "ConfigSource", configSource)
 		}
 	}
 
-	// if the nodeSelectorTerms were patched at least once, we set the nodeAffinity label to the set value, to keep
-	// track of the fact that the nodeAffinity was patched by the operator.
 	if preferredSchedulingTerms != nil {
 		pod.Spec.Affinity.NodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution = append(
 			pod.Spec.Affinity.NodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution, preferredSchedulingTerms...)
 		pod.EnsureLabel(utils.PreferredNodeAffinityLabel, utils.NodeAffinityLabelValueSet)
-		pod.PublishEvent(corev1.EventTypeNormal, ArchitectureAwareNodeAffinitySet, ArchitecturePreferredPredicateSetupMsg)
+	}
+	switch {
+	// Case 1: All architectures from this config were successfully added (no duplicates)
+	case preferredSchedulingTerms != nil && skippedArchitectures == nil:
+		pod.PublishEvent(corev1.EventTypeNormal, ArchitectureAwareNodeAffinitySet, fmt.Sprintf("%s source: %s", ArchitecturePreferredPredicateSetupMsg, configSource))
+		log.V(2).Info("Applied all architecture preferences from configuration", "ConfigSource", configSource)
+
+	// Case 2: Some architectures were added, but some were skipped due to duplicates
+	case preferredSchedulingTerms != nil && skippedArchitectures != nil:
+		pod.PublishEvent(corev1.EventTypeNormal, ArchitectureAwareNodeAffinitySet, fmt.Sprintf("%s source: %s, skipped: %s", ArchitecturePreferredAffinityWithDuplicatesMsg, configSource, strings.Join(skippedArchitectures, ", ")))
+		log.V(2).Info("Applied some architecture preferences from configuration", "ConfigSource", configSource, "SkippedArchitectures", skippedArchitectures)
+
+	// Case 3: All architectures from this config were already set
+	case preferredSchedulingTerms == nil && skippedArchitectures != nil:
+		pod.PublishEvent(corev1.EventTypeNormal, ArchitecturePreferredAffinityDuplicates, fmt.Sprintf("%s source: %s, architectures: %s", ArchitecturePreferredAffinityAllDuplicatesMsg, configSource, strings.Join(skippedArchitectures, ", ")))
+		log.V(2).Info("All architectures from configuration were already set", "ConfigSource", configSource, "SkippedArchitectures", skippedArchitectures)
+
+	// Case 4: No architectures were provided in the config
+	default:
+		log.V(2).Info("No architecture preferences provided in configuration", "ConfigSource", configSource)
 	}
 }
 
@@ -232,6 +256,42 @@ func (pod *Pod) getExistingPreferredArchitectures() map[string]bool {
 		}
 	}
 	return seen
+}
+
+// trackAffinitySource tracks which config sources attempted to set affinity for which architectures.
+// This information is later used to build the annotation showing the full audit trail.
+func (pod *Pod) trackAffinitySource(arch string, weight int32, source string, applied bool) {
+	// Get existing annotation or start fresh
+	existingAnnotation := ""
+	if pod.Annotations != nil {
+		existingAnnotation = pod.Annotations[utils.PreferredNodeAffinitySourcesAnnotation]
+	}
+
+	// Format: arch:weight:source or arch:weight:source:skipped
+	var newEntry string
+	if applied {
+		newEntry = fmt.Sprintf("%s:%d:%s", arch, weight, source)
+	} else {
+		newEntry = fmt.Sprintf("%s:%d:%s:skipped", arch, weight, source)
+	}
+
+	// Check if this entry already exists to avoid duplicates on retries
+	if existingAnnotation != "" {
+		entries := strings.Split(existingAnnotation, ",")
+		for _, entry := range entries {
+			if entry == newEntry {
+				// Entry already exists, don't add it again
+				return
+			}
+		}
+	}
+
+	// Append to existing annotation with comma separator
+	if existingAnnotation == "" {
+		pod.EnsureAnnotation(utils.PreferredNodeAffinitySourcesAnnotation, newEntry)
+	} else {
+		pod.EnsureAnnotation(utils.PreferredNodeAffinitySourcesAnnotation, existingAnnotation+","+newEntry)
+	}
 }
 
 func (pod *Pod) getArchitecturePredicate(pullSecretDataList [][]byte) (corev1.NodeSelectorRequirement, error) {
