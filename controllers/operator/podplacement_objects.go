@@ -241,6 +241,11 @@ func buildClusterRoleController() *rbacv1.ClusterRole {
 			Verbs:     []string{LIST, WATCH, GET},
 		},
 		{
+			APIGroups: []string{v1beta1.GroupVersion.Group},
+			Resources: []string{v1beta1.PodPlacementConfigResource},
+			Verbs:     []string{LIST, WATCH, GET},
+		},
+		{
 			APIGroups: []string{""},
 			Resources: []string{"configmaps", "secrets"},
 			Verbs:     []string{LIST, WATCH, GET},
