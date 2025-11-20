@@ -1,4 +1,4 @@
-ARG RUNTIME_IMAGE=quay.io/centos/centos:stream9-minimal
+ARG RUNTIME_IMAGE=registry.access.redhat.com/ubi9/ubi-minimal:latest@sha25661d5ad475048c2e655cd46d0a55dfeaec182cc3faa6348cb85989a7c9e196483
 FROM golang:1.23 as builder
 ARG TARGETOS
 ARG TARGETARCH
