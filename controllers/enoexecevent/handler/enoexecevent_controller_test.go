@@ -19,7 +19,7 @@ import (
 )
 
 func defaultENoExecFormatError() *builder.ENoExecEventBuilder {
-	return builder.NewENoExecEvent().WithCommand(testCommand).
+	return builder.NewENoExecEvent().
 		WithNodeName(testNodeName).
 		WithPodNamespace(testNamespace).
 		WithNamespace(utils.Namespace()).WithContainerID(testContainerID)
@@ -132,7 +132,7 @@ var _ = Describe("Controllers/ENoExecEvent/Reconciler", func() {
 				enee := defaultENoExecFormatError().WithPodName(podName).WithName(eneeName).Build()
 				createENEEAndUpdateStatus(enee)
 				By("Ensuring the event is published")
-				ensureEvent(podName, utils.ExecFormatErrorEventMessage(testContainerName, testNodeArch, testCommand)).
+				ensureEvent(podName, utils.ExecFormatErrorEventMessage(testContainerName, testNodeArch)).
 					Should(Succeed(), "failed to get event for Pod")
 				By("Ensuring the ENoExecEvent is deleted")
 				ensureDeletion(eneeName)
@@ -183,7 +183,7 @@ var _ = Describe("Controllers/ENoExecEvent/Reconciler", func() {
 				By("Ensuring the pod is not labeled with ENoExecEvent label")
 				ensureLabel(podName).ShouldNot(Succeed(), "the pod should not have the ENoExecEvent label if the node is not found")
 				By("Ensuring the pod does not have an event published")
-				ensureEvent(podName, utils.ExecFormatErrorEventMessage(testContainerName, testNodeArch, testCommand)).
+				ensureEvent(podName, utils.ExecFormatErrorEventMessage(testContainerName, testNodeArch)).
 					ShouldNot(Succeed(), "the pod should not have an event published if the node is not found")
 				By("Deleting pod")
 				deletePod(podName)
@@ -203,7 +203,7 @@ var _ = Describe("Controllers/ENoExecEvent/Reconciler", func() {
 				// Ensure the ENoExecEvent is deleted
 				ensureDeletion(eneeName)
 				// Ensure the event is published
-				ensureEvent(podName, utils.ExecFormatErrorEventMessage(utils.UnknownContainer, testNodeArch, testCommand)).
+				ensureEvent(podName, utils.ExecFormatErrorEventMessage(utils.UnknownContainer, testNodeArch)).
 					Should(Succeed(), "failed to get event for Pod with wrong container ID")
 				ensureLabel(podName).Should(Succeed(), "failed to label Pod with ENoExecEvent label for wrong container ID")
 
@@ -224,7 +224,7 @@ var _ = Describe("Controllers/ENoExecEvent/Reconciler", func() {
 				By("Ensuring the pod is not labeled with ENoExecEvent label")
 				ensureLabel(podName).ShouldNot(Succeed(), "the pod should not have the ENoExecEvent label if the node is not found")
 				By("Ensuring the pod does not have an event published")
-				ensureEvent(podName, utils.ExecFormatErrorEventMessage(testContainerName, testNodeArch, testCommand)).
+				ensureEvent(podName, utils.ExecFormatErrorEventMessage(testContainerName, testNodeArch)).
 					ShouldNot(Succeed(), "the pod should not have an event published if the node is not found")
 				By("Deleting pod")
 				deletePod(podName)
@@ -252,7 +252,6 @@ var _ = Describe("Controllers/ENoExecEvent/Reconciler", func() {
 					PodName:      "test-pod",
 					PodNamespace: "test-namespace",
 					ContainerID:  "docker://d34db33fd34db33fd34db33fa34db33fd34db33fd34db33fd34db33fd34db3d3",
-					Command:      "foo",
 				}
 				err = k8sClient.Status().Update(ctx, enee)
 				Expect(err).NotTo(HaveOccurred())
@@ -269,7 +268,6 @@ var _ = Describe("Controllers/ENoExecEvent/Reconciler", func() {
 					g.Expect(enee.Status.PodName).To(Equal("test-pod"))
 					g.Expect(enee.Status.PodNamespace).To(Equal("test-namespace"))
 					g.Expect(enee.Status.ContainerID).To(Equal("docker://d34db33fd34db33fd34db33fa34db33fd34db33fd34db33fd34db33fd34db3d3"))
-					g.Expect(enee.Status.Command).To(Equal("foo"))
 				}).Should(Succeed(), "failed to get enee")
 				By("Deleting the ENoExecEvent")
 				err = k8sClient.Delete(ctx, enee)

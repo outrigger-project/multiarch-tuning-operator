@@ -55,8 +55,6 @@ spec:
           status:
             description: ENoExecEventStatus defines the observed state of ENoExecEvent
             properties:
-              command:
-                type: string
               containerID:
                 description: |-
                   ContainerID must be a runtime-prefixed 64-character hexadecimal string.
