@@ -66,7 +66,6 @@ type ENoExecEventStatus struct {
 	//      https://github.com/elastic/apm/blob/c7655441bb5f15db5ddbd7f4b60cb0735758d44d/specs/agents/metadata.md?plain=1#L111
 	// +kubebuilder:validation:Pattern=`^.+://[a-f0-9]{64}$`
 	ContainerID string `json:"containerID,omitempty"`
-	Command     string `json:"command,omitempty"`
 }
 
 //+kubebuilder:object:root=true

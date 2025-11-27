@@ -143,7 +143,7 @@ func (r *Reconciler) reconcile(ctx context.Context, enoExecEvent *multiarchv1bet
 
 	logger.Info("Publishing event for ENoExecEvent", "podName", pod.Name, "namespace", pod.Namespace)
 	pod.PublishEvent(v1.EventTypeWarning, utils.ExecFormatErrorEventReason,
-		utils.ExecFormatErrorEventMessage(containerName, node.Labels[utils.ArchLabel], enoExecEvent.Status.Command))
+		utils.ExecFormatErrorEventMessage(containerName, node.Labels[utils.ArchLabel]))
 
 	// Label the pod with the ENoExecEvent label.
 	pod.EnsureLabel(utils.ExecFormatErrorLabelKey, utils.True)

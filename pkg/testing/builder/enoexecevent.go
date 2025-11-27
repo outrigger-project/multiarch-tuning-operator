@@ -44,11 +44,6 @@ func (p *ENoExecEventBuilder) WithContainerID(containerID string) *ENoExecEventB
 	return p
 }
 
-func (p *ENoExecEventBuilder) WithCommand(command string) *ENoExecEventBuilder {
-	p.Status.Command = command
-	return p
-}
-
 func (p *ENoExecEventBuilder) Build() *v1beta1.ENoExecEvent {
 	return p.ENoExecEvent
 }
