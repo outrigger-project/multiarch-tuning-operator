@@ -14,8 +14,8 @@ COPY vendor/ vendor/
 
 # Copy the go source
 COPY cmd/ cmd/
-COPY apis/ apis/
-COPY controllers/ controllers/
+COPY api/ api/
+COPY internal/ internal/
 COPY pkg/ pkg/
 
 # Build
@@ -23,7 +23,7 @@ COPY pkg/ pkg/
 # was called. For example, if we call make docker-build in a local env which has the Apple Silicon M1 SO
 # the docker BUILDPLATFORM arg will be linux/arm64 when for Apple x86 it will be linux/amd64. Therefore,
 # by leaving it empty we can ensure that the container and binary shipped on it will have the same platform.
-RUN CGO_ENABLED=1 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -o manager cmd/main-binary/main.go
+RUN CGO_ENABLED=1 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -o manager cmd/main.go
 RUN CGO_ENABLED=1 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -o enoexec-daemon cmd/enoexec-daemon/main.go
 
 FROM registry.redhat.io/rhel9-2-els/rhel:9.2

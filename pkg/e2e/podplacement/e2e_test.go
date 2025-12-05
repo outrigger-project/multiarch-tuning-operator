@@ -22,8 +22,8 @@ import (
 	ocpconfigv1 "github.com/openshift/api/config/v1"
 	ocpoperatorv1alpha1 "github.com/openshift/api/operator/v1alpha1"
 
-	"github.com/openshift/multiarch-tuning-operator/apis/multiarch/common/plugins"
-	"github.com/openshift/multiarch-tuning-operator/apis/multiarch/v1beta1"
+	"github.com/openshift/multiarch-tuning-operator/api/common/plugins"
+	"github.com/openshift/multiarch-tuning-operator/api/v1beta1"
 	"github.com/openshift/multiarch-tuning-operator/pkg/e2e"
 	. "github.com/openshift/multiarch-tuning-operator/pkg/testing/builder"
 	"github.com/openshift/multiarch-tuning-operator/pkg/testing/framework"

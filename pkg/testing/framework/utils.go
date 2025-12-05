@@ -37,8 +37,8 @@ import (
 	ocpmachineconfigurationv1 "github.com/openshift/api/machineconfiguration/v1"
 	ocpoperatorv1alpha1 "github.com/openshift/api/operator/v1alpha1"
 
-	"github.com/openshift/multiarch-tuning-operator/apis/multiarch/v1alpha1"
-	"github.com/openshift/multiarch-tuning-operator/apis/multiarch/v1beta1"
+	"github.com/openshift/multiarch-tuning-operator/api/v1alpha1"
+	"github.com/openshift/multiarch-tuning-operator/api/v1beta1"
 )
 
 func DecorateWithWaitGroup(wg *sync.WaitGroup, f func()) {
