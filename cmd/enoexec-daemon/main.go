@@ -14,7 +14,7 @@ import (
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 
-	enoexeceventdaemon "github.com/openshift/multiarch-tuning-operator/controllers/enoexecevent/daemon"
+	enoexeceventdaemon "github.com/openshift/multiarch-tuning-operator/internal/controller/enoexecevent/daemon"
 )
 
 var (

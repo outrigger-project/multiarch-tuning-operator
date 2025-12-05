@@ -60,14 +60,14 @@ import (
 
 	monitoringv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
 
-	multiarchv1alpha1 "github.com/openshift/multiarch-tuning-operator/apis/multiarch/v1alpha1"
-	multiarchv1beta1 "github.com/openshift/multiarch-tuning-operator/apis/multiarch/v1beta1"
+	multiarchv1alpha1 "github.com/openshift/multiarch-tuning-operator/api/v1alpha1"
+	multiarchv1beta1 "github.com/openshift/multiarch-tuning-operator/api/v1beta1"
 
-	"github.com/openshift/multiarch-tuning-operator/apis/multiarch/common"
-	enoexeceventhandler "github.com/openshift/multiarch-tuning-operator/controllers/enoexecevent/handler"
-	"github.com/openshift/multiarch-tuning-operator/controllers/operator"
-	"github.com/openshift/multiarch-tuning-operator/controllers/podplacement"
-	"github.com/openshift/multiarch-tuning-operator/controllers/podplacementconfig"
+	"github.com/openshift/multiarch-tuning-operator/api/common"
+	enoexeceventhandler "github.com/openshift/multiarch-tuning-operator/internal/controller/enoexecevent/handler"
+	"github.com/openshift/multiarch-tuning-operator/internal/controller/operator"
+	"github.com/openshift/multiarch-tuning-operator/internal/controller/podplacement"
+	"github.com/openshift/multiarch-tuning-operator/internal/controller/podplacementconfig"
 	"github.com/openshift/multiarch-tuning-operator/pkg/informers/clusterpodplacementconfig"
 	"github.com/openshift/multiarch-tuning-operator/pkg/utils"
 )
