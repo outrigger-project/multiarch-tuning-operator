@@ -1,11 +1,13 @@
 package utils
 
 import (
+	"fmt"
 	"os"
 	"path"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"go.uber.org/zap/zapcore"
 )
 
 func NewPtr[T any](a T) *T {
@@ -33,4 +35,15 @@ func ShouldStdErr(fn func() error) {
 	if err := fn(); err != nil {
 		_, _ = os.Stderr.WriteString(err.Error() + "\n")
 	}
+}
+
+// ToZapLevel converts an int log level to zapcore.Level with overflow validation.
+// The input is negated before conversion (positive values become negative for zap).
+// Returns an error if the value would overflow int8 range (-128 to 127).
+func ToZapLevel(level int) (zapcore.Level, error) {
+	negated := -level
+	if negated < -128 || negated > 127 {
+		return 0, fmt.Errorf("log level %d out of int8 range when negated", level)
+	}
+	return zapcore.Level(negated), nil
 }

@@ -41,10 +41,11 @@ type Tracepoint struct {
 
 func NewTracepoint(ctx context.Context, ch chan *types.ENOEXECInternalEvent, maxEvents uint32) (*Tracepoint, error) {
 	// Buffer Size must be a multiple of page size
-	if os.Getpagesize() <= 0 {
-		return nil, fmt.Errorf("invalid page size")
+	ps := os.Getpagesize()
+	if ps <= 0 || ps > 0xFFFFFFFF {
+		return nil, fmt.Errorf("invalid page size: %d", ps)
 	}
-	pageSize := uint32(os.Getpagesize()) // [bytes]
+	pageSize := uint32(ps) // [bytes]
 	// The payload is 8 bytes. Other 8 bytes are used for the header.
 	// 16 [bytes/event].
 	payloadSize := PayloadSize + 8
