@@ -1,0 +1,204 @@
+# Version discovery configuration for multiarch-tuning-operator upgrades
+#
+# This file defines HOW to determine version compatibility dynamically.
+# NO versions are hardcoded - all are discovered from authoritative sources.
+
+# How to determine Kubernetes to OpenShift version mapping
+kubernetes_to_openshift:
+  method: "derive_from_build_image_and_validate"
+  steps:
+    - description: "Extract current OCP version from BUILD_IMAGE in Makefile"
+      extract_from: "Makefile"
+      pattern: "BUILD_IMAGE.*openshift-(?P<ocp_version>\\d+\\.\\d+)"
+
+    - description: "Validate K8s version is compatible with that OCP version"
+      check_repo: "https://github.com/openshift/api"
+      branch: "release-{ocp_version}"
+      file: "go.mod"
+      validate: "k8s.io/api version should be v0.{k8s_minor}.x"
+
+  note: "The OCP version comes from BUILD_IMAGE, K8s version is user-provided and validated against openshift/api"
+
+# How to determine controller-runtime compatibility
+controller_runtime:
+  method: "dynamic_discovery_from_releases"
+  api_url: "https://api.github.com/repos/kubernetes-sigs/controller-runtime/releases"
+  filter: "tag_name starts with 'v0.'"
+
+  for_each_release:
+    - fetch_file: "https://raw.githubusercontent.com/kubernetes-sigs/controller-runtime/v{version}/go.mod"
+    - extract_k8s_version: "grep 'k8s.io/apimachinery' | awk '{print $2}' | extract v0.{k8s_minor}"
+    - extract_go_version: "grep '^go ' | awk '{print $2}'"
+    - match_criteria:
+        k8s_minor_matches: true
+        go_version_compatible: "release_go_minor <= target_go_minor"
+
+  note: "Find controller-runtime version that matches target K8s minor version and is compatible with target Go version"
+
+# How to determine minimum Go version
+go_version_requirements:
+  method: "check_multiple_sources_and_use_highest"
+  sources:
+    - name: "k8s.io/api repository"
+      url: "https://raw.githubusercontent.com/kubernetes/api/release-1.{k8s_minor}/go.mod"
+      extract: "grep '^go ' | awk '{print $2}'"
+      priority: 1
+
+    - name: "openshift/api for target OCP release"
+      url: "https://raw.githubusercontent.com/openshift/api/release-{ocp_version}/go.mod"
+      extract: "grep '^go ' | awk '{print $2}'"
+      priority: 2
+
+    - name: "BUILD_IMAGE tag in Makefile"
+      location: "Makefile"
+      pattern: "rhel-9-golang-(?P<go_version>\\d+\\.\\d+)-.*-openshift-(?P<ocp_version>\\d+\\.\\d+)"
+      priority: 3
+
+  rule: "Use the highest Go version requirement from all sources"
+
+# Base image validation
+base_images:
+  dockerfile:
+    pattern: "golang:{go_version}"
+    validation:
+      command: "docker manifest inspect golang:{go_version}"
+      on_failure: "Try golang:{go_version}.0, golang:{go_version}.1, golang:{go_version}.2, etc."
+
+  ci_builder:
+    patterns:
+      - "registry.ci.openshift.org/ocp/builder:rhel-9-golang-{go_version}-openshift-{ocp_version}"
+      - "registry.ci.openshift.org/ocp/builder:rhel-9-golang-{go_version}-builder-multi-openshift-{ocp_version}"
+    validation:
+      command: "skopeo inspect docker://{image}"
+      try_all_patterns: true
+      note: "May require VPN/registry access"
+
+  brew_builder:
+    pattern: "brew.registry.redhat.io/rh-osbs/openshift-golang-builder:rhel_9_{go_version}"
+    validation:
+      command: "skopeo inspect docker://{image}"
+      required: true
+      note: "Requires Red Hat VPN and registry authentication"
+
+# Tool version discovery - ALL dynamic, NOTHING hardcoded
+tool_versions:
+  kustomize:
+    method: "find_latest_compatible"
+    api_url: "https://api.github.com/repos/kubernetes-sigs/kustomize/releases"
+    filter: "tag_name contains 'kustomize/v5'"
+
+    for_each_release:
+      - extract_version: "tag_name → 'kustomize/v{version}'"
+      - fetch_file: "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/kustomize/v{version}/kustomize/go.mod"
+      - extract_go_req: "grep '^go ' | awk '{print $2}' | extract minor version"
+      - match_criteria: "release_go_minor <= target_go_minor"
+      - take_first_match: true
+
+    fallback:
+      source: "Makefile"
+      variable: "KUSTOMIZE_VERSION"
+
+    additional_validation:
+      - check: "Kustomize v5.x required for K8s 1.27+"
+      - warn_if: "version < 5.0.0 and k8s >= 1.27"
+
+  controller_tools:
+    method: "find_latest_compatible"
+    api_url: "https://api.github.com/repos/kubernetes-sigs/controller-tools/releases"
+    filter: "tag_name starts with 'v0.'"
+
+    for_each_release:
+      - fetch_file: "https://raw.githubusercontent.com/kubernetes-sigs/controller-tools/v{version}/go.mod"
+      - extract_k8s_minor: "grep 'k8s.io/apimachinery' | extract v0.{k8s_minor}"
+      - extract_go_minor: "grep '^go ' | extract minor version"
+      - match_criteria:
+          k8s_minor_matches: "release_k8s_minor == target_k8s_minor"
+          go_compatible: "release_go_minor <= target_go_minor"
+      - take_first_match: true
+
+    fallback:
+      source: "Makefile"
+      variable: "CONTROLLER_TOOLS_VERSION"
+
+  setup_envtest:
+    method: "derive_from_controller_runtime"
+    depends_on: "controller_runtime version (from go.mod or discovered)"
+
+    steps:
+      - get_controller_runtime_version: "grep 'sigs.k8s.io/controller-runtime' go.mod | extract v0.{minor}.x"
+      - format: "release-0.{minor}"
+      - example: "controller-runtime v0.20.x → setup-envtest release-0.20"
+
+    validation:
+      api_url: "https://api.github.com/repos/kubernetes-sigs/controller-runtime/git/refs/tags/{version}"
+      check: "Tag exists"
+      warn_if_not_found: true
+
+  envtest_k8s_version:
+    method: "extract_from_controller_runtime_dependencies"
+    depends_on: "controller_runtime version"
+
+    steps:
+      - description: "Use the EXACT k8s.io/api version that controller-runtime uses"
+      - fetch_file: "https://raw.githubusercontent.com/kubernetes-sigs/controller-runtime/v{controller_runtime_version}/go.mod"
+      - extract: "grep 'k8s.io/api ' | awk '{print $2}'"
+      - example: "If controller-runtime uses k8s.io/api v0.34.0, use v0.34.0"
+
+    rationale: "envtest must use the exact K8s version that controller-runtime was built with"
+
+  golangci_lint:
+    method: "find_latest_compatible"
+    api_url: "https://api.github.com/repos/golangci/golangci-lint/releases"
+
+    for_each_release:
+      - extract_version: "tag_name → 'v{version}'"
+      - fetch_file: "https://raw.githubusercontent.com/golangci/golangci-lint/v{version}/go.mod"
+      - extract_go_req: "grep '^go ' | awk '{print $2}' | extract minor version"
+      - match_criteria: "release_go_minor <= target_go_minor"
+      - take_first_match: true
+
+    fallback:
+      source: "Makefile"
+      variable: "GOLINT_VERSION"
+
+# Dependency version discovery for go.mod updates
+dependencies:
+  kubernetes_packages:
+    pattern: "k8s.io/*"
+    method: "pin_to_user_provided_version"
+    command: "go get {package}@v{k8s_version}"
+    note: "Some k8s.io packages may not have exact version, go get will find nearest compatible"
+
+  controller_runtime:
+    package: "sigs.k8s.io/controller-runtime"
+    method: "discovered_from_k8s_version"
+    discovery: "Find compatible version using steps defined in controller_runtime section above"
+
+  openshift_packages:
+    pattern: "github.com/openshift/*"
+    method: "use_ocp_release_branch"
+    command: "go get {package}@release-{ocp_version}"
+    example: "For OCP 4.19: go get github.com/openshift/api@release-4.19"
+
+  other_dependencies:
+    method: "update_to_latest_compatible"
+    command: "go get -u {package}"
+    note: "Let go modules automatically find latest compatible versions"
+
+# Operator-specific validations
+operator_specific:
+  - name: "getCorrectHostmountAnyUIDSCC function validation"
+    file: "controllers/podplacement/podplacement_controller.go"
+    function: "getCorrectHostmountAnyUIDSCC"
+    check: "Ensure K8s→OCP version mapping in this function aligns with target versions"
+    action: "Review function logic and update if version mappings are outdated"
+
+  - name: "Dockerfile uses Docker Hub golang images"
+    file: "Dockerfile"
+    requirement: "FROM golang:{version}"
+    note: "This repository uses Docker Hub images, not UBI (repository-specific pattern)"
+
+  - name: "Konflux .tekton directory"
+    check: "If .tekton directory exists, update brew.registry.redhat.io image references"
+    files: ".tekton/*.yaml"
+    pattern: "brew.registry.redhat.io/rh-osbs/openshift-golang-builder:rhel_9_{go_version}"
