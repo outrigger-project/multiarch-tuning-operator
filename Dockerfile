@@ -1,5 +1,5 @@
 ARG RUNTIME_IMAGE=quay.io/centos/centos:stream9-minimal
-FROM golang:1.23 as builder
+FROM golang:1.24 as builder
 ARG TARGETOS
 ARG TARGETARCH
 
