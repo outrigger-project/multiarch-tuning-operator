@@ -762,7 +762,6 @@ var _ = Describe("The Multiarch Tuning Operator", Serial, func() {
 			By("Creating a eNoExecEvent")
 			enee := NewENoExecEvent().
 				WithName("test-enoexecevent").
-				WithCommand("foo-binary").
 				WithNodeName("test-name").
 				WithPodNamespace(ns.Name).
 				WithNamespace(utils.Namespace()).Build()
@@ -801,7 +800,6 @@ var _ = Describe("The Multiarch Tuning Operator", Serial, func() {
 			By("Creating a eNoExecEvent")
 			enee := NewENoExecEvent().
 				WithName("test-enoexecevent").
-				WithCommand("foo-binary").
 				WithNodeName("test-name").
 				WithPodNamespace(ns.Name).
 				WithNamespace(utils.Namespace()).Build()
