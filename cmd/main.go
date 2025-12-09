@@ -323,7 +323,7 @@ func bindFlags() {
 	klog.InitFlags(nil)
 	flag.Parse()
 	// Set the Log Level as AtomicLevel to allow runtime changes
-	utils.AtomicLevel = zapuber.NewAtomicLevelAt(zapcore.Level(-initialLogLevel))
+	utils.AtomicLevel = zapuber.NewAtomicLevelAt(zapcore.Level(int8(-initialLogLevel))) // #nosec G115 -- initialLogLevel is constrained to 0-3 range
 	zapLogger := zap.New(zap.Level(utils.AtomicLevel), zap.UseDevMode(false))
 	klog.SetLogger(zapLogger)
 	ctrllog.SetLogger(zapLogger)
