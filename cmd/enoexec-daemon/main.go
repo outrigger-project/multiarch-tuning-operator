@@ -39,13 +39,14 @@ func initContext() (context.Context, context.CancelFunc) {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	var logImpl *zap.Logger
 	var err error
+	logLevel := zapcore.Level(int8(-initialLogLevel)) // #nosec G115 -- initialLogLevel is constrained to 0-5 range
 	if logDevMode {
 		cfg := zap.NewDevelopmentConfig()
-		cfg.Level = zap.NewAtomicLevelAt(zapcore.Level(-initialLogLevel))
+		cfg.Level = zap.NewAtomicLevelAt(logLevel)
 		logImpl, err = cfg.Build()
 	} else {
 		cfg := zap.NewProductionConfig()
-		cfg.Level = zap.NewAtomicLevelAt(zapcore.Level(-initialLogLevel))
+		cfg.Level = zap.NewAtomicLevelAt(logLevel)
 		logImpl, err = cfg.Build()
 	}
 	must(err, "failed to create logger")

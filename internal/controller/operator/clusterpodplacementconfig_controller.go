@@ -606,9 +606,10 @@ func (r *ClusterPodPlacementConfigReconciler) handleEnoexecDelete(ctx context.Co
 // reconcile reconciles the ClusterPodPlacementConfig operand's resources.
 func (r *ClusterPodPlacementConfigReconciler) reconcile(ctx context.Context, clusterPodPlacementConfig *multiarchv1beta1.ClusterPodPlacementConfig) error {
 	log := ctrllog.FromContext(ctx)
-	if int8(utils.AtomicLevel.Level()) != int8(clusterPodPlacementConfig.Spec.LogVerbosity.ToZapLevelInt()) {
-		log.Info("Setting log level", "level", -clusterPodPlacementConfig.Spec.LogVerbosity.ToZapLevelInt())
-		utils.AtomicLevel.SetLevel(zapcore.Level(-clusterPodPlacementConfig.Spec.LogVerbosity.ToZapLevelInt()))
+	desiredLogLevel := int8(-clusterPodPlacementConfig.Spec.LogVerbosity.ToZapLevelInt()) // #nosec G115 -- LogVerbosity values are constrained to 0-3 by enum
+	if int8(utils.AtomicLevel.Level()) != desiredLogLevel {
+		log.Info("Setting log level", "level", desiredLogLevel)
+		utils.AtomicLevel.SetLevel(zapcore.Level(desiredLogLevel))
 	}
 	if err := r.ensureNamespaceLabels(ctx); err != nil {
 		log.Error(err, "Unable to ensure namespace labels")
