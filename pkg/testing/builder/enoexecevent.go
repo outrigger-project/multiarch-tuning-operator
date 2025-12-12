@@ -1,7 +1,7 @@
 package builder
 
 import (
-	"github.com/openshift/multiarch-tuning-operator/apis/multiarch/v1beta1"
+	"github.com/openshift/multiarch-tuning-operator/api/v1beta1"
 )
 
 type ENoExecEventBuilder struct {
