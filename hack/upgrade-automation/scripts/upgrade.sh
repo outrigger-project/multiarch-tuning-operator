@@ -116,11 +116,6 @@ step_update_base_images() {
 
     echo "" >&2
 
-    # Validate operator-specific function
-    validate_hostmount_scc_function "$k8s_version" "$ocp_version"
-
-    echo "" >&2
-
     # Commit changes
     echo "Committing changes..." >&2
     git add .ci-operator.yaml .tekton/ Dockerfile Makefile bundle.konflux.Dockerfile konflux.Dockerfile 2>/dev/null || true
