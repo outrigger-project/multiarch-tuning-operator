@@ -1,10 +1,8 @@
 ARG RUNTIME_IMAGE=quay.io/centos/centos:stream9-minimal
-FROM golang:1.24 as builder
+ARG BUILD_IMAGE=golang:1.24
+FROM ${BUILD_IMAGE} as builder
 ARG TARGETOS
 ARG TARGETARCH
-
-RUN if which apt-get; then apt-get update && apt-get install -y libgpgme-dev && apt-get -y clean autoclean; \
-    elif which dnf; then dnf install -y gpgme-devel && dnf clean all -y; fi;
 
 WORKDIR /workspace
 # Copy the Go Modules manifests
