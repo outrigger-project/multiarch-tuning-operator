@@ -198,11 +198,11 @@ test: manifests generate envtest fmt vet goimports gosec lint unit ## Run tests.
 
 .PHONY: build
 build: manifests generate fmt vet ## Build manager binary.
-	CGO_ENABLED=1 go build -a -o bin/manager main.go
+	CGO_ENABLED=1 go build -a -o bin/manager cmd/main.go
 
 .PHONY: run
 run: manifests generate fmt vet ## Run a controller from your host.
-	go run ./main.go
+	go run ./cmd/main.go
 
 # If you wish built the manager image targeting other platforms you can use the --platform flag.
 # (i.e. docker build --platform linux/arm64 ). However, you must enable docker buildKit for it.

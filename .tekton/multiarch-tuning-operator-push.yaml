@@ -6,7 +6,11 @@ metadata:
     build.appstudio.redhat.com/commit_sha: '{{revision}}'
     build.appstudio.redhat.com/target_branch: '{{target_branch}}'
     pipelinesascode.tekton.dev/max-keep-runs: "3"
-    pipelinesascode.tekton.dev/on-cel-expression: event == "push" && target_branch == "v1.x" && (".tekton/***".pathChanged() || "apis/***".pathChanged() || "controllers/***".pathChanged() || "pkg/***".pathChanged() || "test/***".pathChanged() || "konflux.Dockerfile".pathChanged() || "go.mod".pathChanged() || "main.go".pathChanged() || "go.sum".pathChanged() || "trigger-konflux-builds.txt".pathChanged() )
+    pipelinesascode.tekton.dev/on-cel-expression: event == "push" && target_branch
+      == "v1.x" && (".tekton/***".pathChanged() || "api/***".pathChanged() || "internal/controller/***".pathChanged()
+      || "pkg/***".pathChanged() || "test/***".pathChanged() || "konflux.Dockerfile".pathChanged()
+      || "go.mod".pathChanged() || "main.go".pathChanged() || "go.sum".pathChanged()
+      || "trigger-konflux-builds.txt".pathChanged() )
   creationTimestamp: null
   labels:
     appstudio.openshift.io/application: multiarch-tuning-operator-v1-x
