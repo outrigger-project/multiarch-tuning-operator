@@ -9,7 +9,7 @@ metadata:
     pipelinesascode.tekton.dev/on-cel-expression: event == "push" && target_branch
       == "v1.x" && (".tekton/***".pathChanged() || "api/***".pathChanged() || "internal/controller/***".pathChanged()
       || "pkg/***".pathChanged() || "test/***".pathChanged() || "konflux.Dockerfile".pathChanged()
-      || "go.mod".pathChanged() || "main.go".pathChanged() || "go.sum".pathChanged()
+      || "go.mod".pathChanged() || "cmd/***".pathChanged() || "go.sum".pathChanged()
       || "trigger-konflux-builds.txt".pathChanged() )
   creationTimestamp: null
   labels:
