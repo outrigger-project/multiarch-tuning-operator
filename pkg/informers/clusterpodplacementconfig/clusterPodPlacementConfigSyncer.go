@@ -6,7 +6,7 @@ import (
 	"fmt"
 
 	"github.com/go-logr/logr"
-	multiarchv1beta1 "github.com/openshift/multiarch-tuning-operator/apis/multiarch/v1beta1"
+	multiarchv1beta1 "github.com/openshift/multiarch-tuning-operator/api/v1beta1"
 	"github.com/openshift/multiarch-tuning-operator/pkg/informers/clusterpodplacementconfig/internal"
 	"k8s.io/client-go/tools/cache"
 	"sigs.k8s.io/controller-runtime/pkg/log"

@@ -27,7 +27,7 @@ metadata:
     categories: OpenShift Optional, Other
     console.openshift.io/disable-operand-delete: "false"
     containerImage: registry.ci.openshift.org/origin/multiarch-tuning-operator:main
-    createdAt: "2025-11-27T04:58:59Z"
+    createdAt: "2025-12-18T06:58:39Z"
     features.operators.openshift.io/cnf: "false"
     features.operators.openshift.io/cni: "false"
     features.operators.openshift.io/csi: "false"
@@ -44,9 +44,9 @@ metadata:
     operatorframework.io/suggested-namespace: openshift-multiarch-tuning-operator
     operators.openshift.io/valid-subscription: '["OpenShift Kubernetes Engine", "OpenShift
       Container Platform", "OpenShift Platform Plus"]'
-    operators.operatorframework.io/builder: operator-sdk-v1.31.0
+    operators.operatorframework.io/builder: operator-sdk-v1.33.0
     operators.operatorframework.io/internal-objects: '["enoexecevents.multiarch.openshift.io"]'
-    operators.operatorframework.io/project_layout: go.kubebuilder.io/v3
+    operators.operatorframework.io/project_layout: go.kubebuilder.io/v4
     repository: https://github.com/openshift/multiarch-tuning-operator
     support: Red Hat
   labels:

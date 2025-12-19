@@ -7,7 +7,7 @@ import (
 
 	crclient "sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/openshift/multiarch-tuning-operator/apis/multiarch/v1beta1"
+	"github.com/openshift/multiarch-tuning-operator/api/v1beta1"
 	"github.com/openshift/multiarch-tuning-operator/pkg/testing/builder"
 	"github.com/openshift/multiarch-tuning-operator/pkg/testing/framework"
 	"github.com/openshift/multiarch-tuning-operator/pkg/utils"

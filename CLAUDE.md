@@ -127,7 +127,7 @@ make catalog-push CATALOG_IMG=<registry>/multiarch-tuning-operator-catalog:<vers
 
 ### Binary Modes
 
-The operator runs in different modes controlled by flags (see bindFlags() function in cmd/main-binary/main.go):
+The operator runs in different modes controlled by flags (see bindFlags() function in cmd/main.go):
 
 1. **Operator mode** (`--enable-operator`): Manages ClusterPodPlacementConfig CR and deploys operands
 2. **Pod Placement Controllers** (`--enable-ppc-controllers`): Reconciles pods with scheduling gates
@@ -139,18 +139,18 @@ Only one mode can be active at a time. Each mode has its own leader election ID.
 
 ## Core Components
 
-**Operator Controller** (controllers/operator/):
+**Operator Controller** (internal/controller/operator/):
 - Reconciles ClusterPodPlacementConfig singleton CR (name must be "cluster")
 - Deploys/manages pod placement operands (controllers, webhook, RBAC, etc.)
 - Handles ordered deletion to ensure pods are ungated before operand removal
 - Creates ServiceMonitor for metrics scraping
 
-**Pod Placement Operand** (controllers/podplacement/):
+**Pod Placement Operand** (intrenal/controller/podplacement/):
 - **PodReconciler**: Watches pods with scheduling gate, inspects container images, adds architecture-based nodeAffinity
 - **PodSchedulingGateMutatingWebHook**: Adds `multiarch.openshift.io/scheduling-gate` to new pods
 - **GlobalPullSecretSyncer**: Syncs pull secrets for image inspection
 
-**ENoExecEvent System** (controllers/enoexecevent/):
+**ENoExecEvent System** (/internal/controller/enoexecevent/):
 - **Daemon** (cmd/enoexec-daemon/): eBPF-based monitoring of exec format errors on nodes
 - **Handler Controller**: Processes ENoExecEvent CRs created by the daemon
 
@@ -183,12 +183,12 @@ The operator binary runs in four mutually exclusive modes (controlled by flags i
 
 ### Key Components
 
-**Operator Controller** (`controllers/operator/clusterpodplacementconfig_controller.go`):
+**Operator Controller** (`internal/controller/operator/clusterpodplacementconfig_controller.go`):
 - Reconciles ClusterPodPlacementConfig singleton resource (name must be "cluster")
 - Manages deployment lifecycle of pod placement controller and webhook
 - Updates status conditions (Available, Progressing, Degraded, Deprovisioning)
 
-**Pod Placement Controller** (`controllers/podplacement/pod_reconciler.go`):
+**Pod Placement Controller** (`internal/controller/podplacement/pod_reconciler.go`):
 - Watches pods in Pending status with the `multiarch.openshift.io/scheduling-gate` scheduling gate
 - High concurrency: `MaxConcurrentReconciles = NumCPU * 4` (I/O bound image inspection)
 - Reconciliation flow:
@@ -201,14 +201,14 @@ The operator binary runs in four mutually exclusive modes (controlled by flags i
 - Max retries mechanism for image inspection failures
 - Cache optimization in pod field selector: only watches `status.phase=Pending`
 
-**Pod Model** (`controllers/podplacement/pod_model.go`):
+**Pod Model** (`internal/controller/podplacement/pod_model.go`):
 - Core logic for pod processing
 - Image architecture inspection (supports registry authentication)
 - NodeAffinity computation (required and preferred scheduling)
 - Scheduling gate management
 - Event publishing for audit trail
 
-**Mutating Webhook** (`controllers/podplacement/scheduling_gate_mutating_webhook.go`):
+**Mutating Webhook** (`internal/controller/podplacement/scheduling_gate_mutating_webhook.go`):
 - Adds `multiarch.openshift.io/scheduling-gate` to new pods
 - Respects namespace selector from ClusterPodPlacementConfig
 - Always excludes: `openshift-*`, `kube-*`, `hypershift-*` namespaces
@@ -229,9 +229,9 @@ The operator binary runs in four mutually exclusive modes (controlled by flags i
 
 - **v1alpha1**: Original API version with conversion webhook
 - **v1beta1**: Current stable API (hub version for conversions)
-- Conversion webhooks in apis/multiarch/v1beta1/clusterpodplacementconfig_webhook.go
+- Conversion webhooks in api/v1beta1/clusterpodplacementconfig_webhook.go
 
-**ClusterPodPlacementConfig** (`apis/multiarch/v1beta1/clusterpodplacementconfig_types.go`):
+**ClusterPodPlacementConfig** (`api/v1beta1/clusterpodplacementconfig_types.go`):
 - Singleton resource (only name "cluster" allowed)
 - Spec fields:
   - `logVerbosity`: Normal, Debug, Trace, TraceAll
@@ -251,7 +251,7 @@ Additional namespaces can be excluded via namespaceSelector with label `multiarc
 
 ### Plugins System
 
-**NodeAffinityScoring Plugin** (`apis/multiarch/common/plugins/nodeaffinityscoring_plugin.go`):
+**NodeAffinityScoring Plugin** (`api/common/plugins/nodeaffinityscoring_plugin.go`):
 - Adds preferred (soft) nodeAffinity to influence scheduler scoring
 - Weights architectures based on cluster node distribution
 - Enables workload placement on preferred architectures while maintaining required constraints
@@ -259,13 +259,13 @@ Additional namespaces can be excluded via namespaceSelector with label `multiarc
 ## Code Organization
 
 ```
-apis/multiarch/
+api/
 ├── common/              # Shared constants and types
 │   └── plugins/         # Plugin system (NodeAffinityScoring)
 ├── v1alpha1/            # Alpha API version with conversion
 └── v1beta1/             # Beta API version (storage version)
 
-controllers/
+internal/controller/
 ├── operator/            # Operator mode: ClusterPodPlacementConfig lifecycle
 └── podplacement/        # Operand modes: pod reconciler and webhook
     └── metrics/         # Prometheus metrics
