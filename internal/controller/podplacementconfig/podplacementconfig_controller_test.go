@@ -128,7 +128,7 @@ var _ = Describe("Internal/Controller/PodPlacementConfig/PodPlacementConfigRecon
 				Expect(err).NotTo(HaveOccurred())
 				//nolint:errcheck
 				defer k8sClient.Delete(ctx, ns)
-				By("Creating a local PodPlacementConfig with a Prioriry setting")
+				By("Creating a local PodPlacementConfig with a Priority setting")
 				err = k8sClient.Create(ctx,
 					builder.NewPodPlacementConfig().
 						WithName("test-ppc").
@@ -150,7 +150,7 @@ var _ = Describe("Internal/Controller/PodPlacementConfig/PodPlacementConfigRecon
 					g.Expect(err).NotTo(HaveOccurred(), "failed to get podplacementconfig", err)
 					g.Expect(ppc.Spec.Priority).To(Equal(uint8(50)), "the ppc Priority should equal 50")
 				}).Should(Succeed(), "the PodPlacementConfig should be created")
-				By("Creating another local PodPlacementConfig with the same Prioriry")
+				By("Creating another local PodPlacementConfig with the same Priority")
 				err = k8sClient.Create(ctx,
 					builder.NewPodPlacementConfig().
 						WithName("test-ppc-2").

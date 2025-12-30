@@ -7,11 +7,13 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	ctrl "sigs.k8s.io/controller-runtime"
 	runtimeclient "sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/openshift/multiarch-tuning-operator/api/common"
+	"github.com/openshift/multiarch-tuning-operator/api/v1beta1"
 	"github.com/openshift/multiarch-tuning-operator/pkg/e2e"
 	"github.com/openshift/multiarch-tuning-operator/pkg/testing/builder"
 	"github.com/openshift/multiarch-tuning-operator/pkg/testing/framework"
@@ -51,6 +53,17 @@ var _ = SynchronizedBeforeSuite(func() []byte {
 })
 
 var _ = SynchronizedAfterSuite(func() {}, func() {
+	By("Verifying the cppc removing the no-pod-placement-config finalizer before delation")
+	Eventually(func(g Gomega) {
+		cppc := &v1beta1.ClusterPodPlacementConfig{}
+		err := client.Get(ctx, runtimeclient.ObjectKeyFromObject(&v1beta1.ClusterPodPlacementConfig{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: common.SingletonResourceObjectName,
+			},
+		}), cppc)
+		g.Expect(err).NotTo(HaveOccurred())
+		g.Expect(cppc.Finalizers).NotTo(ContainElement(utils.CPPCNoPPCObjectFinalizer))
+	}).Should(Succeed(), "CPPC should not have a PodPlacementConfig finalizer")
 	err := client.Delete(ctx, builder.NewClusterPodPlacementConfig().
 		WithName(common.SingletonResourceObjectName).Build())
 	Expect(runtimeclient.IgnoreNotFound(err)).NotTo(HaveOccurred())
