@@ -82,7 +82,7 @@ ENVTEST_K8S_VERSION = 1.32.0
 GOLINT_VERSION = v2.0.2
 
 # TODO: We'd need an upstream builder image that includes gpgme-devel (libgpgme-dev)
-BUILD_IMAGE ?= registry.ci.openshift.org/ocp/builder:rhel-9-golang-1.23-openshift-4.19
+BUILD_IMAGE ?= registry.ci.openshift.org/ocp/builder:rhel-9-golang-1.25-openshift-4.21
 RUNTIME_IMAGE ?= registry.access.redhat.com/ubi9/ubi-minimal:latest
 
 NO_DOCKER ?= 0

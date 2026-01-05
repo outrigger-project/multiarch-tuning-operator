@@ -1,4 +1,4 @@
-ARG BUILD_IMAGE=golang:1.23
+ARG BUILD_IMAGE=golang:1.25
 ARG RUNTIME_IMAGE=registry.access.redhat.com/ubi9/ubi-minimal:latest
 FROM ${BUILD_IMAGE} as builder
 ARG TARGETOS
