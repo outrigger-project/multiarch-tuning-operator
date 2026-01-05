@@ -1,5 +1,5 @@
 # TODO: delete this Dockerfile when https://issues.redhat.com/browse/KONFLUX-2361
-FROM brew.registry.redhat.io/rh-osbs/openshift-golang-builder:rhel_9_1.23 as builder
+FROM brew.registry.redhat.io/rh-osbs/openshift-golang-builder:rhel_9_1.25 as builder
 ARG TARGETOS
 ARG TARGETARCH
 ENV GOEXPERIMENT=strictfipsruntime
