@@ -48,6 +48,14 @@ type ClusterPodPlacementConfigSpec struct {
 	// This field is optional and will be omitted from the output if not set.
 	// +optional
 	Plugins *plugins.Plugins `json:"plugins,omitempty"`
+
+	// FallbackArchitecture defines the architecture to use if the image inspector cannot determine the image's architecture.
+	// If configured, the PodPlacementController will set the node affinity of the pod to the fallback architecture
+	// if the image inspector cannot determine the image's architecture.
+	// +optional
+	// +kubebuilder:default=""
+	// +kubebuilder:validation:Enum=arm64;amd64;ppc64le;s390x;""
+	FallbackArchitecture string `json:"fallbackArchitecture,omitempty"`
 }
 
 // ClusterPodPlacementConfigStatus defines the observed state of ClusterPodPlacementConfig

@@ -18,6 +18,7 @@ package operator
 
 import (
 	"fmt"
+	"strings"
 
 	admissionv1 "k8s.io/api/admissionregistration/v1"
 	appsv1 "k8s.io/api/apps/v1"
@@ -816,6 +817,53 @@ var _ = Describe("internal/Controller/ClusterPodPlacementConfig/ClusterPodPlacem
 				g.Expect(err).NotTo(HaveOccurred())
 				g.Expect(cppc.Finalizers).NotTo(ContainElement(utils.CPPCNoPPCObjectFinalizer))
 			}).Should(Succeed(), "the ClusterPodPlacementConfig should remove the no-pod-placement-config finalizer")
+		})
+	})
+	Context("Validating FallbackArchitecture field", func() {
+		DescribeTable("should validate ClusterPodPlacementConfig correctly",
+			func(arch string, expectValid bool) {
+				By("Ensure no ClusterPodPlacementConfig exists")
+				cppc := &v1beta1.ClusterPodPlacementConfig{}
+				err := k8sClient.Get(ctx, crclient.ObjectKey{
+					Name: common.SingletonResourceObjectName,
+				}, cppc)
+				Expect(errors.IsNotFound(err)).To(BeTrue(), "ClusterPodPlacementConfig should not exist")
+
+				By("Create the ClusterPodPlacementConfig")
+				object := builder.NewClusterPodPlacementConfig().
+					WithName(common.SingletonResourceObjectName).
+					WithFallbackArchitecture(arch).
+					Build()
+				err = k8sClient.Create(ctx, object)
+				if expectValid {
+					By("Verify it is created successfully")
+					Expect(err).NotTo(HaveOccurred(), "Failed to create ClusterPodPlacementConfig with valid FallbackArchitecture")
+				} else {
+					By("Verify the creation fails")
+					Expect(err).To(HaveOccurred(), "ClusterPodPlacementConfig creation should fail for invalid FallbackArchitecture")
+					Expect(errors.IsInvalid(err)).To(BeTrue(), "Error should indicate invalid object")
+				}
+			},
+			// Valid architectures
+			Entry("amd64", "amd64", true),
+			Entry("arm64", "arm64", true),
+			Entry("ppc64le", "ppc64le", true),
+			Entry("s390x", "s390x", true),
+			Entry("empty string", "", true),
+			// Invalid architectures
+			Entry("wrong string", "wrong", false),
+			Entry("space string", " ", false),
+			Entry("uppercase architecture", "AMD64", false),
+			Entry("unsupported architecture", "arm32", false),
+			Entry("special characters", "@!$", false),
+			Entry("too long string", strings.Repeat("a", 100), false),
+		)
+		AfterEach(func() {
+			By("Clean up ClusterPodPlacementConfig")
+			err := k8sClient.Delete(ctx, builder.NewClusterPodPlacementConfig().
+				WithName(common.SingletonResourceObjectName).Build())
+			Expect(crclient.IgnoreNotFound(err)).NotTo(HaveOccurred(), "failed to delete ClusterPodPlacementConfig")
+			Eventually(framework.ValidateDeletion(k8sClient, ctx, framework.MainPlugin, framework.ENoExecPlugin)).Should(Succeed(), "the ClusterPodPlacementConfig should be deleted")
 		})
 	})
 })

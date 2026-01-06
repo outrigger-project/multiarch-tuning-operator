@@ -75,3 +75,8 @@ func (p *ClusterPodPlacementConfigBuilder) WithNodeAffinityScoringTerm(architect
 	})
 	return p
 }
+
+func (p *ClusterPodPlacementConfigBuilder) WithFallbackArchitecture(architecture string) *ClusterPodPlacementConfigBuilder {
+	p.Spec.FallbackArchitecture = architecture
+	return p
+}
