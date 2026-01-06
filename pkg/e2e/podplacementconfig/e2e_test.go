@@ -11,7 +11,11 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	runtimeclient "sigs.k8s.io/controller-runtime/pkg/client"
 
+	"github.com/openshift/multiarch-tuning-operator/api/common"
 	"github.com/openshift/multiarch-tuning-operator/pkg/e2e"
+	"github.com/openshift/multiarch-tuning-operator/pkg/testing/builder"
+	"github.com/openshift/multiarch-tuning-operator/pkg/testing/framework"
+	"github.com/openshift/multiarch-tuning-operator/pkg/utils"
 )
 
 var (
@@ -30,6 +34,25 @@ func TestE2E(t *testing.T) {
 	RunSpecs(t, "Multiarch Tuning Operator Suite (podplacementconfig E2E)", Label("e2e", "podplacementconfig"))
 }
 
-var _ = BeforeSuite(func() {
+var _ = SynchronizedBeforeSuite(func() []byte {
 	client, clientset, ctx, suiteLog = e2e.CommonBeforeSuite()
+	err := client.Create(ctx,
+		builder.NewClusterPodPlacementConfig().
+			WithName(common.SingletonResourceObjectName).
+			WithNodeAffinityScoring(true).
+			WithNodeAffinityScoringTerm(utils.ArchitectureAmd64, 50).
+			Build(),
+	)
+	Expect(err).NotTo(HaveOccurred())
+	Eventually(framework.ValidateCreation(client, ctx)).Should(Succeed())
+	return nil
+}, func(data []byte) {
+	client, clientset, ctx, suiteLog = e2e.CommonBeforeSuite()
+})
+
+var _ = SynchronizedAfterSuite(func() {}, func() {
+	err := client.Delete(ctx, builder.NewClusterPodPlacementConfig().
+		WithName(common.SingletonResourceObjectName).Build())
+	Expect(runtimeclient.IgnoreNotFound(err)).NotTo(HaveOccurred())
+	Eventually(framework.ValidateDeletion(client, ctx)).Should(Succeed())
 })

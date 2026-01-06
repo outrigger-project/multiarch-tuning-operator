@@ -24,7 +24,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/openshift/multiarch-tuning-operator/api/common"
+	"github.com/openshift/multiarch-tuning-operator/api/v1alpha1"
+	"github.com/openshift/multiarch-tuning-operator/api/v1beta1"
 	"github.com/openshift/multiarch-tuning-operator/pkg/e2e"
+	"github.com/openshift/multiarch-tuning-operator/pkg/informers/clusterpodplacementconfig"
 	"github.com/openshift/multiarch-tuning-operator/pkg/utils"
 
 	v1 "k8s.io/api/admissionregistration/v1"
@@ -47,6 +51,7 @@ import (
 
 	"go.uber.org/zap/zapcore"
 
+	"github.com/openshift/multiarch-tuning-operator/pkg/testing/builder"
 	testingutils "github.com/openshift/multiarch-tuning-operator/pkg/testing/framework"
 	//+kubebuilder:scaffold:imports
 )
@@ -83,6 +88,24 @@ var _ = SynchronizedBeforeSuite(func() []byte {
 	startTestEnv()
 	testingutils.EnsureNamespaces(ctx, k8sClient, testNamespace)
 	runManager()
+	By("Creating the ClusterPodPlacementConfig")
+	err := k8sClient.Create(ctx, builder.NewClusterPodPlacementConfig().
+		WithName(common.SingletonResourceObjectName).
+		WithPlugins().
+		WithNodeAffinityScoring(true).
+		WithNodeAffinityScoringTerm(utils.ArchitectureArm64, 50).
+		Build())
+	Expect(err).NotTo(HaveOccurred(), "failed to create ClusterPodPlacementConfig")
+
+	By("Checking initialization of the cache with the ClusterPodPlacementConfig")
+	cppc := &v1beta1.ClusterPodPlacementConfig{}
+	err = k8sClient.Get(ctx, client.ObjectKey{Name: common.SingletonResourceObjectName}, cppc)
+	Expect(err).NotTo(HaveOccurred(), "failed to get ClusterPodPlacementConfig")
+
+	// Wait for the informer to update by polling
+	By("Waiting for the cache to reflect the ClusterPodPlacementConfig")
+	Eventually(clusterpodplacementconfig.GetClusterPodPlacementConfig).
+		Should(Equal(cppc), "cache did not update with ClusterPodPlacementConfig")
 	kc := testingutils.FromEnvTestConfig(cfg)
 	data, err := json.Marshal(kc)
 	Expect(err).NotTo(HaveOccurred(), "failed to marshal sharedData")
@@ -109,11 +132,18 @@ var _ = SynchronizedBeforeSuite(func() []byte {
 })
 
 var _ = SynchronizedAfterSuite(func() {}, func() {
+	By("Deleting the ClusterPodPlacementConfig")
+	err := k8sClient.Delete(ctx, builder.NewClusterPodPlacementConfig().WithName(common.SingletonResourceObjectName).Build())
+	Expect(err).NotTo(HaveOccurred(), "failed to delete ClusterPodPlacementConfig", err)
+	Eventually(testingutils.ValidateDeletion(k8sClient, ctx)).Should(Succeed(), "the ClusterPodPlacementConfig should be deleted")
+	By("Checking the cache is empty")
+	Expect(clusterpodplacementconfig.GetClusterPodPlacementConfig()).To(BeNil())
+
 	By("tearing down the test environment")
 	stopMgr()
 	// wait for the manager to stop. FIXME: this is a hack, not sure what is the right way to do it.
 	time.Sleep(5 * time.Second)
-	err := testEnv.Stop()
+	err = testEnv.Stop()
 	Expect(err).NotTo(HaveOccurred())
 })
 
@@ -157,12 +187,23 @@ func runManager() {
 
 	suiteLog.Info("Manager created")
 
-	By("Setting up PodPlacement controller")
+	By("Setting up podplacementconfig validating webhook")
 	mgr.GetWebhookServer().Register("/validate-multiarch-openshift-io-v1beta1-podplacementconfig", &webhook.Admission{
 		Handler: NewPodPlacementConfigWebhook(mgr.GetAPIReader(), mgr.GetScheme())})
 
 	err = mgr.AddReadyzCheck("readyz", healthz.Ping)
 	Expect(err).NotTo(HaveOccurred())
+
+	err = v1alpha1.AddToScheme(scheme.Scheme)
+	Expect(err).NotTo(HaveOccurred())
+	err = v1beta1.AddToScheme(scheme.Scheme)
+	Expect(err).NotTo(HaveOccurred())
+
+	By("Setting up Cluster Podplacement Config informer")
+	err = mgr.Add(clusterpodplacementconfig.NewCPPCSyncer(mgr))
+	Expect(err).NotTo(HaveOccurred())
+	By("Checking the cache is empty")
+	Expect(clusterpodplacementconfig.GetClusterPodPlacementConfig()).To(BeNil())
 
 	By("Starting the manager")
 	go func() {
