@@ -7,7 +7,9 @@ import (
 	"sync"
 
 	admissionv1 "k8s.io/api/admission/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
@@ -37,6 +39,23 @@ func (w *PodPlacementConfigWebhook) Handle(ctx context.Context, req admission.Re
 		if err := w.decoder.Decode(req, newPPC); err != nil {
 			return admission.Errored(http.StatusBadRequest,
 				fmt.Errorf("failed to decode new PodPlacementConfig: %w", err))
+		}
+
+		// Check if ClusterPodPlacementConfig exists. If it doesn't, deny creation of namespaced PodPlacementConfig.
+		CPPC := &multiarchv1beta1.ClusterPodPlacementConfig{}
+		err := w.apiReader.Get(ctx, types.NamespacedName{Name: common.SingletonResourceObjectName}, CPPC)
+		if err != nil {
+			if apierrors.IsNotFound(err) {
+				// ClusterPodPlacementConfig does not exist, deny creation
+				return admission.Errored(
+					http.StatusBadRequest,
+					fmt.Errorf("ClusterPodPlacementConfig does not exist: you must create a ClusterPodPlacementConfig before creating a namespaced PodPlacementConfig"),
+				)
+			}
+			return admission.Errored(
+				http.StatusInternalServerError,
+				fmt.Errorf("failed to check ClusterPodPlacementConfig: %w", err),
+			)
 		}
 
 		// Check for duplicate architectures in NodeAffinityScoring
