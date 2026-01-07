@@ -1,5 +1,6 @@
 # TODO: delete this Dockerfile when https://issues.redhat.com/browse/KONFLUX-2361
 FROM brew.registry.redhat.io/rh-osbs/openshift-golang-builder:rhel_9_1.23 as builder
+ARG TARGETOS
 ARG TARGETARCH
 ENV GOEXPERIMENT=strictfipsruntime
 
@@ -26,7 +27,7 @@ COPY pkg/ pkg/
 RUN CGO_ENABLED=1 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -o manager cmd/main.go
 RUN CGO_ENABLED=1 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -o enoexec-daemon cmd/enoexec-daemon/main.go
 
-FROM registry.redhat.io/rhel9-2-els/rhel:9.2
+FROM registry.redhat.io/ubi9/ubi-minimal:latest
 WORKDIR /
 COPY --from=builder /workspace/manager .
 COPY --from=builder /workspace/enoexec-daemon .

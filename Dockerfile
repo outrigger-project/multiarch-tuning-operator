@@ -1,5 +1,6 @@
-ARG RUNTIME_IMAGE=quay.io/centos/centos:stream9-minimal
-FROM golang:1.23 as builder
+ARG BUILD_IMAGE=golang:1.23
+ARG RUNTIME_IMAGE=registry.access.redhat.com/ubi9/ubi-minimal:latest
+FROM ${BUILD_IMAGE} as builder
 ARG TARGETOS
 ARG TARGETARCH
 
@@ -13,7 +14,6 @@ COPY go.sum go.sum
 # cache deps before building and copying source so that we don't need to re-download as much
 # and so that source changes don't invalidate our downloaded layer
 COPY vendor/ vendor/
-RUN go mod download
 
 # Copy the go source
 COPY cmd/ cmd/
@@ -29,13 +29,17 @@ COPY pkg/ pkg/
 RUN CGO_ENABLED=1 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -o manager cmd/main.go
 RUN CGO_ENABLED=1 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -o enoexec-daemon cmd/enoexec-daemon/main.go
 
-# Use distroless as minimal base image to package the manager binary
-# Refer to https://github.com/GoogleContainerTools/distroless for more details
-FROM ${RUNTIME_IMAGE}
 
+# Use UBI minimal as base image to package the manager binary
+FROM ${RUNTIME_IMAGE}
+WORKDIR /
+COPY --from=builder /workspace/manager .
+COPY --from=builder /workspace/enoexec-daemon .
+
+USER 65532:65532
 LABEL com.redhat.component="Multiarch Tuning Operator"
 LABEL distribution-scope="public"
-LABEL name="multiarch-tuning/multiarch-tuning-operator-bundle"
+LABEL name="multiarch-tuning/multiarch-tuning-operator"
 LABEL release="1.2.1"
 LABEL version="1.2.1"
 LABEL cpe="cpe:/a:redhat:multiarch_tuning_operator:1.1::el9"
@@ -47,15 +51,11 @@ LABEL description="The Multiarch Tuning Operator enhances the user experience fo
 LABEL io.k8s.description="The Multiarch Tuning Operator enhances the user experience for administrators of Openshift \
                    clusters with multi-architecture compute nodes or Site Reliability Engineers willing to \
                    migrate from single-arch to multi-arch OpenShift"
+
 LABEL summary="The Multiarch Tuning Operator enhances the user experience for administrators of Openshift \
                    clusters with multi-architecture compute nodes or Site Reliability Engineers willing to \
                    migrate from single-arch to multi-arch OpenShift"
 LABEL io.k8s.display-name="Multiarch Tuning Operator"
 LABEL io.openshift.tags="openshift,operator,multiarch,scheduling"
-
-WORKDIR /
-COPY --from=builder /workspace/manager .
-COPY --from=builder /workspace/enoexec-daemon .
-USER 65532:65532
 
 ENTRYPOINT ["/manager"]
