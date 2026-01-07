@@ -648,8 +648,16 @@ var _ = Describe("Internal/Controller/Podplacement/PodReconciler", func() {
 						"scheduling gate annotation not found")
 					g.Expect(pod.Labels).To(HaveKeyWithValue(utils.PreferredNodeAffinityLabel, utils.NodeAffinityLabelValueSet),
 						"preferred node affinity label not found")
-					g.Expect(pod.Labels).To(HaveKeyWithValue(utils.PreferredNodeAffinitySourceLabel, utils.LabelValueSetWithDuplicates),
-						"should override cppc config")
+					// Verify annotation tracks all sources
+					g.Expect(pod.Annotations).To(HaveKey(utils.PreferredNodeAffinitySourcesAnnotation),
+						"should have affinity sources annotation")
+					annotation := pod.Annotations[utils.PreferredNodeAffinitySourcesAnnotation]
+					g.Expect(annotation).To(ContainSubstring("amd64:50 from PodPlacementConfig-test-ppc1 (applied)"),
+						"should show PPC1 applied amd64")
+					g.Expect(annotation).To(ContainSubstring("arm64:10 from PodPlacementConfig-test-ppc2 (applied)"),
+						"should show PPC2 applied arm64")
+					g.Expect(annotation).To(ContainSubstring("arm64:50 from ClusterPodPlacementConfig (skipped)"),
+						"should show CPPC skipped arm64 since PPC2 already set it")
 					g.Expect(pod.Labels).To(HaveKeyWithValue(utils.NodeAffinityLabel, utils.NodeAffinityLabelValueSet),
 						"node affinity label not found")
 				}).Should(Succeed(), "failed to remove scheduling gate from pod")
@@ -707,8 +715,20 @@ var _ = Describe("Internal/Controller/Podplacement/PodReconciler", func() {
 						"scheduling gate annotation not found")
 					g.Expect(pod.Labels).To(HaveKeyWithValue(utils.PreferredNodeAffinityLabel, utils.NodeAffinityLabelValueSet),
 						"preferred node affinity label not found")
-					g.Expect(pod.Labels).NotTo(HaveKeyWithValue(utils.PreferredNodeAffinitySourceLabel, utils.LabelValueSetWithDuplicates),
-						"should not override cppc config")
+					// Verify annotation shows all architectures applied cleanly (no conflicts)
+					g.Expect(pod.Annotations).To(HaveKey(utils.PreferredNodeAffinitySourcesAnnotation),
+						"should have affinity sources annotation")
+					annotation := pod.Annotations[utils.PreferredNodeAffinitySourcesAnnotation]
+					g.Expect(annotation).To(ContainSubstring("amd64:100 from PodPlacementConfig-test-ppc1 (applied)"),
+						"should show PPC applied amd64")
+					g.Expect(annotation).To(ContainSubstring("ppc64le:10 from PodPlacementConfig-test-ppc1 (applied)"),
+						"should show PPC applied ppc64le")
+					g.Expect(annotation).To(ContainSubstring("s390x:50 from PodPlacementConfig-test-ppc1 (applied)"),
+						"should show PPC applied s390x")
+					g.Expect(annotation).To(ContainSubstring("arm64:50 from ClusterPodPlacementConfig (applied)"),
+						"should show CPPC applied arm64")
+					g.Expect(annotation).NotTo(ContainSubstring("skipped"),
+						"should have no skipped entries - all applied cleanly")
 					g.Expect(pod.Labels).To(HaveKeyWithValue(utils.NodeAffinityLabel, utils.NodeAffinityLabelValueSet),
 						"node affinity label not found")
 				}).Should(Succeed(), "failed to remove scheduling gate from pod")
@@ -774,8 +794,6 @@ var _ = Describe("Internal/Controller/Podplacement/PodReconciler", func() {
 						"scheduling gate annotation not found")
 					g.Expect(pod.Labels).To(HaveKeyWithValue(utils.PreferredNodeAffinityLabel, utils.NodeAffinityLabelValueSet),
 						"preferred node affinity label not found")
-					g.Expect(pod.Labels).To(HaveKeyWithValue(utils.PreferredNodeAffinitySourceLabel, utils.LabelValueSetWithDuplicates),
-						"should override other ppc config")
 					g.Expect(pod.Labels).To(HaveKeyWithValue(utils.NodeAffinityLabel, utils.NodeAffinityLabelValueSet),
 						"node affinity label not found")
 				}).Should(Succeed(), "failed to remove scheduling gate from pod")
@@ -851,8 +869,6 @@ var _ = Describe("Internal/Controller/Podplacement/PodReconciler", func() {
 						"scheduling gate annotation not found")
 					g.Expect(pod.Labels).To(HaveKeyWithValue(utils.PreferredNodeAffinityLabel, utils.NodeAffinityLabelValueSet),
 						"preferred node affinity label not found")
-					g.Expect(pod.Labels).To(HaveKeyWithValue(utils.PreferredNodeAffinitySourceLabel, utils.LabelValueSetWithDuplicates),
-						"should not override user config")
 					g.Expect(pod.Labels).To(HaveKeyWithValue(utils.NodeAffinityLabel, utils.NodeAffinityLabelValueSet),
 						"node affinity label not found")
 				}).Should(Succeed(), "failed to remove scheduling gate from pod")
@@ -928,8 +944,6 @@ var _ = Describe("Internal/Controller/Podplacement/PodReconciler", func() {
 						"scheduling gate annotation not found")
 					g.Expect(pod.Labels).To(HaveKeyWithValue(utils.PreferredNodeAffinityLabel, utils.NodeAffinityLabelValueSet),
 						"preferred node affinity label not found")
-					g.Expect(pod.Labels).To(HaveKeyWithValue(utils.PreferredNodeAffinitySourceLabel, utils.LabelValueSetWithDuplicates),
-						"should have has-duplicates label since low-priority PPC's arm64 was skipped")
 					g.Expect(pod.Labels).To(HaveKeyWithValue(utils.NodeAffinityLabel, utils.NodeAffinityLabelValueSet),
 						"node affinity label not found")
 				}).Should(Succeed(), "failed to remove scheduling gate from pod")
@@ -1007,8 +1021,6 @@ var _ = Describe("Internal/Controller/Podplacement/PodReconciler", func() {
 						"scheduling gate annotation not found")
 					g.Expect(pod.Labels).To(HaveKeyWithValue(utils.PreferredNodeAffinityLabel, utils.NodeAffinityLabelValueSet),
 						"preferred node affinity label not found")
-					g.Expect(pod.Labels).To(HaveKeyWithValue(utils.PreferredNodeAffinitySourceLabel, utils.LabelValueSetWithDuplicates),
-						"should have has-duplicates label since PPC's ppc64le conflicts with user's ppc64le")
 					g.Expect(pod.Labels).To(HaveKeyWithValue(utils.NodeAffinityLabel, utils.NodeAffinityLabelValueSet),
 						"node affinity label not found")
 				}).Should(Succeed(), "failed to remove scheduling gate from pod")
@@ -1070,8 +1082,6 @@ var _ = Describe("Internal/Controller/Podplacement/PodReconciler", func() {
 						"scheduling gate annotation not found")
 					g.Expect(pod.Labels).To(HaveKeyWithValue(utils.PreferredNodeAffinityLabel, utils.LabelValueNotSet),
 						"preferred node affinity label not found")
-					g.Expect(pod.Labels).To(HaveKeyWithValue(utils.PreferredNodeAffinitySourceLabel, utils.LabelValueSetWithDuplicates),
-						"should have has-duplicates label since CPPC's arm64 conflicts with user's arm64")
 					g.Expect(pod.Labels).To(HaveKeyWithValue(utils.NodeAffinityLabel, utils.NodeAffinityLabelValueSet),
 						"node affinity label not found")
 				}).Should(Succeed(), "failed to remove scheduling gate from pod")
@@ -1153,8 +1163,6 @@ var _ = Describe("Internal/Controller/Podplacement/PodReconciler", func() {
 						"scheduling gate annotation not found")
 					g.Expect(pod.Labels).To(HaveKeyWithValue(utils.PreferredNodeAffinityLabel, utils.NodeAffinityLabelValueSet),
 						"preferred node affinity label not found")
-					g.Expect(pod.Labels).To(HaveKeyWithValue(utils.PreferredNodeAffinitySourceLabel, utils.LabelValueSetWithDuplicates),
-						"should have has-duplicates label due to cascading conflicts")
 					g.Expect(pod.Labels).To(HaveKeyWithValue(utils.NodeAffinityLabel, utils.NodeAffinityLabelValueSet),
 						"node affinity label not found")
 				}).Should(Succeed(), "failed to remove scheduling gate from pod")
@@ -1235,8 +1243,6 @@ var _ = Describe("Internal/Controller/Podplacement/PodReconciler", func() {
 						"scheduling gate annotation not found")
 					g.Expect(matchingPod.Labels).To(HaveKeyWithValue(utils.PreferredNodeAffinityLabel, utils.NodeAffinityLabelValueSet),
 						"preferred node affinity label not found")
-					g.Expect(matchingPod.Labels).NotTo(HaveKeyWithValue(utils.PreferredNodeAffinitySourceLabel, utils.LabelValueSetWithDuplicates),
-						"should not override user config")
 					g.Expect(matchingPod.Labels).To(HaveKeyWithValue(utils.NodeAffinityLabel, utils.NodeAffinityLabelValueSet),
 						"node affinity label not found")
 				}).Should(Succeed())
@@ -1254,8 +1260,6 @@ var _ = Describe("Internal/Controller/Podplacement/PodReconciler", func() {
 						"scheduling gate annotation not found")
 					g.Expect(nonMatchingPod.Labels).To(HaveKeyWithValue(utils.PreferredNodeAffinityLabel, utils.NodeAffinityLabelValueSet),
 						"preferred node affinity label not found")
-					g.Expect(nonMatchingPod.Labels).NotTo(HaveKeyWithValue(utils.PreferredNodeAffinitySourceLabel, utils.LabelValueSetWithDuplicates),
-						"should not override user config")
 					g.Expect(nonMatchingPod.Labels).To(HaveKeyWithValue(utils.NodeAffinityLabel, utils.NodeAffinityLabelValueSet),
 						"node affinity label not found")
 				}).Should(Succeed())
@@ -1307,8 +1311,6 @@ var _ = Describe("Internal/Controller/Podplacement/PodReconciler", func() {
 						"scheduling gate annotation not found")
 					g.Expect(pod.Labels).To(HaveKeyWithValue(utils.PreferredNodeAffinityLabel, utils.NodeAffinityLabelValueSet),
 						"preferred node affinity label not found")
-					g.Expect(pod.Labels).NotTo(HaveKeyWithValue(utils.PreferredNodeAffinitySourceLabel, utils.LabelValueSetWithDuplicates),
-						"should not override user config")
 					g.Expect(pod.Labels).To(HaveKeyWithValue(utils.NodeAffinityLabel, utils.NodeAffinityLabelValueSet),
 						"node affinity label not found")
 				}).Should(Succeed())

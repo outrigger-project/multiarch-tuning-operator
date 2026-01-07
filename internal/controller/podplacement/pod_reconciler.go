@@ -145,16 +145,11 @@ func (r *PodReconciler) processPod(ctx context.Context, pod *Pod) {
 	}
 	// If the pod has been processed successfully or the max retries have been reached, remove the scheduling gate.
 	if err == nil || pod.maxRetries() {
+		// If no preferred node affinity was set by any config, log and publish an event
 		if pod.Labels[utils.PreferredNodeAffinityLabel] == utils.LabelValueNotSet {
-			if pod.Labels[utils.PreferredNodeAffinitySourceLabel] == utils.LabelValueSetWithDuplicates {
-				pod.PublishEvent(corev1.EventTypeNormal, ArchitectureAwareNodeAffinitySet,
-					ArchitecturePreferredAffinityAllDuplicatesMsg)
-				log.V(2).Info("All provided preferred node affinity was already set.")
-			} else {
-				pod.PublishEvent(corev1.EventTypeNormal, ArchitectureAwareNodeAffinitySet,
-					ArchitecturePreferredPredicateSkippedMsg)
-				log.V(2).Info("No preferred node affinity was set")
-			}
+			pod.PublishEvent(corev1.EventTypeNormal, ArchitectureAwareNodeAffinitySet,
+				ArchitecturePreferredPredicateSkippedMsg)
+			log.V(2).Info("No preferred node affinity was set")
 		}
 
 		log.V(1).Info("Removing the scheduling gate from pod.")

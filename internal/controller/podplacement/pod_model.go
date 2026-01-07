@@ -201,8 +201,12 @@ func (pod *Pod) SetPreferredArchNodeAffinity(nodeAffinity *plugins.NodeAffinityS
 			}
 			preferredSchedulingTerms = append(preferredSchedulingTerms, preferredSchedulingTerm)
 			seenArchitectures[nodeAffinityScoringPlatformTerm.Architecture] = true
+			// Track that this architecture was applied from this source
+			pod.trackAffinitySource(nodeAffinityScoringPlatformTerm.Architecture, nodeAffinityScoringPlatformTerm.Weight, configSource, true)
 		} else {
 			skippedArchitectures = append(skippedArchitectures, nodeAffinityScoringPlatformTerm.Architecture)
+			// Track that this architecture was skipped from this source
+			pod.trackAffinitySource(nodeAffinityScoringPlatformTerm.Architecture, nodeAffinityScoringPlatformTerm.Weight, configSource, false)
 			log.Info("Preferred affinity for pod is already set", "Architecture", nodeAffinityScoringPlatformTerm.Architecture, "Weight", nodeAffinityScoringPlatformTerm.Weight, "Pod.Name", pod.Name, "Pod.Namespace", pod.Namespace, "ConfigSource", configSource)
 		}
 	}
@@ -220,13 +224,11 @@ func (pod *Pod) SetPreferredArchNodeAffinity(nodeAffinity *plugins.NodeAffinityS
 
 	// Case 2: Some architectures were added, but some were skipped due to duplicates
 	case preferredSchedulingTerms != nil && skippedArchitectures != nil:
-		pod.EnsureLabel(utils.PreferredNodeAffinitySourceLabel, utils.LabelValueSetWithDuplicates)
 		pod.PublishEvent(corev1.EventTypeNormal, ArchitectureAwareNodeAffinitySet, fmt.Sprintf("%s source: %s, skipped: %s", ArchitecturePreferredAffinityWithDuplicatesMsg, configSource, strings.Join(skippedArchitectures, ", ")))
 		log.V(2).Info("Applied some architecture preferences from configuration", "ConfigSource", configSource, "SkippedArchitectures", skippedArchitectures)
 
 	// Case 3: All architectures from this config were already set
 	case preferredSchedulingTerms == nil && skippedArchitectures != nil:
-		pod.EnsureLabel(utils.PreferredNodeAffinitySourceLabel, utils.LabelValueSetWithDuplicates)
 		pod.PublishEvent(corev1.EventTypeNormal, ArchitecturePreferredAffinityDuplicates, fmt.Sprintf("%s source: %s, architectures: %s", ArchitecturePreferredAffinityAllDuplicatesMsg, configSource, strings.Join(skippedArchitectures, ", ")))
 		log.V(2).Info("All architectures from configuration were already set", "ConfigSource", configSource, "SkippedArchitectures", skippedArchitectures)
 
@@ -254,6 +256,30 @@ func (pod *Pod) getExistingPreferredArchitectures() map[string]bool {
 		}
 	}
 	return seen
+}
+
+// trackAffinitySource tracks which config sources attempted to set affinity for which architectures.
+// This information is later used to build the annotation showing the full audit trail.
+func (pod *Pod) trackAffinitySource(arch string, weight int32, source string, applied bool) {
+	// Get existing annotation or start fresh
+	existingAnnotation := ""
+	if pod.Annotations != nil {
+		existingAnnotation = pod.Annotations[utils.PreferredNodeAffinitySourcesAnnotation]
+	}
+
+	status := "applied"
+	if !applied {
+		status = "skipped"
+	}
+
+	newEntry := fmt.Sprintf("%s:%d from %s (%s)", arch, weight, source, status)
+
+	// Append to existing annotation
+	if existingAnnotation == "" {
+		pod.EnsureAnnotation(utils.PreferredNodeAffinitySourcesAnnotation, newEntry)
+	} else {
+		pod.EnsureAnnotation(utils.PreferredNodeAffinitySourcesAnnotation, existingAnnotation+"\n"+newEntry)
+	}
 }
 
 func (pod *Pod) getArchitecturePredicate(pullSecretDataList [][]byte) (corev1.NodeSelectorRequirement, error) {

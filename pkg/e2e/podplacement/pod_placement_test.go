@@ -11,6 +11,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	runtimeclient "sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/openshift/multiarch-tuning-operator/pkg/e2e"
 	. "github.com/openshift/multiarch-tuning-operator/pkg/testing/builder"
@@ -337,9 +338,23 @@ var _ = Describe("The Pod Placement Operand", func() {
 			By("Verify node affinity label are set correct")
 			Eventually(framework.VerifyPodLabelsAreSet(ctx, client, ns, "app", "test",
 				utils.NodeAffinityLabel, utils.NodeAffinityLabelValueSet,
-				utils.PreferredNodeAffinitySourceLabel, utils.LabelValueSetWithDuplicates,
 				utils.PreferredNodeAffinityLabel, utils.LabelValueNotSet,
 			), e2e.WaitShort).Should(Succeed())
+			By("Verify annotation shows CPPC preferences were skipped due to user conflict")
+			Eventually(func(g Gomega) {
+				pods := &corev1.PodList{}
+				err := client.List(ctx, pods, runtimeclient.InNamespace(ns.Name), runtimeclient.MatchingLabels{"app": "test"})
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(pods.Items).To(HaveLen(1))
+				pod := pods.Items[0]
+				g.Expect(pod.Annotations).To(HaveKey(utils.PreferredNodeAffinitySourcesAnnotation),
+					"should have affinity sources annotation")
+				annotation := pod.Annotations[utils.PreferredNodeAffinitySourcesAnnotation]
+				g.Expect(annotation).To(ContainSubstring("skipped"),
+					"should show CPPC preferences were skipped due to user-defined conflict")
+				g.Expect(annotation).To(ContainSubstring("ClusterPodPlacementConfig"),
+					"should mention CPPC as the source")
+			}, e2e.WaitShort).Should(Succeed())
 			By("The pod should have been set node affinity of arch info.")
 			Eventually(framework.VerifyPodNodeAffinity(ctx, client, ns, "app", "test", *expectedNSTs), e2e.WaitShort).Should(Succeed())
 			By("The pod should have the preferred affinities set in the ClusterPodPlacementConfig")
@@ -2012,7 +2027,6 @@ var _ = Describe("The Pod Placement Operand", func() {
 			Eventually(framework.VerifyPodLabelsAreSet(ctx, client, ns, "app", "test",
 				utils.SchedulingGateLabel, utils.SchedulingGateLabelValueRemoved,
 				utils.PreferredNodeAffinityLabel, utils.NodeAffinityLabelValueSet,
-				utils.PreferredNodeAffinitySourceLabel, utils.LabelValueSetWithDuplicates,
 				utils.NodeAffinityLabel, utils.NodeAffinityLabelValueSet,
 			), e2e.WaitShort).Should(Succeed())
 			By("Verifying the preferred node affinity terms are set correctly")
@@ -2080,9 +2094,7 @@ var _ = Describe("The Pod Placement Operand", func() {
 				utils.PreferredNodeAffinityLabel, utils.NodeAffinityLabelValueSet,
 				utils.NodeAffinityLabel, utils.NodeAffinityLabelValueSet,
 			), e2e.WaitShort).Should(Succeed())
-			Eventually(framework.VerifyPodLabelsAreSet(ctx, client, ns, "app", "backend",
-				utils.PreferredNodeAffinitySourceLabel, utils.LabelValueSetWithDuplicates,
-			), e2e.WaitShort).ShouldNot(Succeed())
+			Eventually(framework.VerifyPodLabelsAreSet(ctx, client, ns, "app", "backend"), e2e.WaitShort).ShouldNot(Succeed())
 			By("Verifying backend deployment pods get PPC ppc64le and CPPC arm64 preferences")
 			ppc64leTerm := NewPreferredSchedulingTerm().
 				WithArchitecture(utils.ArchitecturePpc64le).WithWeight(60).Build()
@@ -2098,9 +2110,7 @@ var _ = Describe("The Pod Placement Operand", func() {
 				utils.PreferredNodeAffinityLabel, utils.NodeAffinityLabelValueSet,
 				utils.NodeAffinityLabel, utils.NodeAffinityLabelValueSet,
 			), e2e.WaitShort).Should(Succeed())
-			Eventually(framework.VerifyPodLabelsAreSet(ctx, client, ns, "app", "backend",
-				utils.PreferredNodeAffinitySourceLabel, utils.LabelValueSetWithDuplicates,
-			), e2e.WaitShort).ShouldNot(Succeed())
+			Eventually(framework.VerifyPodLabelsAreSet(ctx, client, ns, "app", "backend"), e2e.WaitShort).ShouldNot(Succeed())
 			By("Verifying frontend deployment pods get only CPPC amd64 preferences")
 			frontendAmd64Term := NewPreferredSchedulingTerm().
 				WithArchitecture(utils.ArchitectureAmd64).WithWeight(50).
@@ -2150,7 +2160,6 @@ var _ = Describe("The Pod Placement Operand", func() {
 			Eventually(framework.VerifyPodLabelsAreSet(ctx, client, ns, "app", "test",
 				utils.SchedulingGateLabel, utils.SchedulingGateLabelValueRemoved,
 				utils.PreferredNodeAffinityLabel, utils.NodeAffinityLabelValueSet,
-				utils.PreferredNodeAffinitySourceLabel, utils.LabelValueSetWithDuplicates,
 				utils.NodeAffinityLabel, utils.NodeAffinityLabelValueSet,
 			), e2e.WaitShort).Should(Succeed())
 			By("Verifying affinity includes both PPCs where applicable")
@@ -2215,7 +2224,6 @@ var _ = Describe("The Pod Placement Operand", func() {
 			Eventually(framework.VerifyPodLabelsAreSet(ctx, client, ns, "app", "test",
 				utils.NodeAffinityLabel, utils.NodeAffinityLabelValueSet,
 				utils.PreferredNodeAffinityLabel, utils.NodeAffinityLabelValueSet,
-				utils.PreferredNodeAffinitySourceLabel, utils.LabelValueSetWithDuplicates,
 			), e2e.WaitShort).Should(Succeed())
 			By("The pod should have been set node affinity of arch info.")
 			Eventually(framework.VerifyPodNodeAffinity(ctx, client, ns, "app", "test", *expectedNSTs), e2e.WaitShort).Should(Succeed())
@@ -2273,7 +2281,6 @@ var _ = Describe("The Pod Placement Operand", func() {
 			Eventually(framework.VerifyPodLabelsAreSet(ctx, client, ns, "app", "test",
 				utils.SchedulingGateLabel, utils.SchedulingGateLabelValueRemoved,
 				utils.PreferredNodeAffinityLabel, utils.NodeAffinityLabelValueSet,
-				utils.PreferredNodeAffinitySourceLabel, utils.LabelValueSetWithDuplicates,
 				utils.NodeAffinityLabel, utils.NodeAffinityLabelValueSet,
 			), e2e.WaitShort).Should(Succeed())
 			By("Verifying affinity includes both PPCs where applicable")
@@ -2341,7 +2348,6 @@ var _ = Describe("The Pod Placement Operand", func() {
 			Eventually(framework.VerifyPodLabelsAreSet(ctx, client, ns, "app", "test",
 				utils.NodeAffinityLabel, utils.NodeAffinityLabelValueSet,
 				utils.PreferredNodeAffinityLabel, utils.LabelValueNotSet,
-				utils.PreferredNodeAffinitySourceLabel, utils.LabelValueSetWithDuplicates,
 			), e2e.WaitShort).Should(Succeed())
 			By("The pod should have been set node affinity of arch info.")
 			Eventually(framework.VerifyPodNodeAffinity(ctx, client, ns, "app", "test", *expectedNSTs), e2e.WaitShort).Should(Succeed())
