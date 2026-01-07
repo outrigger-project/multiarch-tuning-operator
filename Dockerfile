@@ -1,9 +1,14 @@
-ARG BUILD_IMAGE=golang:1.25
+ARG BUILD_IMAGE=registry.access.redhat.com/ubi9/go-toolset:1.25
 ARG RUNTIME_IMAGE=registry.access.redhat.com/ubi9/ubi-minimal:latest
 FROM ${BUILD_IMAGE} as builder
 ARG TARGETOS
 ARG TARGETARCH
 
+# Switch to root to install gpgme-devel, which is required for CGO compilation of the
+# containers/image library used for registry authentication and image inspection.
+# This only affects the builder stage (used during compilation) and does not impact the
+# security of the final runtime image, which runs as USER 65532:65532 (non-root).
+USER 0
 RUN if which apt-get; then apt-get update && apt-get install -y libgpgme-dev && apt-get -y clean autoclean; \
     elif which dnf; then dnf install -y gpgme-devel && dnf clean all -y; fi;
 
