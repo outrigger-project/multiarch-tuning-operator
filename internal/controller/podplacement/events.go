@@ -11,6 +11,7 @@ const (
 	ArchitectureAwareSchedulingGateRemovalFailure = "ArchAwareSchedGateRemovalFailed"
 	ArchitectureAwareSchedulingGateRemovalSuccess = "ArchAwareSchedGateRemovalSuccess"
 	NoSupportedArchitecturesFound                 = "NoSupportedArchitecturesFound"
+	ArchitectureAwareFallbackNodeAffinitySet      = "ArchAwareFallbackPredicateSet"
 
 	SchedulingGateAddedMsg                   = "Successfully gated with the " + utils.SchedulingGateName + " scheduling gate"
 	SchedulingGateRemovalSuccessMsg          = "Successfully removed the " + utils.SchedulingGateName + " scheduling gate"
@@ -23,4 +24,5 @@ const (
 	NoSupportedArchitecturesFoundMsg         = "Pod cannot be scheduled due to incompatible image architectures; container images have no supported architectures in common"
 	ArchitectureAwareGatedPodIgnoredMsg      = "The gated pod has been modified and is no longer eligible for architecture-aware scheduling"
 	ImageInspectionErrorMaxRetriesMsg        = "Failed to retrieve the supported architectures after multiple retries"
+	ArchitectureFallbackSetupMsg             = "Image inspection failed; setting the nodeAffinity to the fallback architecture"
 )

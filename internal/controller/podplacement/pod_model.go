@@ -207,6 +207,33 @@ func (pod *Pod) SetPreferredArchNodeAffinity(cppc *v1beta1.ClusterPodPlacementCo
 	pod.PublishEvent(corev1.EventTypeNormal, ArchitectureAwareNodeAffinitySet, ArchitecturePreferredPredicateSetupMsg)
 }
 
+// SetNodeAffinityToFallbackArchitecture sets the node affinity for the pod to the fallback architecture.
+func (pod *Pod) SetNodeAffinityToFallbackArchitecture(architecture string) {
+	requirement := corev1.NodeSelectorRequirement{
+		Key:      utils.ArchLabel,
+		Operator: corev1.NodeSelectorOpIn,
+		Values:   []string{architecture},
+	}
+	pod.ensureArchitectureLabels(requirement)
+
+	if pod.Spec.Affinity == nil {
+		pod.Spec.Affinity = &corev1.Affinity{}
+	}
+
+	if pod.Spec.Affinity.NodeAffinity == nil {
+		pod.Spec.Affinity.NodeAffinity = &corev1.NodeAffinity{}
+	}
+
+	if pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution == nil {
+		pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution = &corev1.NodeSelector{}
+	}
+
+	pod.setRequiredArchNodeAffinity(requirement)
+	pod.EnsureLabel(utils.FallbackArchitectureLabel, architecture)
+	pod.PublishEvent(corev1.EventTypeWarning, ArchitectureAwareFallbackNodeAffinitySet,
+		ArchitectureFallbackSetupMsg+fmt.Sprintf(": %s", architecture))
+}
+
 func (pod *Pod) getArchitecturePredicate(pullSecretDataList [][]byte) (corev1.NodeSelectorRequirement, error) {
 	architectures, err := pod.intersectImagesArchitecture(pullSecretDataList)
 	// if an error occurs, we return an empty NodeSelectorRequirement and the error.
