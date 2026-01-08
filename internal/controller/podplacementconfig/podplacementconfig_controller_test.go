@@ -163,7 +163,7 @@ var _ = Describe("Internal/Controller/PodPlacementConfig/PodPlacementConfigRecon
 				)
 				Expect(err).To(HaveOccurred(), "the PodPlacementConfig should not be accepted", err)
 			})
-			It("when update a local ppc priority to an exsiting one", func() {
+			It("when update a local ppc priority to an existing one", func() {
 				By("Create an ephemeral namespace")
 				ns := framework.NewEphemeralNamespace()
 				err := k8sClient.Create(ctx, ns)
