@@ -824,7 +824,7 @@ var _ = Describe("The Multiarch Tuning Operator", Serial, func() {
 		})
 	})
 	Context("the webhook shoud deny local PodPlacementConfig creation", func() {
-		It("when the ClusterPodPlacementConfig doesn't exsit", func() {
+		It("when the ClusterPodPlacementConfig doesn't exist", func() {
 			By("Ensure the ClusterPodPlacementConfig doesn't exist")
 			cppc := &v1beta1.ClusterPodPlacementConfig{}
 			err := client.Get(ctx, runtimeclient.ObjectKey{Name: common.SingletonResourceObjectName}, cppc)
@@ -847,6 +847,49 @@ var _ = Describe("The Multiarch Tuning Operator", Serial, func() {
 					Build(),
 			)
 			Expect(err).To(HaveOccurred(), "the PodPlacementConfig should not be accepted", err)
+			//nolint:errcheck
+			defer client.Delete(ctx, NewPodPlacementConfig().WithName("test-ppc").WithNamespace(ns.Name).Build())
+		})
+	})
+	Context("when local PodPlacementConfigs exist", func() {
+		It("should deny deletion of ClusterPodPlacementConfig", func() {
+			By("Create ClusterPodPlacementConfig")
+			err := client.Create(ctx, NewClusterPodPlacementConfig().WithName(common.SingletonResourceObjectName).Build())
+			Expect(err).NotTo(HaveOccurred(), "failed to create ClusterPodPlacementConfig", err)
+			Eventually(framework.ValidateCreation(client, ctx)).Should(Succeed())
+			By("Create an ephemeral namespace")
+			ns := framework.NewEphemeralNamespace()
+			err = client.Create(ctx, ns)
+			Expect(err).NotTo(HaveOccurred())
+			//nolint:errcheck
+			defer client.Delete(ctx, ns)
+			By("Creating a local PodPlacementConfig")
+			err = client.Create(ctx,
+				NewPodPlacementConfig().
+					WithName("test-ppc").
+					WithNamespace(ns.Name).
+					WithPriority(50).
+					WithPlugins().
+					WithNodeAffinityScoring(true).
+					WithNodeAffinityScoringTerm(utils.ArchitectureAmd64, 50).
+					Build(),
+			)
+			Expect(err).NotTo(HaveOccurred(), "failed to create local PodPlacementConfig", err)
+			//nolint:errcheck
+			defer client.Delete(ctx, NewPodPlacementConfig().WithName("test-ppc").WithNamespace(ns.Name).Build())
+			By("Attempting to delete ClusterPodPlacementConfig")
+			err = client.Delete(ctx, NewClusterPodPlacementConfig().WithName(common.SingletonResourceObjectName).Build())
+			Expect(err).To(HaveOccurred(), "the ClusterPodPlacementConfig should not be able to deleted when local PodPlacementConfigs exist", err)
+			By("Deleting the local PodPlacementConfig")
+			err = client.Delete(ctx, NewPodPlacementConfig().
+				WithName("test-ppc").
+				WithNamespace(ns.Name).Build())
+			Expect(err).NotTo(HaveOccurred(), "failed to delete PodPlacementConfig")
+			By("Deleting ClusterPodPlacementConfig after local configs are removed")
+			err = client.Delete(ctx, NewClusterPodPlacementConfig().WithName(common.SingletonResourceObjectName).Build())
+			Expect(err).NotTo(HaveOccurred(), "failed to delete ClusterPodPlacementConfig", err)
+			Expect(runtimeclient.IgnoreNotFound(err)).NotTo(HaveOccurred())
+			Eventually(framework.ValidateDeletion(client, ctx)).Should(Succeed())
 		})
 	})
 })

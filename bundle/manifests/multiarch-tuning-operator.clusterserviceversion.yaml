@@ -517,6 +517,7 @@ spec:
       operations:
       - CREATE
       - UPDATE
+      - DELETE
       resources:
       - clusterpodplacementconfigs
     sideEffects: None
