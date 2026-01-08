@@ -270,10 +270,16 @@ extract_envtest_k8s_version() {
         return 1
     fi
 
-    local version
-    version=$(echo "$gomod" | grep 'k8s.io/api ' | awk '{print $2}')
+    # Get k8s.io/api version in Go module format (e.g., v0.34.1)
+    local k8s_module_version
+    k8s_module_version=$(echo "$gomod" | grep 'k8s.io/api ' | awk '{print $2}')
 
-    echo "✅ ENVTEST_K8S_VERSION=$version (from controller-runtime's k8s.io/api)" >&2
+    # Convert Go module version (v0.34.1) to Kubernetes version format (1.34.1)
+    # Go modules use v0.X.Y while Kubernetes uses 1.X.Y
+    local version
+    version=$(echo "$k8s_module_version" | sed -E 's/v0\./1./')
+
+    echo "✅ ENVTEST_K8S_VERSION=$version (from controller-runtime's k8s.io/api $k8s_module_version)" >&2
     echo "$version"
 }
 

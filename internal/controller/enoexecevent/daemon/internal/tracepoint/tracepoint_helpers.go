@@ -116,11 +116,19 @@ func (tp *Tracepoint) initializeOffsets() error {
 	var foundFlags uint8
 	for _, member := range taskStruct.Members {
 		if member.Name == "real_parent" {
-			realParentOffset = int32(member.Offset.Bytes())
+			offset := member.Offset.Bytes()
+			if offset > 0x7FFFFFFF {
+				return fmt.Errorf("real_parent offset too large: %d", offset)
+			}
+			realParentOffset = int32(offset)
 			foundFlags |= realParentFound
 		}
 		if member.Name == "tgid" {
-			tgidOffset = int32(member.Offset.Bytes())
+			offset := member.Offset.Bytes()
+			if offset > 0x7FFFFFFF {
+				return fmt.Errorf("tgid offset too large: %d", offset)
+			}
+			tgidOffset = int32(offset)
 			foundFlags |= tgidFound
 		}
 
