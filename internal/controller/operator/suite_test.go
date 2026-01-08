@@ -24,8 +24,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/openshift/multiarch-tuning-operator/pkg/e2e"
-
 	"sigs.k8s.io/kustomize/api/resmap"
 
 	v1 "k8s.io/api/admissionregistration/v1"
@@ -59,7 +57,9 @@ import (
 
 	"github.com/openshift/library-go/pkg/operator/events"
 
+	apiv1beta1 "github.com/openshift/multiarch-tuning-operator/api/v1beta1"
 	ppc "github.com/openshift/multiarch-tuning-operator/internal/controller/podplacementconfig"
+	"github.com/openshift/multiarch-tuning-operator/pkg/e2e"
 	testingutils "github.com/openshift/multiarch-tuning-operator/pkg/testing/framework"
 	"github.com/openshift/multiarch-tuning-operator/pkg/utils"
 	//+kubebuilder:scaffold:imports
@@ -137,7 +137,7 @@ func startTestEnv() {
 		CRDDirectoryPaths:     []string{filepath.Join("..", "..", "..", "config", "crd", "bases")},
 		ErrorIfCRDPathMissing: true,
 		WebhookInstallOptions: envtest.WebhookInstallOptions{
-			ValidatingWebhooks: []*v1.ValidatingWebhookConfiguration{getPodPlacementConfigValidatingWebHook()},
+			ValidatingWebhooks: []*v1.ValidatingWebhookConfiguration{getValidatingWebHook()},
 		},
 	}
 	var err error
@@ -237,6 +237,7 @@ func runManager() {
 		DynamicClient: dynamic.NewForConfigOrDie(cfg),
 		Recorder:      events.NewKubeRecorder(clientset.CoreV1().Events(utils.Namespace()), utils.OperatorName, ctrlref, clock.RealClock{}),
 	}).SetupWithManager(mgr)).NotTo(HaveOccurred())
+	Expect((&apiv1beta1.ClusterPodPlacementConfig{}).SetupWebhookWithManager(mgr)).NotTo(HaveOccurred())
 
 	By("Setting up podplacementconfig validating webhook")
 	mgr.GetWebhookServer().Register("/validate-multiarch-openshift-io-v1beta1-podplacementconfig", &webhook.Admission{
@@ -263,12 +264,39 @@ func runManager() {
 	suiteLog.Info("Manager is ready")
 }
 
-func getPodPlacementConfigValidatingWebHook() *v1.ValidatingWebhookConfiguration {
+func getValidatingWebHook() *v1.ValidatingWebhookConfiguration {
 	return &v1.ValidatingWebhookConfiguration{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "validating-webhook-configuration",
 		},
 		Webhooks: []v1.ValidatingWebhook{
+			{
+				Name:                    "validate-clusterpodplacementconfig.multiarch.openshift.io",
+				AdmissionReviewVersions: []string{"v1"},
+				ClientConfig: v1.WebhookClientConfig{
+					Service: &v1.ServiceReference{
+						Name:      "webhook-service",
+						Namespace: "system",
+						Path:      utils.NewPtr("/validate-multiarch-openshift-io-v1beta1-clusterpodplacementconfig"),
+					},
+				},
+				FailurePolicy: utils.NewPtr(v1.Fail),
+				SideEffects:   utils.NewPtr(v1.SideEffectClassNone),
+				Rules: []v1.RuleWithOperations{
+					{
+						Operations: []v1.OperationType{
+							v1.Create,
+							v1.Update,
+							v1.Delete,
+						},
+						Rule: v1.Rule{
+							APIGroups:   []string{"multiarch.openshift.io"},
+							APIVersions: []string{"v1beta1"},
+							Resources:   []string{"clusterpodplacementconfigs"},
+						},
+					},
+				},
+			},
 			{
 				Name:                    "validate-podplacementconfig.multiarch.openshift.io",
 				AdmissionReviewVersions: []string{"v1"},
