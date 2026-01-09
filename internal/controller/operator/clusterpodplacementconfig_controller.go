@@ -27,6 +27,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	errorutils "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
@@ -34,7 +35,9 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	ctrllog "sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/openshift/library-go/pkg/operator/events"
 
@@ -140,6 +143,31 @@ func (r *ClusterPodPlacementConfigReconciler) Reconcile(ctx context.Context, req
 		}
 		return ctrl.Result{Requeue: true}, nil
 	}
+
+	// Handle the no-pod-placement-config finalizer
+	ppcList := &multiarchv1beta1.PodPlacementConfigList{}
+	if err := r.List(ctx, ppcList); err != nil {
+		log.Error(err, "Unable to list PodPlacementConfigs")
+		return ctrl.Result{}, err
+	}
+	if len(ppcList.Items) > 0 && !controllerutil.ContainsFinalizer(clusterPodPlacementConfig, utils.CPPCNoPPCObjectFinalizer) {
+		log.V(1).Info("Adding no-pod-placement-config finalizer to the ClusterPodPlacementConfig")
+		controllerutil.AddFinalizer(clusterPodPlacementConfig, utils.CPPCNoPPCObjectFinalizer)
+		if err := r.Update(ctx, clusterPodPlacementConfig); err != nil {
+			log.Error(err, "Unable to update finalizers in the ClusterPodPlacementConfig")
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{Requeue: true}, nil
+	} else if len(ppcList.Items) == 0 && controllerutil.ContainsFinalizer(clusterPodPlacementConfig, utils.CPPCNoPPCObjectFinalizer) {
+		log.V(1).Info("Removing no-pod-placement-config finalizer from the ClusterPodPlacementConfig")
+		controllerutil.RemoveFinalizer(clusterPodPlacementConfig, utils.CPPCNoPPCObjectFinalizer)
+		if err := r.Update(ctx, clusterPodPlacementConfig); err != nil {
+			log.Error(err, "Unable to remove finalizers from the ClusterPodPlacementConfig")
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{Requeue: true}, nil
+	}
+
 	if clusterPodPlacementConfig.PluginsEnabled(common.ExecFormatErrorMonitorPluginName) {
 		if !controllerutil.ContainsFinalizer(clusterPodPlacementConfig, utils.ExecFormatErrorFinalizerName) {
 			// Add the finalizer to the object
@@ -878,6 +906,19 @@ func isDeploymentUpToDate(deployment *appsv1.Deployment) bool {
 func (r *ClusterPodPlacementConfigReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	c := ctrl.NewControllerManagedBy(mgr).
 		For(&multiarchv1beta1.ClusterPodPlacementConfig{}).
+		// Watch PodPlacementConfig to reconcile ClusterPodPlacementConfig
+		Watches(
+			&multiarchv1beta1.PodPlacementConfig{},
+			handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, obj client.Object) []reconcile.Request {
+				return []reconcile.Request{
+					{
+						NamespacedName: types.NamespacedName{
+							Name: common.SingletonResourceObjectName,
+						},
+					},
+				}
+			}),
+		).
 		Owns(&appsv1.Deployment{}).
 		Owns(&appsv1.DaemonSet{}).
 		Owns(&corev1.Service{}).
