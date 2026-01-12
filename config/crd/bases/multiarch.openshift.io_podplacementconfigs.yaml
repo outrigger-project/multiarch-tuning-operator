@@ -1,0 +1,154 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.19.0
+  name: podplacementconfigs.multiarch.openshift.io
+spec:
+  group: multiarch.openshift.io
+  names:
+    kind: PodPlacementConfig
+    listKind: PodPlacementConfigList
+    plural: podplacementconfigs
+    singular: podplacementconfig
+  scope: Namespaced
+  versions:
+  - name: v1beta1
+    schema:
+      openAPIV3Schema:
+        description: PodPlacementConfig defines the configuration for the architecture
+          aware pod placement operand in a given namespace for a subset of its pods
+          based on the provided labelSelector.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: PodPlacementConfigSpec defines the desired state of PodPlacementConfig
+            properties:
+              labelSelector:
+                description: |-
+                  labelSelector selects the pods that the pod placement operand should process according to the other specs provided in the PodPlacementConfig object.
+                  of the pods. If left empty, all the pods are considered.
+                properties:
+                  matchExpressions:
+                    description: matchExpressions is a list of label selector requirements.
+                      The requirements are ANDed.
+                    items:
+                      description: |-
+                        A label selector requirement is a selector that contains values, a key, and an operator that
+                        relates the key and values.
+                      properties:
+                        key:
+                          description: key is the label key that the selector applies
+                            to.
+                          type: string
+                        operator:
+                          description: |-
+                            operator represents a key's relationship to a set of values.
+                            Valid operators are In, NotIn, Exists and DoesNotExist.
+                          type: string
+                        values:
+                          description: |-
+                            values is an array of string values. If the operator is In or NotIn,
+                            the values array must be non-empty. If the operator is Exists or DoesNotExist,
+                            the values array must be empty. This array is replaced during a strategic
+                            merge patch.
+                          items:
+                            type: string
+                          type: array
+                          x-kubernetes-list-type: atomic
+                      required:
+                      - key
+                      - operator
+                      type: object
+                    type: array
+                    x-kubernetes-list-type: atomic
+                  matchLabels:
+                    additionalProperties:
+                      type: string
+                    description: |-
+                      matchLabels is a map of {key,value} pairs. A single {key,value} in the matchLabels
+                      map is equivalent to an element of matchExpressions, whose key field is "key", the
+                      operator is "In", and the values array contains only "value". The requirements are ANDed.
+                    type: object
+                type: object
+                x-kubernetes-map-type: atomic
+              plugins:
+                description: |-
+                  Plugins defines the configurable plugins for this component.
+                  This field is optional and will be omitted from the output if not set.
+                properties:
+                  nodeAffinityScoring:
+                    description: NodeAffinityScoring is the plugin that implements
+                      the ScorePlugin interface.
+                    properties:
+                      enabled:
+                        description: Enabled indicates whether the plugin is enabled.
+                        type: boolean
+                      platforms:
+                        description: Platforms is a required field and must contain
+                          at least one entry.
+                        items:
+                          description: NodeAffinityScoringPlatformTerm holds configuration
+                            for specific platforms, with required fields validated.
+                          properties:
+                            architecture:
+                              description: Architecture must be a list of non-empty
+                                string of arch names.
+                              enum:
+                              - arm64
+                              - amd64
+                              - ppc64le
+                              - s390x
+                              type: string
+                            weight:
+                              description: |-
+                                weight associated with matching the corresponding NodeAffinityScoringPlatformTerm,
+                                in the range 1-100.
+                              format: int32
+                              maximum: 100
+                              minimum: 1
+                              type: integer
+                          required:
+                          - architecture
+                          - weight
+                          type: object
+                        minItems: 1
+                        type: array
+                    required:
+                    - enabled
+                    - platforms
+                    type: object
+                type: object
+              priority:
+                description: |-
+                  Priority defines the priority of the PodPlacementConfig and only accepts values in the range 0-255.
+                  This field is optional and will default to 0 if not set.
+                maximum: 255
+                minimum: 0
+                type: integer
+            type: object
+          status:
+            description: PodPlacementConfigStatus defines the observed state of PodPlacementConfig
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
