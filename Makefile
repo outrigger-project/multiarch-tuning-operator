@@ -71,18 +71,18 @@ IMG ?= registry.ci.openshift.org/origin/multiarch-tuning-operator:v1.x
 #### Tool Versions ####
 ### TODO: NOTE: Update these values to match the versions of the K8S API when pivoting to a new version of K8S.
 # https://github.com/kubernetes-sigs/kustomize/releases
-KUSTOMIZE_VERSION ?= v5.6.0
+KUSTOMIZE_VERSION ?= v5.8.0
 # https://github.com/kubernetes-sigs/controller-tools/releases
-CONTROLLER_TOOLS_VERSION ?= v0.17.2
+CONTROLLER_TOOLS_VERSION ?= v0.19.0
 # https://github.com/kubernetes-sigs/controller-runtime/branches
-SETUP_ENVTEST_VERSION ?= release-0.20
+SETUP_ENVTEST_VERSION ?= release-0.22
 # ENVTEST_K8S_VERSION refers to the version of kubebuilder assets to be downloaded by envtest binary.
-ENVTEST_K8S_VERSION = 1.32.0
+ENVTEST_K8S_VERSION = 1.34.1
 # https://github.com/golangci/golangci-lint/releases
-GOLINT_VERSION = v2.0.2
+GOLINT_VERSION = v2.7.2
 
 # TODO: We'd need an upstream builder image that includes gpgme-devel (libgpgme-dev)
-BUILD_IMAGE ?= registry.ci.openshift.org/ocp/builder:rhel-9-golang-1.23-openshift-4.19
+BUILD_IMAGE ?= registry.ci.openshift.org/ocp/builder:rhel-9-golang-1.25-openshift-4.21
 RUNTIME_IMAGE ?= registry.access.redhat.com/ubi9/ubi-minimal:latest
 
 NO_DOCKER ?= 0

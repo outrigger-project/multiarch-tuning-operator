@@ -12,7 +12,7 @@ spec:
           - name: source
             emptyDir: { }
         steps:
-          - image: brew.registry.redhat.io/rh-osbs/openshift-golang-builder:rhel_9_1.23
+          - image: brew.registry.redhat.io/rh-osbs/openshift-golang-builder:rhel_9_1.25
             env:
               - name: URL
                 valueFrom:
