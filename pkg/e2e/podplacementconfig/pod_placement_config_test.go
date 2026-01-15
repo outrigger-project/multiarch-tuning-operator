@@ -44,7 +44,7 @@ var _ = Describe("The Multiarch Tuning Operator", func() {
 			Expect(err).NotTo(HaveOccurred())
 			//nolint:errcheck
 			defer client.Delete(ctx, ns)
-			By("Creating a local PodPlacementConfig with a Prioriry setting")
+			By("Creating a local PodPlacementConfig with a Priority setting")
 			err = client.Create(ctx,
 				builder.NewPodPlacementConfig().
 					WithName("test-ppc").
@@ -68,7 +68,7 @@ var _ = Describe("The Multiarch Tuning Operator", func() {
 				g.Expect(err).NotTo(HaveOccurred(), "failed to get podplacementconfig", err)
 				g.Expect(ppc.Spec.Priority).To(Equal(uint8(50)), "the ppc Priority should equal 50")
 			}).Should(Succeed(), "the PodPlacementConfig should be created")
-			By("Creating another local PodPlacementConfig with the same Prioriry")
+			By("Creating another local PodPlacementConfig with the same Priority")
 			err = client.Create(ctx,
 				builder.NewPodPlacementConfig().
 					WithName("test-ppc-2").
