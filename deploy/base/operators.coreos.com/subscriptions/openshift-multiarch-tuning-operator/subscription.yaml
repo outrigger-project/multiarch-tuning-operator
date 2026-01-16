@@ -9,4 +9,4 @@ spec:
   source: multiarch-tuning-operator-catalog
   sourceNamespace: openshift-marketplace
   installPlanApproval: Automatic
-  startingCSV: multiarch-tuning-operator.v1.2.1
+  startingCSV: multiarch-tuning-operator.v1.2.2
