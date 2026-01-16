@@ -27,7 +27,7 @@ metadata:
     categories: OpenShift Optional, Other
     console.openshift.io/disable-operand-delete: "false"
     containerImage: registry.ci.openshift.org/origin/multiarch-tuning-operator:main
-    createdAt: "2025-12-22T08:28:44Z"
+    createdAt: "2026-01-16T03:19:24Z"
     features.operators.openshift.io/cnf: "false"
     features.operators.openshift.io/cni: "false"
     features.operators.openshift.io/csi: "false"
@@ -54,7 +54,7 @@ metadata:
     operatorframework.io/arch.arm64: supported
     operatorframework.io/arch.ppc64le: supported
     operatorframework.io/arch.s390x: supported
-  name: multiarch-tuning-operator.v1.2.1
+  name: multiarch-tuning-operator.v1.2.2
   namespace: openshift-multiarch-tuning-operator
 spec:
   apiservicedefinitions: {}
@@ -490,7 +490,7 @@ spec:
   provider:
     name: Red Hat
     url: https://github.com/openshift/multiarch-tuning-operator
-  version: 1.2.1
+  version: 1.2.2
   webhookdefinitions:
   - admissionReviewVersions:
     - v1
