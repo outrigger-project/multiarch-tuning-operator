@@ -31,7 +31,7 @@ metadata:
     operatorframework.io/arch.arm64: supported
     operatorframework.io/arch.ppc64le: supported
     operatorframework.io/arch.s390x: supported
-  name: multiarch-tuning-operator.v1.2.1
+  name: multiarch-tuning-operator.v1.2.2
   namespace: openshift-multiarch-tuning-operator
 spec:
   apiservicedefinitions: {}
@@ -102,4 +102,4 @@ spec:
   provider:
     name: Red Hat
     url: https://github.com/openshift/multiarch-tuning-operator
-  version: 1.2.1
+  version: 1.2.2
