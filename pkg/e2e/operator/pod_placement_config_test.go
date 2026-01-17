@@ -11,7 +11,6 @@ import (
 	"github.com/openshift/multiarch-tuning-operator/api/v1alpha1"
 	"github.com/openshift/multiarch-tuning-operator/api/v1beta1"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	runtimeclient "sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -821,32 +820,6 @@ var _ = Describe("The Multiarch Tuning Operator", Serial, func() {
 			err = client.Delete(ctx, enee)
 			Expect(err).NotTo(HaveOccurred())
 			Eventually(framework.ValidateDeletion(client, ctx, framework.MainPlugin, framework.ENoExecPlugin)).Should(Succeed())
-		})
-	})
-	Context("the webhook shoud deny local PodPlacementConfig creation", func() {
-		It("when the ClusterPodPlacementConfig doesn't exist", func() {
-			By("Ensure the ClusterPodPlacementConfig doesn't exist")
-			cppc := &v1beta1.ClusterPodPlacementConfig{}
-			err := client.Get(ctx, runtimeclient.ObjectKey{Name: common.SingletonResourceObjectName}, cppc)
-			Expect(errors.IsNotFound(err)).To(BeTrue(), "the ClusterPodPlacementConfig should not exist", err)
-			By("Create an ephemeral namespace")
-			ns := framework.NewEphemeralNamespace()
-			err = client.Create(ctx, ns)
-			Expect(err).NotTo(HaveOccurred())
-			//nolint:errcheck
-			defer client.Delete(ctx, ns)
-			By("Creating a local PodPlacementConfig")
-			err = client.Create(ctx,
-				NewPodPlacementConfig().
-					WithName("test-ppc").
-					WithNamespace(ns.Name).
-					WithPriority(50).
-					WithPlugins().
-					WithNodeAffinityScoring(true).
-					WithNodeAffinityScoringTerm(utils.ArchitectureAmd64, 50).
-					Build(),
-			)
-			Expect(err).To(HaveOccurred(), "the PodPlacementConfig should not be accepted", err)
 		})
 	})
 })

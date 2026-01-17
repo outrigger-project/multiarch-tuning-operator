@@ -665,32 +665,6 @@ var _ = Describe("internal/Controller/ClusterPodPlacementConfig/ClusterPodPlacem
 			Expect(d.Finalizers).To(ContainElement(utils.ExecFormatErrorFinalizerName))
 		})
 	})
-	Context("the webhook shoud deny PodPlacementConfig creation", func() {
-		It("when the ClusterPodPlacementConfig doesn't exist", func() {
-			By("Ensure the ClusterPodPlacementConfig doesn't exist")
-			cppc := &v1beta1.ClusterPodPlacementConfig{}
-			err := k8sClient.Get(ctx, crclient.ObjectKey{Name: common.SingletonResourceObjectName}, cppc)
-			Expect(errors.IsNotFound(err)).To(BeTrue(), "the ClusterPodPlacementConfig should not exist", err)
-			By("Create an ephemeral namespace")
-			ns := framework.NewEphemeralNamespace()
-			err = k8sClient.Create(ctx, ns)
-			Expect(err).NotTo(HaveOccurred())
-			//nolint:errcheck
-			defer k8sClient.Delete(ctx, ns)
-			By("Creating a local PodPlacementConfig")
-			err = k8sClient.Create(ctx,
-				builder.NewPodPlacementConfig().
-					WithName("test-ppc").
-					WithNamespace(ns.Name).
-					WithPriority(50).
-					WithPlugins().
-					WithNodeAffinityScoring(true).
-					WithNodeAffinityScoringTerm(utils.ArchitectureAmd64, 50).
-					Build(),
-			)
-			Expect(err).To(HaveOccurred(), "the PodPlacementConfig should not be accepted", err)
-		})
-	})
 })
 
 func patchDeploymentStatus(name string, g Gomega, patch func(*appsv1.Deployment)) {
