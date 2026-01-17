@@ -19,33 +19,23 @@ package v1beta1
 import (
 	"context"
 	"errors"
-	"fmt"
 
-	"k8s.io/apimachinery/pkg/runtime"
+	runtime "k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/webhook"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 )
 
-// +kubebuilder:webhook:path=/validate-multiarch-openshift-io-v1beta1-clusterpodplacementconfig,mutating=false,failurePolicy=fail,sideEffects=None,groups=multiarch.openshift.io,resources=clusterpodplacementconfigs,verbs=create;update;delete,versions=v1beta1,name=validate-clusterpodplacementconfig.multiarch.openshift.io,admissionReviewVersions=v1
+// +kubebuilder:webhook:path=/validate-multiarch-openshift-io-v1beta1-clusterpodplacementconfig,mutating=false,failurePolicy=fail,sideEffects=None,groups=multiarch.openshift.io,resources=clusterpodplacementconfigs,verbs=create;update,versions=v1beta1,name=validate-clusterpodplacementconfig.multiarch.openshift.io,admissionReviewVersions=v1
 
 func (c *ClusterPodPlacementConfig) SetupWebhookWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewWebhookManagedBy(mgr).
 		For(c).
-		WithValidator(&ClusterPodPlacementConfigValidator{
-			Client: mgr.GetClient(),
-		}).
+		WithValidator(&ClusterPodPlacementConfigValidator{}).
 		Complete()
 }
 
-// ClusterPodPlacementConfigValidator validates ClusterPodPlacementConfig resources
-// +kubebuilder:object:generate=false
 type ClusterPodPlacementConfigValidator struct {
-	Client client.Client
 }
-
-var _ webhook.CustomValidator = &ClusterPodPlacementConfigValidator{}
 
 func (v *ClusterPodPlacementConfigValidator) ValidateCreate(ctx context.Context, obj runtime.Object) (warnings admission.Warnings, err error) {
 	return v.validate(obj)
@@ -56,14 +46,6 @@ func (v *ClusterPodPlacementConfigValidator) ValidateUpdate(ctx context.Context,
 }
 
 func (v *ClusterPodPlacementConfigValidator) ValidateDelete(ctx context.Context, obj runtime.Object) (warnings admission.Warnings, err error) {
-	// Check if any local PodPlacementConfig exists. If exists, deny deletion of ClusterPodPlacementConfig.
-	existingPPCs := &PodPlacementConfigList{}
-	if err := v.Client.List(ctx, existingPPCs); err != nil {
-		return nil, fmt.Errorf("failed to list existing PodPlacementConfigs: %w", err)
-	}
-	if len(existingPPCs.Items) != 0 {
-		return nil, fmt.Errorf("cannot delete ClusterPodPlacementConfig while local PodPlacementConfigs still exist")
-	}
 	return nil, nil
 }
 
