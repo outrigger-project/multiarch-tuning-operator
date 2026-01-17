@@ -1,4 +1,4 @@
-FROM brew.registry.redhat.io/rh-osbs/openshift-golang-builder:rhel_9_1.23 as builder
+FROM brew.registry.redhat.io/rh-osbs/openshift-golang-builder:rhel_9_1.25 as builder
 ARG IMG=registry.redhat.io/multiarch-tuning/multiarch-tuning-rhel9-operator@sha256:e1c4dd8deb2b7c11f2ff6680496969b58922155900286effea415a2a7affe2bd
 ARG ORIGINAL_IMG=registry.ci.openshift.org/origin/multiarch-tuning-operator:v1.x
 WORKDIR /code
@@ -19,9 +19,9 @@ LABEL operators.operatorframework.io.bundle.metadata.v1=metadata/
 LABEL operators.operatorframework.io.bundle.package.v1=multiarch-tuning-operator
 LABEL operators.operatorframework.io.bundle.channels.v1=stable
 LABEL operators.operatorframework.io.bundle.channel.default.v1=stable
-LABEL operators.operatorframework.io.metrics.builder=operator-sdk-v1.31.0
+LABEL operators.operatorframework.io.metrics.builder=operator-sdk-v1.33.0
 LABEL operators.operatorframework.io.metrics.mediatype.v1=metrics+v1
-LABEL operators.operatorframework.io.metrics.project_layout=go.kubebuilder.io/v3
+LABEL operators.operatorframework.io.metrics.project_layout=go.kubebuilder.io/v4
 
 # Labels for testing.
 LABEL operators.operatorframework.io.test.mediatype.v1=scorecard+v1
@@ -36,8 +36,8 @@ COPY --from=builder /code/bundle/tests/scorecard /tests/scorecard/
 LABEL com.redhat.component="Multiarch Tuning Operator"
 LABEL distribution-scope="public"
 LABEL name="multiarch-tuning/multiarch-tuning-operator-bundle"
-LABEL release="1.2.1"
-LABEL version="1.2.1"
+LABEL release="1.2.2"
+LABEL version="1.2.2"
 LABEL cpe="cpe:/a:redhat:multiarch_tuning_operator:1.1::el9"
 LABEL url="https://github.com/openshift/multiarch-tuning-operator"
 LABEL vendor="Red Hat, Inc."

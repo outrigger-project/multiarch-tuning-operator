@@ -11,4 +11,4 @@ schema: olm.channel
 package: multiarch-tuning-operator
 name: v1.x
 entries:
-  - name: multiarch-tuning-operator.v1.2.1
+  - name: multiarch-tuning-operator.v1.2.2
