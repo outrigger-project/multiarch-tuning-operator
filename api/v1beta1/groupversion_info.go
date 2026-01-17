@@ -37,5 +37,7 @@ var (
 
 const ClusterPodPlacementConfigResource = "clusterpodplacementconfigs"
 const ClusterPodPlacementConfigKind = "ClusterPodPlacementConfig"
+const PodPlacementConfigResource = "podplacementconfigs"
+const PodPlacementConfigKind = "PodPlacementConfig"
 const ENoExecEventKind = "ENoExecEvent"
 const ENoExecEventResource = "enoexecevents"
