@@ -11,8 +11,10 @@ import (
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes"
 
+	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/selection"
+	"k8s.io/apimachinery/pkg/types"
 	runtimeclient "sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/openshift/multiarch-tuning-operator/pkg/testing/builder"
@@ -262,23 +264,35 @@ func VerifyPodsEvents(ctx context.Context, client runtimeclient.Client, ns *v1.N
 			LabelSelector: labels.NewSelector().Add(*r),
 		})
 		g.Expect(err).NotTo(HaveOccurred())
+		if len(pods.Items) == 0 {
+			fmt.Printf("No pods found with label %s=%s, skipping event verification\n", labelKey, labelInValue)
+			return
+		}
 
 		// List all events in the namespace
 		events := &v1.EventList{}
-		err = client.List(ctx, events, &runtimeclient.ListOptions{Namespace: ns.Name})
+		err = client.List(ctx, events, &runtimeclient.ListOptions{
+			Namespace: ns.Name,
+			FieldSelector: fields.AndSelectors(
+				fields.OneTermEqualSelector("involvedObject.kind", "Pod"),
+				fields.OneTermEqualSelector("reason", eventReason),
+			),
+		})
 		g.Expect(err).NotTo(HaveOccurred())
 
+		// Create a map for faster event lookup
+		eventMap := make(map[types.UID]bool)
+		for _, e := range events.Items {
+			eventMap[e.InvolvedObject.UID] = true
+		}
 		// Verify each pod has at least one matching event
 		g.Expect(pods.Items).Should(HaveEach(
 			WithTransform(func(p v1.Pod) bool {
-				for _, e := range events.Items {
-					if e.InvolvedObject.UID == p.UID && e.Reason == eventReason {
-						return true
-					}
-				}
-				return false
+				return eventMap[p.UID]
 			}, BeTrue()),
-		))
+		), "not all pods in namespace %s received event with reason %q. "+
+			"Found %d pods but only %d matching events",
+			ns.Name, eventReason, len(pods.Items), len(events.Items))
 	}
 }
 

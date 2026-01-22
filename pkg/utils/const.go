@@ -69,7 +69,7 @@ func AllSupportedArchitecturesSet() sets.Set[string] {
 	return sets.New(ArchitectureAmd64, ArchitectureArm64, ArchitecturePpc64le, ArchitectureS390x)
 }
 
-func ExecFormatErrorEventMessage(containerName, nodeArch, command string) string {
+func ExecFormatErrorEventMessage(containerName, nodeArch string) string {
 	var b strings.Builder
 
 	if containerName == UnknownContainer {
@@ -79,9 +79,6 @@ func ExecFormatErrorEventMessage(containerName, nodeArch, command string) string
 	}
 
 	b.WriteString("is running a binary")
-	if command != "" {
-		b.WriteString(fmt.Sprintf(" (%q)", command))
-	}
 	b.WriteString(" that is not compatible with the node architecture")
 	if nodeArch != "" {
 		b.WriteString(fmt.Sprintf(" (%s)", nodeArch))
