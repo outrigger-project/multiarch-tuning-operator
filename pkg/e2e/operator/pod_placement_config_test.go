@@ -7,9 +7,9 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	"github.com/openshift/multiarch-tuning-operator/apis/multiarch/common"
-	"github.com/openshift/multiarch-tuning-operator/apis/multiarch/v1alpha1"
-	"github.com/openshift/multiarch-tuning-operator/apis/multiarch/v1beta1"
+	"github.com/openshift/multiarch-tuning-operator/api/common"
+	"github.com/openshift/multiarch-tuning-operator/api/v1alpha1"
+	"github.com/openshift/multiarch-tuning-operator/api/v1beta1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	runtimeclient "sigs.k8s.io/controller-runtime/pkg/client"
@@ -694,7 +694,7 @@ var _ = Describe("The Multiarch Tuning Operator", Serial, func() {
 				d := NewDeployment().
 					WithSelectorAndPodLabels(podLabel).
 					WithPodSpec(ps).
-					WithReplicas(utils.NewPtr(int32(10))).
+					WithReplicas(utils.NewPtr(int32(5))).
 					WithName("test-deployment").
 					WithNamespace(ns.Name).
 					Build()
@@ -762,7 +762,6 @@ var _ = Describe("The Multiarch Tuning Operator", Serial, func() {
 			By("Creating a eNoExecEvent")
 			enee := NewENoExecEvent().
 				WithName("test-enoexecevent").
-				WithCommand("foo-binary").
 				WithNodeName("test-name").
 				WithPodNamespace(ns.Name).
 				WithNamespace(utils.Namespace()).Build()
@@ -801,7 +800,6 @@ var _ = Describe("The Multiarch Tuning Operator", Serial, func() {
 			By("Creating a eNoExecEvent")
 			enee := NewENoExecEvent().
 				WithName("test-enoexecevent").
-				WithCommand("foo-binary").
 				WithNodeName("test-name").
 				WithPodNamespace(ns.Name).
 				WithNamespace(utils.Namespace()).Build()

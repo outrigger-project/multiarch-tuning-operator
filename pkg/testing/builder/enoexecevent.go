@@ -1,7 +1,7 @@
 package builder
 
 import (
-	"github.com/openshift/multiarch-tuning-operator/apis/multiarch/v1beta1"
+	"github.com/openshift/multiarch-tuning-operator/api/v1beta1"
 )
 
 type ENoExecEventBuilder struct {
@@ -41,11 +41,6 @@ func (p *ENoExecEventBuilder) WithPodNamespace(podNamespace string) *ENoExecEven
 
 func (p *ENoExecEventBuilder) WithContainerID(containerID string) *ENoExecEventBuilder {
 	p.Status.ContainerID = containerID
-	return p
-}
-
-func (p *ENoExecEventBuilder) WithCommand(command string) *ENoExecEventBuilder {
-	p.Status.Command = command
 	return p
 }
 
