@@ -267,18 +267,19 @@ func (pod *Pod) trackAffinitySource(arch string, weight int32, source string, ap
 		existingAnnotation = pod.Annotations[utils.PreferredNodeAffinitySourcesAnnotation]
 	}
 
-	status := "applied"
-	if !applied {
-		status = "skipped"
+	// Format: arch:weight:source or arch:weight:source:skipped
+	var newEntry string
+	if applied {
+		newEntry = fmt.Sprintf("%s:%d:%s", arch, weight, source)
+	} else {
+		newEntry = fmt.Sprintf("%s:%d:%s:skipped", arch, weight, source)
 	}
 
-	newEntry := fmt.Sprintf("%s:%d from %s (%s)", arch, weight, source, status)
-
-	// Append to existing annotation
+	// Append to existing annotation with comma separator
 	if existingAnnotation == "" {
 		pod.EnsureAnnotation(utils.PreferredNodeAffinitySourcesAnnotation, newEntry)
 	} else {
-		pod.EnsureAnnotation(utils.PreferredNodeAffinitySourcesAnnotation, existingAnnotation+"\n"+newEntry)
+		pod.EnsureAnnotation(utils.PreferredNodeAffinitySourcesAnnotation, existingAnnotation+","+newEntry)
 	}
 }
 
