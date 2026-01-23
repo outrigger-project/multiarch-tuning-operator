@@ -160,8 +160,9 @@ Only one mode can be active at a time. Each mode has its own leader election ID.
 1. Webhook adds scheduling gate to pod, preventing scheduling
 2. PodReconciler watches gated pods
 3. Inspects container images to determine supported architectures
-4. Adds nodeAffinity requirement for kubernetes.io/arch
-5. Removes scheduling gate, allowing scheduler to place pod
+4. If image inspection fails and `fallbackArchitecture` is configured, uses the fallback architecture
+5. Adds nodeAffinity requirement for kubernetes.io/arch
+6. Removes scheduling gate, allowing scheduler to place pod
 
 **Image Inspection** (pkg/image/):
 - Supports multi-arch manifests (OCI, Docker v2.2)
@@ -237,6 +238,7 @@ The operator binary runs in four mutually exclusive modes (controlled by flags i
   - `logVerbosity`: Normal, Debug, Trace, TraceAll
   - `namespaceSelector`: Label selector for processed namespaces
   - `plugins`: Optional plugins configuration (e.g., NodeAffinityScoring for preferred scheduling)
+  - `fallbackArchitecture`: Architecture to use when image inspector cannot determine image architecture (arm64, amd64, ppc64le, s390x, or empty string)
 - Status conditions: Available, Progressing, Degraded, Deprovisioning, PodPlacementControllerNotRolledOut, PodPlacementWebhookNotRolledOut, MutatingWebhookConfigurationNotAvailable
 
 
