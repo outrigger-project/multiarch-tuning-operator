@@ -357,7 +357,7 @@ var _ = Describe("The Multiarch Tuning Operator", Serial, func() {
 				NamespaceSelector: nil,
 			}))
 		})
-		It("should succeed creating a v1alpha1 CPPC and get the v1beta1 version with no plugins field", func() {
+		It("should succeed creating a v1alpha1 CPPC and get the v1beta1 version with no plugins/fallbackArchitecture field", func() {
 			By("Creating a v1alpha1 ClusterPodPlacementConfig")
 			err := client.Create(ctx, &v1alpha1.ClusterPodPlacementConfig{
 				ObjectMeta: metav1.ObjectMeta{
@@ -377,6 +377,53 @@ var _ = Describe("The Multiarch Tuning Operator", Serial, func() {
 			Expect(err).NotTo(HaveOccurred(), "failed to get the v1beta1 version of the ClusterPodPlacementConfig", err)
 			By("Validate a v1beta1 ClusterPodPlacementConfig plugins ommit empty")
 			Expect(ppc.Spec.Plugins).To(BeNil())
+			By("Validate a v1beta1 ClusterPodPlacementConfig fallbackArchitecture ommit empty")
+			Expect(ppc.Spec.FallbackArchitecture).To(Equal(""))
+		})
+		It("should create a v1beta1 CPPC with fallbackArchitecture and succeed converting to v1alpha1", func() {
+			By("Creating a v1beta1 ClusterPodPlacementConfig with fallbackArchitecture set")
+			err := client.Create(ctx,
+				NewClusterPodPlacementConfig().
+					WithName(common.SingletonResourceObjectName).
+					WithFallbackArchitecture("amd64").
+					Build(),
+			)
+			Expect(err).NotTo(HaveOccurred())
+			By("Fetching the v1beta1 ClusterPodPlacementConfig")
+			v1beta1obj := &v1beta1.ClusterPodPlacementConfig{}
+			err = client.Get(ctx, runtimeclient.ObjectKey{
+				Name: common.SingletonResourceObjectName,
+			}, v1beta1obj)
+			Expect(err).NotTo(HaveOccurred())
+			By("Verifying the FallbackArchitecture field is set to amd64")
+			Expect(v1beta1obj.Spec.FallbackArchitecture).To(Equal("amd64"))
+			By("Fetching the v1alpha1 ClusterPodPlacementConfig via conversion")
+			v1alpha1obj := &v1alpha1.ClusterPodPlacementConfig{}
+			err = client.Get(ctx, runtimeclient.ObjectKey{
+				Name: common.SingletonResourceObjectName,
+			}, v1alpha1obj)
+			Expect(err).NotTo(HaveOccurred())
+			By("Verifying the FallbackArchitecture value is preserved in annotations")
+			Expect(v1alpha1obj.Annotations).To(HaveKeyWithValue(v1alpha1.FallbackArchAnnotation, "amd64"))
+			By("Performing a round-trip conversion back to v1beta1")
+			v1beta1obj = &v1beta1.ClusterPodPlacementConfig{}
+			err = client.Get(ctx, runtimeclient.ObjectKey{
+				Name: common.SingletonResourceObjectName,
+			}, v1beta1obj)
+			Expect(err).NotTo(HaveOccurred())
+			By("Verifying the FallbackArchitecture field is still set after round-trip conversion")
+			Expect(v1beta1obj.Spec.FallbackArchitecture).To(Equal("amd64"))
+			By("Clearing the FallbackArchitecture field")
+			v1beta1obj.Spec.FallbackArchitecture = ""
+			err = client.Update(ctx, v1beta1obj)
+			Expect(err).NotTo(HaveOccurred())
+			v1alpha1obj = &v1alpha1.ClusterPodPlacementConfig{}
+			err = client.Get(ctx, runtimeclient.ObjectKey{
+				Name: common.SingletonResourceObjectName,
+			}, v1alpha1obj)
+			Expect(err).NotTo(HaveOccurred())
+			By("Verifying the FallbackArchitecture annotation is removed")
+			Expect(v1alpha1obj.Annotations).NotTo(HaveKey(v1alpha1.FallbackArchAnnotation))
 		})
 		It("should fail creating the CPPC with multiple items for the same architecture in the plugins.nodeAffinityScoring.Platforms list", func() {
 			By("Creating a v1beta1 ClusterPodPlacementConfig")
