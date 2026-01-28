@@ -25,7 +25,6 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/record"
@@ -107,7 +106,17 @@ func (r *PodReconciler) processPod(ctx context.Context, pod *Pod) {
 	log.V(1).Info("Processing pod")
 
 	cppc := clusterpodplacementconfig.GetClusterPodPlacementConfig()
-	if pod.shouldIgnorePod(cppc) {
+	// List existing PodPlacementConfigs in the same namespace
+	ppcList := &multiarchv1beta1.PodPlacementConfigList{}
+	if err := r.List(ctx, ppcList, client.InNamespace(pod.Namespace)); err != nil {
+		pod.handleError(err, "failed to list existing PodPlacementConfigs in namespace")
+		return
+	}
+
+	// Filter to only PPCs that match this pod's labels - do this once for efficiency
+	matchingPPCs := pod.filterMatchingPPCs(ppcList)
+
+	if pod.shouldIgnorePod(cppc, matchingPPCs) {
 		log.V(3).Info("A pod with the scheduling gate should be ignored. Ignoring...")
 		// We can reach this branch when:
 		// - The pod has been gated but not processed before the operator changed configuration such that the pod should be ignored.
@@ -123,7 +132,7 @@ func (r *PodReconciler) processPod(ctx context.Context, pod *Pod) {
 	// Skip preferred affinity processing if the user has already configured architecture-related preferred affinity
 	// or if the reconcile loop has already applied the PPCs/CPPC (e.g., due to a retry or re-reconciliation)
 	if !pod.isPreferredAffinityConfiguredForArchitecture() {
-		r.applyPodPlacementConfigs(ctx, pod)
+		r.applyMatchingPPCs(ctx, matchingPPCs, pod)
 
 		if cppc != nil && cppc.PluginsEnabled(common.NodeAffinityScoringPluginName) {
 			pod.SetPreferredArchNodeAffinity(cppc.Spec.Plugins.NodeAffinityScoring, multiarchv1beta1.ClusterPodPlacementConfigKind)
@@ -131,7 +140,7 @@ func (r *PodReconciler) processPod(ctx context.Context, pod *Pod) {
 	} else {
 		log.V(2).Info("Pod already has architecture-related preferred affinity. This could be user-defined or from a previous reconcile loop. Skipping PPC/CPPC preferred affinity processing.")
 		// Track that configs were skipped due to user-defined preferences
-		r.trackSkippedConfigs(ctx, pod, cppc)
+		r.trackSkippedMatchingConfigs(ctx, pod, cppc, matchingPPCs)
 	}
 
 	// Prepare the requirement for the node affinity.
@@ -165,22 +174,18 @@ func (r *PodReconciler) processPod(ctx context.Context, pod *Pod) {
 	}
 }
 
-func (r *PodReconciler) applyPodPlacementConfigs(ctx context.Context, pod *Pod) {
+// applyMatchingPPCs applies the pre-filtered matching PodPlacementConfigs to the pod.
+// The matchingPPCs slice should already be filtered to only include PPCs whose label selector matches the pod.
+func (r *PodReconciler) applyMatchingPPCs(ctx context.Context, matchingPPCs []multiarchv1beta1.PodPlacementConfig, pod *Pod) {
 	log := ctrllog.FromContext(ctx).WithName("PodPlacementConfig")
-	// List existing PodPlacementConfigs in the same namespace
-	ppcList := &multiarchv1beta1.PodPlacementConfigList{}
-	if err := r.List(ctx, ppcList, client.InNamespace(pod.Namespace)); err != nil {
-		pod.handleError(err, "failed to list existing PodPlacementConfigs in namespace")
-		return
-	}
 
 	// Sort the configurations by descending priority
-	sort.Slice(ppcList.Items, func(i, j int) bool {
-		return ppcList.Items[i].Spec.Priority > ppcList.Items[j].Spec.Priority
+	sort.Slice(matchingPPCs, func(i, j int) bool {
+		return matchingPPCs[i].Spec.Priority > matchingPPCs[j].Spec.Priority
 	})
 
-	// For each namespace-scoped configuration, check selector and apply
-	for _, ppc := range ppcList.Items {
+	// For each matching namespace-scoped configuration, apply if plugin is enabled
+	for _, ppc := range matchingPPCs {
 		log.V(1).Info("Processing PodPlacementConfig", "namespace", ppc.Namespace, "name", ppc.Name)
 
 		// check if plugin is enabled
@@ -189,56 +194,31 @@ func (r *PodReconciler) applyPodPlacementConfigs(ctx context.Context, pod *Pod) 
 			continue
 		}
 
-		selector, err := metav1.LabelSelectorAsSelector(ppc.Spec.LabelSelector)
-		if err != nil {
-			pod.handleError(err, "Invalid label selector in PodPlacementConfig")
-			continue
-		}
-
-		// Check if the pod matches the label selector
-		if selector == labels.Nothing() || selector.Matches(labels.Set(pod.Labels)) {
-			log.Info("Applying namespace-scoped config", "PodPlacementConfig", ppc.Name)
-			// Apply the configuration, checking for overlaps
-			configSource := fmt.Sprintf("%s-%s", multiarchv1beta1.PodPlacementConfigKind, ppc.Name)
-			pod.SetPreferredArchNodeAffinity(ppc.Spec.Plugins.NodeAffinityScoring, configSource)
-		}
+		log.Info("Applying namespace-scoped config", "PodPlacementConfig", ppc.Name)
+		configSource := fmt.Sprintf("%s-%s", multiarchv1beta1.PodPlacementConfigKind, ppc.Name)
+		pod.SetPreferredArchNodeAffinity(ppc.Spec.Plugins.NodeAffinityScoring, configSource)
 	}
 }
 
-// trackSkippedConfigs tracks in the annotation which PPC/CPPC configs would have been applied
-// but were skipped due to user-defined architecture-related preferred affinity
-func (r *PodReconciler) trackSkippedConfigs(ctx context.Context, pod *Pod, cppc *multiarchv1beta1.ClusterPodPlacementConfig) {
-	log := ctrllog.FromContext(ctx)
-
-	// Track skipped PodPlacementConfigs
-	ppcList := &multiarchv1beta1.PodPlacementConfigList{}
-	err := r.List(ctx, ppcList, client.InNamespace(pod.Namespace))
-	if err != nil {
-		log.Error(err, "Unable to list PodPlacementConfigs")
-		return
-	}
-
-	// Sort by descending priority (same as applyPodPlacementConfigs)
-	sort.Slice(ppcList.Items, func(i, j int) bool {
-		return ppcList.Items[i].Spec.Priority > ppcList.Items[j].Spec.Priority
+// trackSkippedMatchingConfigs tracks in the annotation which PPC/CPPC configs would have been applied
+// but were skipped due to user-defined architecture-related preferred affinity.
+// The matchingPPCs slice should already be filtered to only include PPCs whose label selector matches the pod.
+func (r *PodReconciler) trackSkippedMatchingConfigs(ctx context.Context, pod *Pod, cppc *multiarchv1beta1.ClusterPodPlacementConfig, matchingPPCs []multiarchv1beta1.PodPlacementConfig) {
+	// Sort by descending priority (same as applyMatchingPPCs)
+	sort.Slice(matchingPPCs, func(i, j int) bool {
+		return matchingPPCs[i].Spec.Priority > matchingPPCs[j].Spec.Priority
 	})
 
-	for _, ppc := range ppcList.Items {
+	// Track skipped PodPlacementConfigs
+	for _, ppc := range matchingPPCs {
 		if !ppc.PluginsEnabled(common.NodeAffinityScoringPluginName) {
 			continue
 		}
 
-		selector, err := metav1.LabelSelectorAsSelector(ppc.Spec.LabelSelector)
-		if err != nil {
-			continue
-		}
-
-		if selector == labels.Nothing() || selector.Matches(labels.Set(pod.Labels)) {
-			configSource := fmt.Sprintf("%s-%s", multiarchv1beta1.PodPlacementConfigKind, ppc.Name)
-			// Track each platform term as skipped
-			for _, platform := range ppc.Spec.Plugins.NodeAffinityScoring.Platforms {
-				pod.trackAffinitySource(platform.Architecture, platform.Weight, configSource, false)
-			}
+		configSource := fmt.Sprintf("%s-%s", multiarchv1beta1.PodPlacementConfigKind, ppc.Name)
+		// Track each platform term as skipped
+		for _, platform := range ppc.Spec.Plugins.NodeAffinityScoring.Platforms {
+			pod.trackAffinitySource(platform.Architecture, platform.Weight, configSource, false)
 		}
 	}
 

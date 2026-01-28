@@ -92,7 +92,7 @@ spec:
               plugins:
                 description: |-
                   Plugins defines the configurable plugins for this component.
-                  This field is optional and will be omitted from the output if not set.
+                  This field is required.
                 properties:
                   nodeAffinityScoring:
                     description: NodeAffinityScoring is the plugin that implements
@@ -137,16 +137,21 @@ spec:
                     type: object
                 type: object
               priority:
+                default: 0
                 description: |-
                   Priority defines the priority of the PodPlacementConfig and only accepts values in the range 0-255.
                   This field is optional and will default to 0 if not set.
                 maximum: 255
                 minimum: 0
                 type: integer
+            required:
+            - plugins
             type: object
           status:
             description: PodPlacementConfigStatus defines the observed state of PodPlacementConfig
             type: object
+        required:
+        - spec
         type: object
     served: true
     storage: true

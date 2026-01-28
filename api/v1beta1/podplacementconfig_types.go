@@ -33,16 +33,17 @@ type PodPlacementConfigSpec struct {
 	LabelSelector *metav1.LabelSelector `json:"labelSelector,omitempty"`
 
 	// Plugins defines the configurable plugins for this component.
-	// This field is optional and will be omitted from the output if not set.
-	// +optional
-	Plugins *plugins.LocalPlugins `json:"plugins,omitempty"`
+	// This field is required.
+	// +kubebuilder:validation:Required
+	Plugins *plugins.LocalPlugins `json:"plugins"`
 
 	// Priority defines the priority of the PodPlacementConfig and only accepts values in the range 0-255.
 	// This field is optional and will default to 0 if not set.
 	// +optional
+	// +kubebuilder:default:=0
 	// +kubebuilder:validation:Minimum=0
 	// +kubebuilder:validation:Maximum=255
-	Priority uint8 `json:"priority,omitempty"`
+	Priority uint8 `json:"priority"`
 }
 
 // PodPlacementConfig defines the configuration for the architecture aware pod placement operand in a given namespace for a subset of its pods based on the provided labelSelector.
@@ -54,7 +55,7 @@ type PodPlacementConfig struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Spec   PodPlacementConfigSpec   `json:"spec,omitempty"`
+	Spec   PodPlacementConfigSpec   `json:"spec"`
 	Status PodPlacementConfigStatus `json:"status,omitempty"`
 }
 

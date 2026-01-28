@@ -24,6 +24,8 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/tools/record"
 	ctrllog "sigs.k8s.io/controller-runtime/pkg/log"
@@ -400,13 +402,15 @@ func (pod *Pod) ensureArchitectureLabels(requirement corev1.NodeSelectorRequirem
 // - the pod has a node name set
 // - the pod has a node selector that matches the control plane nodes
 // - the pod is owned by a DaemonSet
-// - both the nodeSelector/nodeAffinity and the preferredAffinity are set for the kubernetes.io/arch label.
-// - only the nodeSelector/nodeAffinity is set for the kubernetes.io/arch label and the NodeAffinityScoring plugin is disabled.
-func (pod *Pod) shouldIgnorePod(cppc *v1beta1.ClusterPodPlacementConfig) bool {
+// - the pod has required architecture affinity configured AND:
+//   - preferred affinity is already configured, OR
+//   - both CPPC and all matching PPCs have the NodeAffinityScoring plugin disabled
+func (pod *Pod) shouldIgnorePod(cppc *v1beta1.ClusterPodPlacementConfig, matchingPPCs []v1beta1.PodPlacementConfig) bool {
 	return utils.Namespace() == pod.Namespace || strings.HasPrefix(pod.Namespace, "kube-") ||
 		pod.Spec.NodeName != "" || pod.HasControlPlaneNodeSelector() || pod.IsFromDaemonSet() ||
 		pod.isNodeSelectorConfiguredForArchitecture() &&
-			(!cppc.PluginsEnabled(common.NodeAffinityScoringPluginName) || pod.isPreferredAffinityConfiguredForArchitecture())
+			(pod.isPreferredAffinityConfiguredForArchitecture() ||
+				(!cppc.PluginsEnabled(common.NodeAffinityScoringPluginName) && !pod.hasMatchingPPCWithPlugin(matchingPPCs)))
 }
 
 // isNodeSelectorConfiguredForArchitecture returns true if the pod has already a nodeSelector for the architecture label
@@ -488,6 +492,38 @@ func (pod *Pod) isPreferredAffinityConfiguredForArchitecture() bool {
 			if expr.Key == utils.ArchLabel {
 				return true
 			}
+		}
+	}
+	return false
+}
+
+// filterMatchingPPCs returns only PPCs whose label selector matches this pod.
+// This is done once per reconcile/webhook call to avoid redundant selector evaluations.
+func (pod *Pod) filterMatchingPPCs(ppcList *v1beta1.PodPlacementConfigList) []v1beta1.PodPlacementConfig {
+	var matching []v1beta1.PodPlacementConfig
+
+	for _, ppc := range ppcList.Items {
+		selector, err := metav1.LabelSelectorAsSelector(ppc.Spec.LabelSelector)
+		if err != nil {
+			// Invalid selector means it doesn't match - skip
+			continue
+		}
+
+		// Empty selector (Nothing()) or matching selector
+		if selector == labels.Nothing() || selector.Matches(labels.Set(pod.Labels)) {
+			matching = append(matching, ppc)
+		}
+	}
+
+	return matching
+}
+
+// hasMatchingPPCWithPlugin checks if any of the matching PPCs have the NodeAffinityScoring plugin enabled.
+// The matchingPPCs slice should already be filtered to only include PPCs whose label selector matches the pod.
+func (pod *Pod) hasMatchingPPCWithPlugin(matchingPPCs []v1beta1.PodPlacementConfig) bool {
+	for _, ppc := range matchingPPCs {
+		if ppc.PluginsEnabled(common.NodeAffinityScoringPluginName) {
+			return true
 		}
 	}
 	return false
