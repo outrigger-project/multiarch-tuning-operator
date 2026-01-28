@@ -18,10 +18,9 @@ package podplacement
 
 import (
 	"context"
+	"net/http"
 	"sync"
 	"time"
-
-	"net/http"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -31,7 +30,6 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/record"
-
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	ctrllog "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
@@ -39,6 +37,7 @@ import (
 	"github.com/panjf2000/ants/v2"
 
 	"github.com/openshift/multiarch-tuning-operator/api/common"
+	multiarchv1beta1 "github.com/openshift/multiarch-tuning-operator/api/v1beta1"
 	"github.com/openshift/multiarch-tuning-operator/internal/controller/podplacement/metrics"
 	"github.com/openshift/multiarch-tuning-operator/pkg/informers/clusterpodplacementconfig"
 	"github.com/openshift/multiarch-tuning-operator/pkg/utils"
@@ -81,13 +80,27 @@ func (a *PodSchedulingGateMutatingWebHook) Handle(ctx context.Context, req admis
 	log := ctrllog.FromContext(ctx).WithValues("namespace", pod.Namespace, "name", pod.Name)
 
 	cppc := clusterpodplacementconfig.GetClusterPodPlacementConfig()
-	if cppc != nil && cppc.PluginsEnabled(common.NodeAffinityScoringPluginName) {
+
+	// List existing PodPlacementConfigs in the same namespace
+	ppcList := &multiarchv1beta1.PodPlacementConfigList{}
+	if err := a.client.List(ctx, ppcList, client.InNamespace(pod.Namespace)); err != nil {
+		log.Error(err, "Failed to list existing PodPlacementConfigs in namespace")
+		// On error, proceed without PPC filtering - fail open
+		ppcList.Items = []multiarchv1beta1.PodPlacementConfig{}
+	}
+
+	// Filter to only PPCs that match this pod's labels - do this once for efficiency
+	matchingPPCs := pod.filterMatchingPPCs(ppcList)
+
+	// Set label to indicate if preferred affinity will be set by CPPC or any matching PPC
+	if (cppc != nil && cppc.PluginsEnabled(common.NodeAffinityScoringPluginName)) ||
+		pod.hasMatchingPPCWithPlugin(matchingPPCs) {
 		pod.EnsureLabel(utils.PreferredNodeAffinityLabel, utils.LabelValueNotSet)
 	}
 	pod.EnsureLabel(utils.NodeAffinityLabel, utils.LabelValueNotSet)
 	pod.EnsureLabel(utils.SchedulingGateLabel, utils.LabelValueNotSet)
 
-	if pod.shouldIgnorePod(cppc) {
+	if pod.shouldIgnorePod(cppc, matchingPPCs) {
 		log.V(3).Info("Ignoring the pod")
 		return a.patchedPodResponse(pod.PodObject(), req)
 	}
