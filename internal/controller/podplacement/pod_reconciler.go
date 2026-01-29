@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	runtime2 "runtime"
+	"sort"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -33,6 +34,7 @@ import (
 	ctrllog "sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/openshift/multiarch-tuning-operator/api/common"
+	multiarchv1beta1 "github.com/openshift/multiarch-tuning-operator/api/v1beta1"
 	"github.com/openshift/multiarch-tuning-operator/internal/controller/podplacement/metrics"
 	"github.com/openshift/multiarch-tuning-operator/pkg/informers/clusterpodplacementconfig"
 	"github.com/openshift/multiarch-tuning-operator/pkg/utils"
@@ -104,7 +106,17 @@ func (r *PodReconciler) processPod(ctx context.Context, pod *Pod) {
 	log.V(1).Info("Processing pod")
 
 	cppc := clusterpodplacementconfig.GetClusterPodPlacementConfig()
-	if pod.shouldIgnorePod(cppc) {
+	// List existing PodPlacementConfigs in the same namespace
+	ppcList := &multiarchv1beta1.PodPlacementConfigList{}
+	if err := r.List(ctx, ppcList, client.InNamespace(pod.Namespace)); err != nil {
+		pod.handleError(err, "failed to list existing PodPlacementConfigs in namespace")
+		return
+	}
+
+	// Filter to only PPCs that match this pod's labels - do this once for efficiency
+	matchingPPCs := pod.filterMatchingPPCs(ppcList)
+
+	if pod.shouldIgnorePod(cppc, matchingPPCs) {
 		log.V(3).Info("A pod with the scheduling gate should be ignored. Ignoring...")
 		// We can reach this branch when:
 		// - The pod has been gated but not processed before the operator changed configuration such that the pod should be ignored.
@@ -117,8 +129,18 @@ func (r *PodReconciler) processPod(ctx context.Context, pod *Pod) {
 		return
 	}
 
-	if cppc != nil && cppc.PluginsEnabled(common.NodeAffinityScoringPluginName) {
-		pod.SetPreferredArchNodeAffinity(cppc)
+	// Skip preferred affinity processing if the user has already configured architecture-related preferred affinity
+	// or if the reconcile loop has already applied the PPCs/CPPC (e.g., due to a retry or re-reconciliation)
+	if !pod.isPreferredAffinityConfiguredForArchitecture() {
+		r.applyMatchingPPCs(ctx, matchingPPCs, pod)
+
+		if cppc != nil && cppc.PluginsEnabled(common.NodeAffinityScoringPluginName) {
+			pod.SetPreferredArchNodeAffinity(cppc.Spec.Plugins.NodeAffinityScoring, multiarchv1beta1.ClusterPodPlacementConfigKind)
+		}
+	} else {
+		log.V(2).Info("Pod already has architecture-related preferred affinity. This could be user-defined or from a previous reconcile loop. Skipping PPC/CPPC preferred affinity processing.")
+		// Track that configs were skipped due to user-defined preferences
+		r.trackSkippedMatchingConfigs(ctx, pod, cppc, matchingPPCs)
 	}
 
 	// Prepare the requirement for the node affinity.
@@ -140,13 +162,71 @@ func (r *PodReconciler) processPod(ctx context.Context, pod *Pod) {
 	}
 	// If the pod has been processed successfully or the max retries have been reached, remove the scheduling gate.
 	if err == nil || pod.maxRetries() {
+		// If no preferred node affinity was set by any config, log and publish an event
 		if pod.Labels[utils.PreferredNodeAffinityLabel] == utils.LabelValueNotSet {
 			pod.PublishEvent(corev1.EventTypeNormal, ArchitectureAwareNodeAffinitySet,
 				ArchitecturePreferredPredicateSkippedMsg)
+			log.V(2).Info("No preferred node affinity was set")
 		}
 
 		log.V(1).Info("Removing the scheduling gate from pod.")
 		pod.RemoveSchedulingGate()
+	}
+}
+
+// applyMatchingPPCs applies the pre-filtered matching PodPlacementConfigs to the pod.
+// The matchingPPCs slice should already be filtered to only include PPCs whose label selector matches the pod.
+func (r *PodReconciler) applyMatchingPPCs(ctx context.Context, matchingPPCs []multiarchv1beta1.PodPlacementConfig, pod *Pod) {
+	log := ctrllog.FromContext(ctx).WithName("PodPlacementConfig")
+
+	// Sort the configurations by descending priority
+	sort.Slice(matchingPPCs, func(i, j int) bool {
+		return matchingPPCs[i].Spec.Priority > matchingPPCs[j].Spec.Priority
+	})
+
+	// For each matching namespace-scoped configuration, apply if plugin is enabled
+	for _, ppc := range matchingPPCs {
+		log.V(1).Info("Processing PodPlacementConfig", "namespace", ppc.Namespace, "name", ppc.Name)
+
+		// check if plugin is enabled
+		if !ppc.PluginsEnabled(common.NodeAffinityScoringPluginName) {
+			log.V(1).Info("Skipping PodPlacementConfig NodeAffinityScoring disabled", "namespace", ppc.Namespace, "name", ppc.Name)
+			continue
+		}
+
+		log.Info("Applying namespace-scoped config", "PodPlacementConfig", ppc.Name)
+		configSource := fmt.Sprintf("%s-%s", multiarchv1beta1.PodPlacementConfigKind, ppc.Name)
+		pod.SetPreferredArchNodeAffinity(ppc.Spec.Plugins.NodeAffinityScoring, configSource)
+	}
+}
+
+// trackSkippedMatchingConfigs tracks in the annotation which PPC/CPPC configs would have been applied
+// but were skipped due to user-defined architecture-related preferred affinity.
+// The matchingPPCs slice should already be filtered to only include PPCs whose label selector matches the pod.
+func (r *PodReconciler) trackSkippedMatchingConfigs(ctx context.Context, pod *Pod, cppc *multiarchv1beta1.ClusterPodPlacementConfig, matchingPPCs []multiarchv1beta1.PodPlacementConfig) {
+	// Sort by descending priority (same as applyMatchingPPCs)
+	sort.Slice(matchingPPCs, func(i, j int) bool {
+		return matchingPPCs[i].Spec.Priority > matchingPPCs[j].Spec.Priority
+	})
+
+	// Track skipped PodPlacementConfigs
+	for _, ppc := range matchingPPCs {
+		if !ppc.PluginsEnabled(common.NodeAffinityScoringPluginName) {
+			continue
+		}
+
+		configSource := fmt.Sprintf("%s-%s", multiarchv1beta1.PodPlacementConfigKind, ppc.Name)
+		// Track each platform term as skipped
+		for _, platform := range ppc.Spec.Plugins.NodeAffinityScoring.Platforms {
+			pod.trackAffinitySource(platform.Architecture, platform.Weight, configSource, false)
+		}
+	}
+
+	// Track skipped ClusterPodPlacementConfig
+	if cppc != nil && cppc.PluginsEnabled(common.NodeAffinityScoringPluginName) {
+		for _, platform := range cppc.Spec.Plugins.NodeAffinityScoring.Platforms {
+			pod.trackAffinitySource(platform.Architecture, platform.Weight, multiarchv1beta1.ClusterPodPlacementConfigKind, false)
+		}
 	}
 }
 

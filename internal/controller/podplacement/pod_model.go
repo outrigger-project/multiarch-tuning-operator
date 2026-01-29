@@ -24,11 +24,14 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/tools/record"
 	ctrllog "sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/openshift/multiarch-tuning-operator/api/common"
+	"github.com/openshift/multiarch-tuning-operator/api/common/plugins"
 	"github.com/openshift/multiarch-tuning-operator/api/v1beta1"
 	"github.com/openshift/multiarch-tuning-operator/internal/controller/podplacement/metrics"
 	"github.com/openshift/multiarch-tuning-operator/pkg/image"
@@ -166,12 +169,9 @@ func (pod *Pod) setRequiredArchNodeAffinity(requirement corev1.NodeSelectorRequi
 }
 
 // SetPreferredArchNodeAffinity sets the node affinity for the pod to the preferences given in the ClusterPodPlacementConfig.
-func (pod *Pod) SetPreferredArchNodeAffinity(cppc *v1beta1.ClusterPodPlacementConfig) {
-	// Prevent overriding of user-provided kubernetes.io/arch preferred affinities or overwriting previously set preferred affinity
-	if pod.isPreferredAffinityConfiguredForArchitecture() {
-		return
-	}
-
+// The configSource parameter identifies which configuration is setting the preferences (e.g., "ClusterPodPlacementConfig" or "PodPlacementConfig/my-ppc").
+func (pod *Pod) SetPreferredArchNodeAffinity(nodeAffinity *plugins.NodeAffinityScoring, configSource string) {
+	log := ctrllog.FromContext(pod.Ctx())
 	if pod.Spec.Affinity == nil {
 		pod.Spec.Affinity = &corev1.Affinity{}
 	}
@@ -184,27 +184,116 @@ func (pod *Pod) SetPreferredArchNodeAffinity(cppc *v1beta1.ClusterPodPlacementCo
 		pod.Spec.Affinity.NodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution = []corev1.PreferredSchedulingTerm{}
 	}
 
-	for _, nodeAffinityScoringPlatformTerm := range cppc.Spec.Plugins.NodeAffinityScoring.Platforms {
-		preferredSchedulingTerm := corev1.PreferredSchedulingTerm{
-			Weight: nodeAffinityScoringPlatformTerm.Weight,
-			Preference: corev1.NodeSelectorTerm{
-				MatchExpressions: []corev1.NodeSelectorRequirement{
-					{
-						Key:      utils.ArchLabel,
-						Operator: corev1.NodeSelectorOpIn,
-						Values:   []string{nodeAffinityScoringPlatformTerm.Architecture},
+	seenArchitectures := pod.getExistingPreferredArchitectures()
+	var preferredSchedulingTerms []corev1.PreferredSchedulingTerm
+	var skippedArchitectures []string
+	for _, nodeAffinityScoringPlatformTerm := range nodeAffinity.Platforms {
+		if !seenArchitectures[nodeAffinityScoringPlatformTerm.Architecture] {
+			preferredSchedulingTerm := corev1.PreferredSchedulingTerm{
+				Weight: nodeAffinityScoringPlatformTerm.Weight,
+				Preference: corev1.NodeSelectorTerm{
+					MatchExpressions: []corev1.NodeSelectorRequirement{
+						{
+							Key:      utils.ArchLabel,
+							Operator: corev1.NodeSelectorOpIn,
+							Values:   []string{nodeAffinityScoringPlatformTerm.Architecture},
+						},
 					},
 				},
-			},
+			}
+			preferredSchedulingTerms = append(preferredSchedulingTerms, preferredSchedulingTerm)
+			seenArchitectures[nodeAffinityScoringPlatformTerm.Architecture] = true
+			// Track that this architecture was applied from this source
+			pod.trackAffinitySource(nodeAffinityScoringPlatformTerm.Architecture, nodeAffinityScoringPlatformTerm.Weight, configSource, true)
+		} else {
+			skippedArchitectures = append(skippedArchitectures, nodeAffinityScoringPlatformTerm.Architecture)
+			// Track that this architecture was skipped from this source
+			pod.trackAffinitySource(nodeAffinityScoringPlatformTerm.Architecture, nodeAffinityScoringPlatformTerm.Weight, configSource, false)
+			log.Info("Preferred affinity for pod is already set", "Architecture", nodeAffinityScoringPlatformTerm.Architecture, "Weight", nodeAffinityScoringPlatformTerm.Weight, "Pod.Name", pod.Name, "Pod.Namespace", pod.Namespace, "ConfigSource", configSource)
 		}
-		pod.Spec.Affinity.NodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution = append(
-			pod.Spec.Affinity.NodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution, preferredSchedulingTerm)
 	}
 
-	// if the nodeSelectorTerms were patched at least once, we set the nodeAffinity label to the set value, to keep
-	// track of the fact that the nodeAffinity was patched by the operator.
-	pod.EnsureLabel(utils.PreferredNodeAffinityLabel, utils.NodeAffinityLabelValueSet)
-	pod.PublishEvent(corev1.EventTypeNormal, ArchitectureAwareNodeAffinitySet, ArchitecturePreferredPredicateSetupMsg)
+	if preferredSchedulingTerms != nil {
+		pod.Spec.Affinity.NodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution = append(
+			pod.Spec.Affinity.NodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution, preferredSchedulingTerms...)
+		pod.EnsureLabel(utils.PreferredNodeAffinityLabel, utils.NodeAffinityLabelValueSet)
+	}
+	switch {
+	// Case 1: All architectures from this config were successfully added (no duplicates)
+	case preferredSchedulingTerms != nil && skippedArchitectures == nil:
+		pod.PublishEvent(corev1.EventTypeNormal, ArchitectureAwareNodeAffinitySet, fmt.Sprintf("%s source: %s", ArchitecturePreferredPredicateSetupMsg, configSource))
+		log.V(2).Info("Applied all architecture preferences from configuration", "ConfigSource", configSource)
+
+	// Case 2: Some architectures were added, but some were skipped due to duplicates
+	case preferredSchedulingTerms != nil && skippedArchitectures != nil:
+		pod.PublishEvent(corev1.EventTypeNormal, ArchitectureAwareNodeAffinitySet, fmt.Sprintf("%s source: %s, skipped: %s", ArchitecturePreferredAffinityWithDuplicatesMsg, configSource, strings.Join(skippedArchitectures, ", ")))
+		log.V(2).Info("Applied some architecture preferences from configuration", "ConfigSource", configSource, "SkippedArchitectures", skippedArchitectures)
+
+	// Case 3: All architectures from this config were already set
+	case preferredSchedulingTerms == nil && skippedArchitectures != nil:
+		pod.PublishEvent(corev1.EventTypeNormal, ArchitecturePreferredAffinityDuplicates, fmt.Sprintf("%s source: %s, architectures: %s", ArchitecturePreferredAffinityAllDuplicatesMsg, configSource, strings.Join(skippedArchitectures, ", ")))
+		log.V(2).Info("All architectures from configuration were already set", "ConfigSource", configSource, "SkippedArchitectures", skippedArchitectures)
+
+	// Case 4: No architectures were provided in the config
+	default:
+		log.V(2).Info("No architecture preferences provided in configuration", "ConfigSource", configSource)
+	}
+}
+
+// getExistingPreferredArchitectures finds all
+// architectures that already have a preferred node affinity configured on the pod.
+func (pod *Pod) getExistingPreferredArchitectures() map[string]bool {
+	seen := make(map[string]bool)
+	if pod.Spec.Affinity == nil || pod.Spec.Affinity.NodeAffinity == nil {
+		return seen
+	}
+
+	for _, term := range pod.Spec.Affinity.NodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution {
+		for _, expr := range term.Preference.MatchExpressions {
+			if expr.Key == utils.ArchLabel {
+				for _, value := range expr.Values {
+					seen[value] = true
+				}
+			}
+		}
+	}
+	return seen
+}
+
+// trackAffinitySource tracks which config sources attempted to set affinity for which architectures.
+// This information is later used to build the annotation showing the full audit trail.
+func (pod *Pod) trackAffinitySource(arch string, weight int32, source string, applied bool) {
+	// Get existing annotation or start fresh
+	existingAnnotation := ""
+	if pod.Annotations != nil {
+		existingAnnotation = pod.Annotations[utils.PreferredNodeAffinitySourcesAnnotation]
+	}
+
+	// Format: arch:weight:source or arch:weight:source:skipped
+	var newEntry string
+	if applied {
+		newEntry = fmt.Sprintf("%s:%d:%s", arch, weight, source)
+	} else {
+		newEntry = fmt.Sprintf("%s:%d:%s:skipped", arch, weight, source)
+	}
+
+	// Check if this entry already exists to avoid duplicates on retries
+	if existingAnnotation != "" {
+		entries := strings.Split(existingAnnotation, ",")
+		for _, entry := range entries {
+			if entry == newEntry {
+				// Entry already exists, don't add it again
+				return
+			}
+		}
+	}
+
+	// Append to existing annotation with comma separator
+	if existingAnnotation == "" {
+		pod.EnsureAnnotation(utils.PreferredNodeAffinitySourcesAnnotation, newEntry)
+	} else {
+		pod.EnsureAnnotation(utils.PreferredNodeAffinitySourcesAnnotation, existingAnnotation+","+newEntry)
+	}
 }
 
 func (pod *Pod) getArchitecturePredicate(pullSecretDataList [][]byte) (corev1.NodeSelectorRequirement, error) {
@@ -313,13 +402,15 @@ func (pod *Pod) ensureArchitectureLabels(requirement corev1.NodeSelectorRequirem
 // - the pod has a node name set
 // - the pod has a node selector that matches the control plane nodes
 // - the pod is owned by a DaemonSet
-// - both the nodeSelector/nodeAffinity and the preferredAffinity are set for the kubernetes.io/arch label.
-// - only the nodeSelector/nodeAffinity is set for the kubernetes.io/arch label and the NodeAffinityScoring plugin is disabled.
-func (pod *Pod) shouldIgnorePod(cppc *v1beta1.ClusterPodPlacementConfig) bool {
+// - the pod has required architecture affinity configured AND:
+//   - preferred affinity is already configured, OR
+//   - both CPPC and all matching PPCs have the NodeAffinityScoring plugin disabled
+func (pod *Pod) shouldIgnorePod(cppc *v1beta1.ClusterPodPlacementConfig, matchingPPCs []v1beta1.PodPlacementConfig) bool {
 	return utils.Namespace() == pod.Namespace || strings.HasPrefix(pod.Namespace, "kube-") ||
 		pod.Spec.NodeName != "" || pod.HasControlPlaneNodeSelector() || pod.IsFromDaemonSet() ||
 		pod.isNodeSelectorConfiguredForArchitecture() &&
-			(!cppc.PluginsEnabled(common.NodeAffinityScoringPluginName) || pod.isPreferredAffinityConfiguredForArchitecture())
+			(pod.isPreferredAffinityConfiguredForArchitecture() ||
+				(!cppc.PluginsEnabled(common.NodeAffinityScoringPluginName) && !pod.hasMatchingPPCWithPlugin(matchingPPCs)))
 }
 
 // isNodeSelectorConfiguredForArchitecture returns true if the pod has already a nodeSelector for the architecture label
@@ -401,6 +492,38 @@ func (pod *Pod) isPreferredAffinityConfiguredForArchitecture() bool {
 			if expr.Key == utils.ArchLabel {
 				return true
 			}
+		}
+	}
+	return false
+}
+
+// filterMatchingPPCs returns only PPCs whose label selector matches this pod.
+// This is done once per reconcile/webhook call to avoid redundant selector evaluations.
+func (pod *Pod) filterMatchingPPCs(ppcList *v1beta1.PodPlacementConfigList) []v1beta1.PodPlacementConfig {
+	var matching []v1beta1.PodPlacementConfig
+
+	for _, ppc := range ppcList.Items {
+		selector, err := metav1.LabelSelectorAsSelector(ppc.Spec.LabelSelector)
+		if err != nil {
+			// Invalid selector means it doesn't match - skip
+			continue
+		}
+
+		// Empty selector (Nothing()) or matching selector
+		if selector == labels.Nothing() || selector.Matches(labels.Set(pod.Labels)) {
+			matching = append(matching, ppc)
+		}
+	}
+
+	return matching
+}
+
+// hasMatchingPPCWithPlugin checks if any of the matching PPCs have the NodeAffinityScoring plugin enabled.
+// The matchingPPCs slice should already be filtered to only include PPCs whose label selector matches the pod.
+func (pod *Pod) hasMatchingPPCWithPlugin(matchingPPCs []v1beta1.PodPlacementConfig) bool {
+	for _, ppc := range matchingPPCs {
+		if ppc.PluginsEnabled(common.NodeAffinityScoringPluginName) {
+			return true
 		}
 	}
 	return false
