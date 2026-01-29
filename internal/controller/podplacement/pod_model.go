@@ -128,7 +128,7 @@ func (pod *Pod) SetNodeAffinityArchRequirement(pullSecretDataList [][]byte) (boo
 
 // setRequiredArchNodeAffinity sets the node affinity for the pod to the given requirement based on the rules in
 // the sig-scheduling's KEP-3838: https://github.com/kubernetes/enhancements/tree/master/keps/sig-scheduling/3838-pod-mutable-scheduling-directives.
-func (pod *Pod) setRequiredArchNodeAffinity(requirement corev1.NodeSelectorRequirement) {
+func (pod *Pod) setRequiredArchNodeAffinity(requirement corev1.NodeSelectorRequirement, publishEvent ...bool) {
 	// the .requiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms are ORed
 	if len(pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms) == 0 {
 		// We create a new array of NodeSelectorTerm of length 1 so that we can always iterate it in the next.
@@ -162,8 +162,15 @@ func (pod *Pod) setRequiredArchNodeAffinity(requirement corev1.NodeSelectorRequi
 	// if the nodeSelectorTerms were patched at least once, we set the nodeAffinity label to the set value, to keep
 	// track of the fact that the nodeAffinity was patched by the operator.
 	pod.EnsureLabel(utils.NodeAffinityLabel, utils.NodeAffinityLabelValueSet)
-	pod.PublishEvent(corev1.EventTypeNormal, ArchitectureAwareNodeAffinitySet,
-		ArchitecturePredicateSetupMsg+fmt.Sprintf("{%s}", strings.Join(requirement.Values, ", ")))
+	// Publish event unless explicitly skipped via the optional publishEvent parameter
+	doPublish := true
+	if len(publishEvent) > 0 {
+		doPublish = publishEvent[0]
+	}
+	if doPublish {
+		pod.PublishEvent(corev1.EventTypeNormal, ArchitectureAwareNodeAffinitySet,
+			ArchitecturePredicateSetupMsg+fmt.Sprintf("{%s}", strings.Join(requirement.Values, ", ")))
+	}
 }
 
 // SetPreferredArchNodeAffinity sets the node affinity for the pod to the preferences given in the ClusterPodPlacementConfig.
@@ -292,6 +299,32 @@ func (pod *Pod) trackAffinitySource(arch string, weight int32, source string, ap
 	} else {
 		pod.EnsureAnnotation(utils.PreferredNodeAffinitySourcesAnnotation, existingAnnotation+","+newEntry)
 	}
+}
+
+// setRequiredNodeAffinityToFallbackArchitecture sets the node affinity for the pod to the fallback architecture.
+func (pod *Pod) setRequiredNodeAffinityToFallbackArchitecture(architecture string) {
+	requirement := corev1.NodeSelectorRequirement{
+		Key:      utils.ArchLabel,
+		Operator: corev1.NodeSelectorOpIn,
+		Values:   []string{architecture},
+	}
+
+	if pod.Spec.Affinity == nil {
+		pod.Spec.Affinity = &corev1.Affinity{}
+	}
+
+	if pod.Spec.Affinity.NodeAffinity == nil {
+		pod.Spec.Affinity.NodeAffinity = &corev1.NodeAffinity{}
+	}
+
+	if pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution == nil {
+		pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution = &corev1.NodeSelector{}
+	}
+
+	pod.setRequiredArchNodeAffinity(requirement, false)
+	pod.EnsureLabel(utils.FallbackArchitectureLabel, architecture)
+	pod.PublishEvent(corev1.EventTypeWarning, ArchitectureAwareFallbackNodeAffinitySet,
+		ArchitectureFallbackSetupMsg+fmt.Sprintf("{%s}", architecture))
 }
 
 func (pod *Pod) getArchitecturePredicate(pullSecretDataList [][]byte) (corev1.NodeSelectorRequirement, error) {
