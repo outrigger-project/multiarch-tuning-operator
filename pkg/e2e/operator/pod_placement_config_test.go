@@ -53,6 +53,14 @@ var _ = Describe("The Multiarch Tuning Operator", Serial, func() {
 			_ = framework.StorePodsLog(ctx, clientset, client, utils.Namespace(), "controller", utils.EnoexecControllerName, utils.EnoexecControllerName, os.Getenv("ARTIFACT_DIR"))
 			_ = framework.StorePodsLog(ctx, clientset, client, utils.Namespace(), "app", utils.EnoexecDaemonSet, utils.EnoexecDaemonSet, os.Getenv("ARTIFACT_DIR"))
 		}
+		By("Waiting for any PodPlacementConfigs to be deleted")
+		Eventually(func(g Gomega) {
+			ppcList := &v1beta1.PodPlacementConfigList{}
+			err := client.List(ctx, ppcList)
+			g.Expect(err).NotTo(HaveOccurred())
+			g.Expect(ppcList.Items).To(BeEmpty(), "all PodPlacementConfigs should be deleted")
+		}).Should(Succeed())
+		By("Deleting ClusterPodPlacementConfig")
 		err := client.Delete(ctx, &v1beta1.ClusterPodPlacementConfig{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: "cluster",
@@ -320,7 +328,7 @@ var _ = Describe("The Multiarch Tuning Operator", Serial, func() {
 			Entry(utils.MasterNodeSelectorLabel, utils.MasterNodeSelectorLabel),
 		)
 	})
-	Context("When a pod placement config is created", func() {
+	Context("When a cluster pod placement config is created", func() {
 		It("should create a v1beta1 CPPC with plugins and succeed getting the v1alpha1 version of the CPPC", func() {
 			By("Creating the ClusterPodPlacementConfig")
 			err := client.Create(ctx,
