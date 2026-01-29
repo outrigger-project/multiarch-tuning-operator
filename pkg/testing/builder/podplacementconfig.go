@@ -31,6 +31,11 @@ func (p *PodPlacementConfigBuilder) WithNamespaceSelector(labelSelector *v1.Labe
 	return p
 }
 
+func (p *PodPlacementConfigBuilder) WithLabelSelector(labelSelector *v1.LabelSelector) *PodPlacementConfigBuilder {
+	p.Spec.LabelSelector = labelSelector
+	return p
+}
+
 func (p *PodPlacementConfigBuilder) Build() *v1beta1.PodPlacementConfig {
 	return p.PodPlacementConfig
 }

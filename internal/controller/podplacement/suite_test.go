@@ -396,6 +396,12 @@ func runManager() {
 	}).MustPassRepeatedly(3).Should(
 		Succeed(), "manager is not ready yet")
 	suiteLog.Info("Manager is ready")
+
+	By("Waiting for the manager cache to sync")
+	Eventually(func(g Gomega) {
+		g.Expect(mgr.GetCache().WaitForCacheSync(ctx)).To(BeTrue())
+	}).Should(Succeed(), "cache did not sync")
+	suiteLog.Info("Manager cache synced")
 }
 
 func getMutatingWebHook() *v1.MutatingWebhookConfiguration {

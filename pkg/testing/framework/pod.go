@@ -335,3 +335,17 @@ func VerifyPodLabelsAreSet(ctx context.Context, client runtimeclient.Client, ns 
 		VerifyPodLabels(ctx, client, ns, labelKey, labelInValue, true, entries)(g)
 	}
 }
+
+func VerifyPodAnnotationsAreSet(ctx context.Context, client runtimeclient.Client, ns *v1.Namespace, labelKey string, labelInValue string, annotationsKeyValuePair ...string) func(g Gomega) {
+	return func(g Gomega) {
+		if len(annotationsKeyValuePair)%2 != 0 {
+			// It's ok to panic as this is only used in unit tests.
+			panic("the number of arguments must be even")
+		}
+		entries := make(map[string]string)
+		for i := 0; i < len(annotationsKeyValuePair); i += 2 {
+			entries[annotationsKeyValuePair[i]] = annotationsKeyValuePair[i+1]
+		}
+		VerifyPodAnnotations(ctx, client, ns, labelKey, labelInValue, entries)(g)
+	}
+}

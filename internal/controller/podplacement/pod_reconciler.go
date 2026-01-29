@@ -20,10 +20,12 @@ import (
 	"context"
 	"fmt"
 	runtime2 "runtime"
+	"sort"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/record"
@@ -33,6 +35,7 @@ import (
 	ctrllog "sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/openshift/multiarch-tuning-operator/api/common"
+	multiarchv1beta1 "github.com/openshift/multiarch-tuning-operator/api/v1beta1"
 	"github.com/openshift/multiarch-tuning-operator/internal/controller/podplacement/metrics"
 	"github.com/openshift/multiarch-tuning-operator/pkg/informers/clusterpodplacementconfig"
 	"github.com/openshift/multiarch-tuning-operator/pkg/utils"
@@ -117,8 +120,18 @@ func (r *PodReconciler) processPod(ctx context.Context, pod *Pod) {
 		return
 	}
 
-	if cppc != nil && cppc.PluginsEnabled(common.NodeAffinityScoringPluginName) {
-		pod.SetPreferredArchNodeAffinity(cppc)
+	// Skip preferred affinity processing if the user has already configured architecture-related preferred affinity
+	// or if the reconcile loop has already applied the PPCs/CPPC (e.g., due to a retry or re-reconciliation)
+	if !pod.isPreferredAffinityConfiguredForArchitecture() {
+		r.applyPodPlacementConfigs(ctx, pod)
+
+		if cppc != nil && cppc.PluginsEnabled(common.NodeAffinityScoringPluginName) {
+			pod.SetPreferredArchNodeAffinity(cppc.Spec.Plugins.NodeAffinityScoring, multiarchv1beta1.ClusterPodPlacementConfigKind)
+		}
+	} else {
+		log.V(2).Info("Pod already has architecture-related preferred affinity. This could be user-defined or from a previous reconcile loop. Skipping PPC/CPPC preferred affinity processing.")
+		// Track that configs were skipped due to user-defined preferences
+		r.trackSkippedConfigs(ctx, pod, cppc)
 	}
 
 	// Prepare the requirement for the node affinity.
@@ -140,13 +153,100 @@ func (r *PodReconciler) processPod(ctx context.Context, pod *Pod) {
 	}
 	// If the pod has been processed successfully or the max retries have been reached, remove the scheduling gate.
 	if err == nil || pod.maxRetries() {
+		// If no preferred node affinity was set by any config, log and publish an event
 		if pod.Labels[utils.PreferredNodeAffinityLabel] == utils.LabelValueNotSet {
 			pod.PublishEvent(corev1.EventTypeNormal, ArchitectureAwareNodeAffinitySet,
 				ArchitecturePreferredPredicateSkippedMsg)
+			log.V(2).Info("No preferred node affinity was set")
 		}
 
 		log.V(1).Info("Removing the scheduling gate from pod.")
 		pod.RemoveSchedulingGate()
+	}
+}
+
+func (r *PodReconciler) applyPodPlacementConfigs(ctx context.Context, pod *Pod) {
+	log := ctrllog.FromContext(ctx).WithName("PodPlacementConfig")
+	// List existing PodPlacementConfigs in the same namespace
+	ppcList := &multiarchv1beta1.PodPlacementConfigList{}
+	if err := r.List(ctx, ppcList, client.InNamespace(pod.Namespace)); err != nil {
+		pod.handleError(err, "failed to list existing PodPlacementConfigs in namespace")
+		return
+	}
+
+	// Sort the configurations by descending priority
+	sort.Slice(ppcList.Items, func(i, j int) bool {
+		return ppcList.Items[i].Spec.Priority > ppcList.Items[j].Spec.Priority
+	})
+
+	// For each namespace-scoped configuration, check selector and apply
+	for _, ppc := range ppcList.Items {
+		log.V(1).Info("Processing PodPlacementConfig", "namespace", ppc.Namespace, "name", ppc.Name)
+
+		// check if plugin is enabled
+		if !ppc.PluginsEnabled(common.NodeAffinityScoringPluginName) {
+			log.V(1).Info("Skipping PodPlacementConfig NodeAffinityScoring disabled", "namespace", ppc.Namespace, "name", ppc.Name)
+			continue
+		}
+
+		selector, err := metav1.LabelSelectorAsSelector(ppc.Spec.LabelSelector)
+		if err != nil {
+			pod.handleError(err, "Invalid label selector in PodPlacementConfig")
+			continue
+		}
+
+		// Check if the pod matches the label selector
+		if selector == labels.Nothing() || selector.Matches(labels.Set(pod.Labels)) {
+			log.Info("Applying namespace-scoped config", "PodPlacementConfig", ppc.Name)
+			// Apply the configuration, checking for overlaps
+			configSource := fmt.Sprintf("%s-%s", multiarchv1beta1.PodPlacementConfigKind, ppc.Name)
+			pod.SetPreferredArchNodeAffinity(ppc.Spec.Plugins.NodeAffinityScoring, configSource)
+		}
+	}
+}
+
+// trackSkippedConfigs tracks in the annotation which PPC/CPPC configs would have been applied
+// but were skipped due to user-defined architecture-related preferred affinity
+func (r *PodReconciler) trackSkippedConfigs(ctx context.Context, pod *Pod, cppc *multiarchv1beta1.ClusterPodPlacementConfig) {
+	log := ctrllog.FromContext(ctx)
+
+	// Track skipped PodPlacementConfigs
+	ppcList := &multiarchv1beta1.PodPlacementConfigList{}
+	err := r.List(ctx, ppcList, client.InNamespace(pod.Namespace))
+	if err != nil {
+		log.Error(err, "Unable to list PodPlacementConfigs")
+		return
+	}
+
+	// Sort by descending priority (same as applyPodPlacementConfigs)
+	sort.Slice(ppcList.Items, func(i, j int) bool {
+		return ppcList.Items[i].Spec.Priority > ppcList.Items[j].Spec.Priority
+	})
+
+	for _, ppc := range ppcList.Items {
+		if !ppc.PluginsEnabled(common.NodeAffinityScoringPluginName) {
+			continue
+		}
+
+		selector, err := metav1.LabelSelectorAsSelector(ppc.Spec.LabelSelector)
+		if err != nil {
+			continue
+		}
+
+		if selector == labels.Nothing() || selector.Matches(labels.Set(pod.Labels)) {
+			configSource := fmt.Sprintf("%s-%s", multiarchv1beta1.PodPlacementConfigKind, ppc.Name)
+			// Track each platform term as skipped
+			for _, platform := range ppc.Spec.Plugins.NodeAffinityScoring.Platforms {
+				pod.trackAffinitySource(platform.Architecture, platform.Weight, configSource, false)
+			}
+		}
+	}
+
+	// Track skipped ClusterPodPlacementConfig
+	if cppc != nil && cppc.PluginsEnabled(common.NodeAffinityScoringPluginName) {
+		for _, platform := range cppc.Spec.Plugins.NodeAffinityScoring.Platforms {
+			pod.trackAffinitySource(platform.Architecture, platform.Weight, multiarchv1beta1.ClusterPodPlacementConfigKind, false)
+		}
 	}
 }
 
