@@ -150,6 +150,11 @@ func (r *PodReconciler) processPod(ctx context.Context, pod *Pod) {
 		// Publish this event and remove the scheduling gate.
 		log.Info("Max retries Reached. The pod will not have the nodeAffinity set.")
 		pod.PublishEvent(corev1.EventTypeWarning, ImageArchitectureInspectionError, fmt.Sprintf("%s: %s", ImageInspectionErrorMaxRetriesMsg, err.Error()))
+
+		if cppc != nil && cppc.Spec.FallbackArchitecture != "" {
+			log.Info("Setting the nodeAffinity to the fallback architecture", "fallbackArchitecture", cppc.Spec.FallbackArchitecture)
+			pod.setRequiredNodeAffinityToFallbackArchitecture(cppc.Spec.FallbackArchitecture)
+		}
 	}
 	// If the pod has been processed successfully or the max retries have been reached, remove the scheduling gate.
 	if err == nil || pod.maxRetries() {

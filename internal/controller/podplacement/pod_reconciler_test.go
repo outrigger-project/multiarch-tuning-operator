@@ -5,8 +5,6 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/openshift/multiarch-tuning-operator/api/v1beta1"
-	"github.com/openshift/multiarch-tuning-operator/pkg/e2e"
 	"k8s.io/apimachinery/pkg/util/sets"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -18,11 +16,14 @@ import (
 
 	imgspecv1 "github.com/opencontainers/image-spec/specs-go/v1"
 
-	"github.com/openshift/multiarch-tuning-operator/pkg/utils"
-
+	"github.com/openshift/multiarch-tuning-operator/api/common"
+	"github.com/openshift/multiarch-tuning-operator/api/v1beta1"
+	"github.com/openshift/multiarch-tuning-operator/pkg/e2e"
+	"github.com/openshift/multiarch-tuning-operator/pkg/informers/clusterpodplacementconfig"
 	. "github.com/openshift/multiarch-tuning-operator/pkg/testing/builder"
 	. "github.com/openshift/multiarch-tuning-operator/pkg/testing/framework"
 	"github.com/openshift/multiarch-tuning-operator/pkg/testing/image/fake/registry"
+	"github.com/openshift/multiarch-tuning-operator/pkg/utils"
 )
 
 var _ = Describe("Internal/Controller/Podplacement/PodReconciler", func() {
@@ -110,6 +111,80 @@ var _ = Describe("Internal/Controller/Podplacement/PodReconciler", func() {
 						"node affinity label not found")
 				}).WithTimeout(e2e.WaitShort).WithPolling(time.Millisecond*250).Should(Succeed(), "failed to remove scheduling gate from pod")
 				// Polling set to 250ms such that the error count is shown in the logs at each update.
+			})
+		})
+
+		Context("with an image that cannot be inspected and fallback architecture is set", Serial, func() {
+			It("sets the node affinity to the fallback architecture", func() {
+				// Update the ClusterPodPlacementConfig to set the fallback architecture
+				cppc := &v1beta1.ClusterPodPlacementConfig{}
+				err := k8sClient.Get(ctx, crclient.ObjectKey{Name: common.SingletonResourceObjectName}, cppc)
+				Expect(err).NotTo(HaveOccurred(), "failed to get ClusterPodPlacementConfig")
+				cppc.Spec.FallbackArchitecture = utils.ArchitectureAmd64
+				err = k8sClient.Update(ctx, cppc)
+				Expect(err).NotTo(HaveOccurred(), "failed to update ClusterPodPlacementConfig")
+
+				// Wait for the cache to reflect the update
+				Eventually(func() string {
+					cppc := clusterpodplacementconfig.GetClusterPodPlacementConfig()
+					if cppc == nil {
+						return ""
+					}
+					return cppc.Spec.FallbackArchitecture
+				}).Should(Equal(utils.ArchitectureAmd64), "cache did not update with new ClusterPodPlacementConfig")
+
+				pod := NewPod().
+					WithContainersImages("quay.io/non-existing/image:latest").
+					WithGenerateName("test-pod-fallback-").
+					WithNamespace("test-namespace").
+					Build()
+				err = k8sClient.Create(ctx, pod)
+				Expect(err).NotTo(HaveOccurred(), "failed to create pod", err)
+
+				// Wait for the scheduling gate removal and affinity set
+				Eventually(func(g Gomega) {
+					err := k8sClient.Get(ctx, crclient.ObjectKeyFromObject(pod), pod)
+					g.Expect(err).NotTo(HaveOccurred(), "failed to get pod")
+					g.Expect(pod.Spec.SchedulingGates).NotTo(ContainElement(corev1.PodSchedulingGate{
+						Name: utils.SchedulingGateName,
+					}), "scheduling gate not removed")
+					g.Expect(pod.Labels).To(HaveKeyWithValue(utils.SchedulingGateLabel, utils.SchedulingGateLabelValueRemoved),
+						"scheduling gate annotation not found")
+					// Verify affinity
+					g.Expect(*pod).To(HaveEquivalentNodeAffinity(
+						&corev1.NodeAffinity{
+							RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
+								NodeSelectorTerms: []corev1.NodeSelectorTerm{
+									{
+										MatchExpressions: []corev1.NodeSelectorRequirement{
+											{
+												Key:      utils.ArchLabel,
+												Operator: corev1.NodeSelectorOpIn,
+												Values:   []string{utils.ArchitectureAmd64},
+											},
+										},
+									},
+								},
+							},
+						}), "unexpected node affinity")
+					g.Expect(pod.Labels).To(HaveKeyWithValue(utils.ImageInspectionErrorCountLabel, strconv.Itoa(MaxRetryCount)), "image inspection error count not found")
+					g.Expect(pod.Labels).To(HaveKeyWithValue(utils.FallbackArchitectureLabel, utils.ArchitectureAmd64),
+						"fallback arch label not found")
+					g.Expect(pod.Labels).To(HaveKeyWithValue(utils.NodeAffinityLabel, utils.NodeAffinityLabelValueSet),
+						"node affinity label not found")
+				}).WithTimeout(e2e.WaitShort).Should(Succeed(), "failed to process fallback architecture")
+
+				// Cleanup: Revert CPPC changes
+				cppc.Spec.FallbackArchitecture = ""
+				err = k8sClient.Update(ctx, cppc)
+				Expect(err).NotTo(HaveOccurred(), "failed to revert ClusterPodPlacementConfig")
+				Eventually(func() string {
+					cppc := clusterpodplacementconfig.GetClusterPodPlacementConfig()
+					if cppc == nil {
+						return "nil"
+					}
+					return cppc.Spec.FallbackArchitecture
+				}).Should(Equal(""), "cache did not update with reverted ClusterPodPlacementConfig")
 			})
 		})
 		Context("with different pull secrets", func() {

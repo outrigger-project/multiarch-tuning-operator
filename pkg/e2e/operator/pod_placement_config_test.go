@@ -3,6 +3,7 @@ package operator_test
 import (
 	"fmt"
 	"os"
+	"strconv"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -10,6 +11,7 @@ import (
 	"github.com/openshift/multiarch-tuning-operator/api/common"
 	"github.com/openshift/multiarch-tuning-operator/api/v1alpha1"
 	"github.com/openshift/multiarch-tuning-operator/api/v1beta1"
+	"github.com/openshift/multiarch-tuning-operator/internal/controller/podplacement"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -534,6 +536,101 @@ var _ = Describe("The Multiarch Tuning Operator", Serial, func() {
 			err = client.Create(ctx, d)
 			Expect(err).NotTo(HaveOccurred(), "failed to create deployment", err)
 			Eventually(framework.VerifyPodLabels(ctx, client, ns, "app", "test", e2e.Present, schedulingGateLabel), e2e.WaitShort).Should(Succeed())
+		})
+	})
+	Context("with an image that cannot be inspected", func() {
+		It("remove the scheduling gate after the max retries count", func() {
+			var err error
+			By("Creating a v1beta1 ClusterPodPlacementConfig")
+			err = client.Create(ctx,
+				NewClusterPodPlacementConfig().
+					WithName(common.SingletonResourceObjectName).
+					WithNodeAffinityScoring(true).
+					WithNodeAffinityScoringTerm(utils.ArchitectureAmd64, 24).
+					Build(),
+			)
+			Expect(err).NotTo(HaveOccurred(), "failed to create the ClusterPodPlacementConfig", err)
+			Eventually(framework.ValidateCreation(client, ctx)).Should(Succeed())
+			By("Create an ephemeral namespace")
+			ns := framework.NewEphemeralNamespace()
+			err = client.Create(ctx, ns)
+			Expect(err).NotTo(HaveOccurred())
+			//nolint:errcheck
+			defer client.Delete(ctx, ns)
+			ps := NewPodSpec().
+				WithContainersImages("quay.io/non-existing/image:latest").
+				Build()
+			d := NewDeployment().
+				WithSelectorAndPodLabels(podLabel).
+				WithPodSpec(ps).
+				WithReplicas(utils.NewPtr(int32(1))).
+				WithName("test-deployment").
+				WithNamespace(ns.Name).
+				Build()
+			err = client.Create(ctx, d)
+			Expect(err).NotTo(HaveOccurred())
+			By("The scheduling gate label should be removed")
+			Eventually(framework.VerifyPodLabels(ctx, client, ns, "app", "test", e2e.Present, schedulingGateLabel), e2e.WaitShort).Should(Succeed())
+			By("Verify node affinity label are set correctly")
+			Eventually(framework.VerifyPodLabelsAreSet(ctx, client, ns, "app", "test",
+				utils.NodeAffinityLabel, utils.LabelValueNotSet,
+				utils.PreferredNodeAffinityLabel, utils.NodeAffinityLabelValueSet,
+			), e2e.WaitShort).Should(Succeed())
+			By("Verify image inspection retry count reaches the maximum")
+			Eventually(framework.VerifyPodLabelsAreSet(ctx, client, ns, "app", "test",
+				utils.ImageInspectionErrorCountLabel, strconv.Itoa(podplacement.MaxRetryCount),
+			), e2e.WaitShort).Should(Succeed())
+		})
+		It("Set the node affinity to the fallback architecture if we configure fallbackArchitecture it in CPPC spec", func() {
+			var err error
+			By("Creating a v1beta1 ClusterPodPlacementConfig")
+			err = client.Create(ctx,
+				NewClusterPodPlacementConfig().
+					WithName(common.SingletonResourceObjectName).
+					WithNodeAffinityScoring(true).
+					WithNodeAffinityScoringTerm(utils.ArchitectureAmd64, 24).
+					WithFallbackArchitecture(utils.ArchitectureAmd64).
+					Build(),
+			)
+			Expect(err).NotTo(HaveOccurred(), "failed to create the ClusterPodPlacementConfig", err)
+			Eventually(framework.ValidateCreation(client, ctx)).Should(Succeed())
+			By("Create an ephemeral namespace")
+			ns := framework.NewEphemeralNamespace()
+			err = client.Create(ctx, ns)
+			Expect(err).NotTo(HaveOccurred())
+			//nolint:errcheck
+			defer client.Delete(ctx, ns)
+			ps := NewPodSpec().
+				WithContainersImages("quay.io/non-existing/image:latest").
+				Build()
+			d := NewDeployment().
+				WithSelectorAndPodLabels(podLabel).
+				WithPodSpec(ps).
+				WithReplicas(utils.NewPtr(int32(1))).
+				WithName("test-deployment").
+				WithNamespace(ns.Name).
+				Build()
+			err = client.Create(ctx, d)
+			Expect(err).NotTo(HaveOccurred())
+			archLabelNSR := NewNodeSelectorRequirement().
+				WithKeyAndValues(utils.ArchLabel, corev1.NodeSelectorOpIn, utils.ArchitectureAmd64).
+				Build()
+			expectedNSTs := NewNodeSelectorTerm().WithMatchExpressions(archLabelNSR).Build()
+			By("The scheduling gate label should be removed")
+			Eventually(framework.VerifyPodLabels(ctx, client, ns, "app", "test", e2e.Present, schedulingGateLabel), e2e.WaitShort).Should(Succeed())
+			By("Verify image inspection retry count reaches the maximum")
+			Eventually(framework.VerifyPodLabelsAreSet(ctx, client, ns, "app", "test",
+				utils.ImageInspectionErrorCountLabel, strconv.Itoa(podplacement.MaxRetryCount),
+			), e2e.WaitShort).Should(Succeed())
+			By("Verify fallback arch label are set correctly")
+			Eventually(framework.VerifyPodLabelsAreSet(ctx, client, ns, "app", "test", utils.FallbackArchitectureLabel, utils.ArchitectureAmd64), e2e.WaitShort).Should(Succeed())
+			By("Verify node affinity label are set correctly")
+			Eventually(framework.VerifyPodLabelsAreSet(ctx, client, ns, "app", "test",
+				utils.NodeAffinityLabel, utils.NodeAffinityLabelValueSet,
+				utils.PreferredNodeAffinityLabel, utils.NodeAffinityLabelValueSet,
+			), e2e.WaitShort).Should(Succeed())
+			By("The pod should have been set node affinity of arch info.")
+			Eventually(framework.VerifyPodNodeAffinity(ctx, client, ns, "app", "test", *expectedNSTs), e2e.WaitShort).Should(Succeed())
 		})
 	})
 	Context("the ClusterPodPlacementConfig is deleted within 1s after creation", func() {
