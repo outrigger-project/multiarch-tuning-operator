@@ -651,6 +651,38 @@ func TestPod_SetPreferredArchNodeAffinity(t *testing.T) {
 	}
 }
 
+func TestPod_setRequiredNodeAffinityToFallbackArchitecture(t *testing.T) {
+	tests := []struct {
+		name         string
+		pod          *v1.Pod
+		architecture string
+		want         *v1.Pod
+	}{
+		{
+			name:         "pod with no affinity, sets fallback arch",
+			pod:          NewPod().Build(),
+			architecture: utils.ArchitectureAmd64,
+			want: NewPod().WithNodeSelectorTermsMatchExpressions(
+				[]v1.NodeSelectorRequirement{
+					{
+						Key:      utils.ArchLabel,
+						Operator: v1.NodeSelectorOpIn,
+						Values:   []string{utils.ArchitectureAmd64},
+					},
+				},
+			).Build(),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pod := newPod(tt.pod, ctx, nil)
+			pod.setRequiredNodeAffinityToFallbackArchitecture(tt.architecture)
+			g := NewGomegaWithT(t)
+			g.Expect(pod.Spec.Affinity).Should(Equal(tt.want.Spec.Affinity))
+		})
+	}
+}
+
 func TestPod_SetNodeAffinityArchRequirement(t *testing.T) {
 	tests := []struct {
 		name               string
