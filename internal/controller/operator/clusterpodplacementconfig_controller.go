@@ -50,6 +50,7 @@ import (
 	"github.com/openshift/multiarch-tuning-operator/api/common"
 	"github.com/openshift/multiarch-tuning-operator/api/common/plugins"
 	multiarchv1beta1 "github.com/openshift/multiarch-tuning-operator/api/v1beta1"
+	enoexechandler "github.com/openshift/multiarch-tuning-operator/internal/controller/enoexecevent/handler"
 	"github.com/openshift/multiarch-tuning-operator/pkg/testing/framework"
 	"github.com/openshift/multiarch-tuning-operator/pkg/utils"
 )
@@ -508,6 +509,13 @@ func (r *ClusterPodPlacementConfigReconciler) handleDelete(ctx context.Context,
 func (r *ClusterPodPlacementConfigReconciler) handleEnoexecDelete(ctx context.Context, clusterPodPlacementConfig *multiarchv1beta1.ClusterPodPlacementConfig) error {
 	var err error
 	log := ctrllog.FromContext(ctx, "operation", "handleEnoexecDelete")
+	// If the ENoExecEvent finalizer was never added, skip the entire cleanup process.
+	// This prevents attempting to list ENoExecEvent resources when the plugin was never enabled,
+	// which would cause the informer to be created and fail to sync in time.
+	if !controllerutil.ContainsFinalizer(clusterPodPlacementConfig, utils.ExecFormatErrorFinalizerName) {
+		log.V(1).Info("ENoExecEvent finalizer not present, skipping ENoExecEvent cleanup")
+		return nil
+	}
 	daemonSetRelatedObjsToDelete := []utils.ToDeleteRef{
 		{
 			NamespacedTypedClient: r.ClientSet.RbacV1().ClusterRoles(),
@@ -565,27 +573,30 @@ func (r *ClusterPodPlacementConfigReconciler) handleEnoexecDelete(ctx context.Co
 		return err
 	}
 
-	// Check if any ENoExecEvent resources were found.
-	if len(enoexecEventList.Items) > 0 {
-		log.Info("Found existing ENoExecEvent resources", "count", len(enoexecEventList.Items))
-		return errors.New("found existing ENoExecEvent resources")
-	} else {
-		log.Info("No ENoExecEvent resources found in the cluster. Removing the ExecEvent finalizer from the ENoExec Deployment")
-		deployment := &appsv1.Deployment{}
-		err = r.Get(ctx, client.ObjectKey{
-			Name:      utils.EnoexecControllerName,
-			Namespace: utils.Namespace(),
-		}, deployment)
-		if client.IgnoreNotFound(err) != nil {
-			log.Error(err, "Could not fetch ENoExecEvent Deployment")
+	// Delete errored ENoExecEvent resources and count remaining non-errored ones
+	nonErroredCount, _ := r.deleteErroredENoExecEvents(ctx, enoexecEventList)
+
+	// Only block cleanup if there are non-errored ENoExecEvent resources
+	if nonErroredCount > 0 {
+		log.Info("Found existing non-errored ENoExecEvent resources, waiting for reconciliation", "nonErroredCount", nonErroredCount)
+		return errors.New("found existing ENoExecEvent resources that need reconciliation")
+	}
+
+	log.Info("No non-errored ENoExecEvent resources found in the cluster. Removing the ExecEvent finalizer from the ENoExec Deployment")
+	deployment := &appsv1.Deployment{}
+	err = r.Get(ctx, client.ObjectKey{
+		Name:      utils.EnoexecControllerName,
+		Namespace: utils.Namespace(),
+	}, deployment)
+	if client.IgnoreNotFound(err) != nil {
+		log.Error(err, "Could not fetch ENoExecEvent Deployment")
+		return err
+	}
+	if err == nil && controllerutil.RemoveFinalizer(deployment, utils.ExecFormatErrorFinalizerName) {
+		if err = r.Update(ctx, deployment); err != nil {
+			log.Error(err, "Unable to remove finalizers.",
+				deployment.Kind, deployment.Name)
 			return err
-		}
-		if err == nil && controllerutil.RemoveFinalizer(deployment, utils.ExecFormatErrorFinalizerName) {
-			if err = r.Update(ctx, deployment); err != nil {
-				log.Error(err, "Unable to remove finalizers.",
-					deployment.Kind, deployment.Name)
-				return err
-			}
 		}
 	}
 
@@ -919,6 +930,36 @@ func isDeploymentUpToDate(deployment *appsv1.Deployment) bool {
 		deployment.Status.ReadyReplicas == expectedReplicas &&
 		deployment.Status.UnavailableReplicas == 0 &&
 		deployment.Status.ObservedGeneration == deployment.Generation
+}
+
+// deleteErroredENoExecEvents deletes ENoExecEvent resources that are marked with an error label.
+// Returns the count of non-errored and errored events found.
+func (r *ClusterPodPlacementConfigReconciler) deleteErroredENoExecEvents(ctx context.Context, enoexecEventList *multiarchv1beta1.ENoExecEventList) (nonErroredCount, erroredCount int) {
+	log := ctrllog.FromContext(ctx)
+	for i := range enoexecEventList.Items {
+		enoexecEvent := &enoexecEventList.Items[i]
+		// Check if this ENoExecEvent is marked as errored
+		if enoexecEvent.Labels == nil {
+			nonErroredCount++
+			continue
+		}
+		if _, hasError := enoexecEvent.Labels[enoexechandler.ENoExecEventErrorLabel]; !hasError {
+			nonErroredCount++
+			continue
+		}
+		// Delete errored ENoExecEvents to prevent accumulation of stale resources
+		erroredCount++
+		if deleteErr := r.Delete(ctx, enoexecEvent); deleteErr != nil {
+			log.Error(deleteErr, "Failed to delete errored ENoExecEvent", "name", enoexecEvent.Name)
+		} else {
+			log.V(1).Info("Deleted errored ENoExecEvent", "name", enoexecEvent.Name)
+		}
+	}
+
+	if erroredCount > 0 {
+		log.Info("Deleted errored ENoExecEvent resources during cleanup", "erroredCount", erroredCount)
+	}
+	return nonErroredCount, erroredCount
 }
 
 // SetupWithManager sets up the controller with the Manager.
