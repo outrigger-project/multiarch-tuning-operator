@@ -68,76 +68,84 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	logger := log.FromContext(ctx)
 	metrics.InitMetrics()
 	// Fetch the ENoExecEvent instance
-	enoExecEvent := &multiarchv1beta1.ENoExecEvent{}
-	if err := r.Get(ctx, req.NamespacedName, enoExecEvent); err != nil {
+	eNoExecEvent := NewENoExecEvent(&multiarchv1beta1.ENoExecEvent{}, ctx, r.recorder)
+	if err := r.Get(ctx, req.NamespacedName, eNoExecEvent); err != nil {
 		// If the resource is not found, we simply return. This is not an error.
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
-	if enoExecEvent.Namespace != utils.Namespace() {
-		logger.Info("ENoExecEvent is not in the operator namespace, skipping reconciliation", "name", enoExecEvent.Name, "namespace", enoExecEvent.Namespace)
+	if eNoExecEvent.Namespace != utils.Namespace() {
+		logger.Info("ENoExecEvent is not in the operator namespace, skipping reconciliation", "name", eNoExecEvent.Name, "namespace", eNoExecEvent.Namespace)
+		eNoExecEvent.EnsureLabel(ENoExecEventErrorLabel, ErrorReasonWrongNamespace)
 		return ctrl.Result{}, nil
 	}
 
-	if enoExecEvent.Status.PodName == "" {
+	if eNoExecEvent.Status.PodName == "" {
 		// If the ENoExecEvent does not have a pod name, we ignore it
-		logger.V(5).Info("ENoExecEvent does not have a pod name, skipping reconciliation", "name", enoExecEvent.Name, "namespace", enoExecEvent.Namespace)
+		logger.V(5).Info("ENoExecEvent does not have a pod name, skipping reconciliation", "name", eNoExecEvent.Name, "namespace", eNoExecEvent.Namespace)
+		eNoExecEvent.EnsureLabel(ENoExecEventErrorLabel, ErrorReasonNodeNotFound)
 		return ctrl.Result{}, nil
 	}
 
 	// Log the ENoExecEvent instance
-	logger.Info("Reconciling ENoExecEvent", "name", enoExecEvent.Name, "namespace", enoExecEvent.Namespace)
-	ret, err := r.reconcile(ctx, enoExecEvent)
+	logger.Info("Reconciling ENoExecEvent", "name", eNoExecEvent.Name, "namespace", eNoExecEvent.Namespace)
+	ret, err := r.reconcile(ctx, eNoExecEvent)
 	// If the reconciliation was successful, or one of the objects was not found, we delete the ENoExecEvent resource.
 	if client.IgnoreNotFound(err) == nil {
-		if err := r.Delete(ctx, enoExecEvent); err != nil {
-			logger.Error(err, "Failed to delete ENoExecEvent resource after reconciliation", "name", enoExecEvent.Name)
+		if err := r.Delete(ctx, eNoExecEvent); err != nil {
+			logger.Error(err, "Failed to delete ENoExecEvent resource after reconciliation", "name", eNoExecEvent.Name)
+			eNoExecEvent.EnsureLabel(ENoExecEventErrorLabel, ErrorReasonReconciliation)
 			return ctrl.Result{}, client.IgnoreNotFound(err)
 		}
 		metrics.EnoexecCounter.Inc()
-		logger.Info("Deleted ENoExecEvent resource after successful reconciliation", "name", enoExecEvent.Name)
+		logger.Info("Deleted ENoExecEvent resource after successful reconciliation", "name", eNoExecEvent.Name)
 		return ret, nil
 	}
 	metrics.EnoexecCounterInvalid.Inc()
-	logger.Error(err, "Failed to reconcile ENoExecEvent", "name", enoExecEvent.Name)
+	logger.Error(err, "Failed to reconcile ENoExecEvent", "name", eNoExecEvent.Name)
+	eNoExecEvent.EnsureLabel(ENoExecEventErrorLabel, ErrorReasonReconciliation)
 	return ctrl.Result{}, err
 }
 
-func (r *Reconciler) reconcile(ctx context.Context, enoExecEvent *multiarchv1beta1.ENoExecEvent) (ctrl.Result, error) {
+func (r *Reconciler) reconcile(ctx context.Context, eNoExecEvent *ENoExecEvent) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 	// Retrieve the pod
-	podObj, err := r.clientSet.CoreV1().Pods(enoExecEvent.Status.PodNamespace).Get(ctx, enoExecEvent.Status.PodName, metav1.GetOptions{})
+	podObj, err := r.clientSet.CoreV1().Pods(eNoExecEvent.Status.PodNamespace).Get(ctx, eNoExecEvent.Status.PodName, metav1.GetOptions{})
 	if err != nil {
 		// If the pod is not found, the error will be ignored and the ENoExecEvent will be deleted by the caller.
 		// TODO: increment counter for exec format error failures and missed ENoExecEvent reconciliations
 		logger.Error(err, "Failed to get pod for ENoExecEvent", "podName",
-			enoExecEvent.Status.PodName, "namespace", enoExecEvent.Status.PodNamespace)
+			eNoExecEvent.Status.PodName, "namespace", eNoExecEvent.Status.PodNamespace)
+		eNoExecEvent.EnsureLabel(ENoExecEventErrorLabel, ErrorReasonPodNotFound)
 		return ctrl.Result{}, err
 	}
 
 	pod := models.NewPod(podObj, ctx, r.recorder)
-	if pod.PodObject().Spec.NodeName != enoExecEvent.Status.NodeName {
+	if pod.PodObject().Spec.NodeName != eNoExecEvent.Status.NodeName {
 		// If the pod is not scheduled on the node where the ENoExecEvent was generated, we skip the reconciliation.
 		logger.Info("Pod is not scheduled on the node where the ENoExecEvent was generated", "podName",
-			pod.Name, "namespace", pod.Namespace, "nodeName", enoExecEvent.Status.NodeName)
+			pod.Name, "namespace", pod.Namespace, "nodeName", eNoExecEvent.Status.NodeName)
+		eNoExecEvent.EnsureLabel(ENoExecEventErrorLabel, ErrorReasonNodeNotFound)
 		return ctrl.Result{}, nil
 	}
 
 	// Retrieve the node
-	node, err := r.clientSet.CoreV1().Nodes().Get(ctx, enoExecEvent.Status.NodeName, metav1.GetOptions{})
+	node, err := r.clientSet.CoreV1().Nodes().Get(ctx, eNoExecEvent.Status.NodeName, metav1.GetOptions{})
 	if err != nil {
 		// When the error is "not found", the ENoExecEvent may refer a new pod with the same name scheduled on a different node.
 		// This ENoExecEvent is then not relevant anymore and will be deleted by the caller.
 		// Other errors will be returned to the caller, which will retry the reconciliation.
 		// TODO: increment counter for exec format error failures and missed ENoExecEvent reconciliations
 		logger.Error(err, "Failed to get node for ENoExecEvent", "nodeName", podObj.Spec.NodeName,
-			"podName", enoExecEvent.Status.PodName, "namespace", enoExecEvent.Status.PodNamespace)
+			"podName", eNoExecEvent.Status.PodName, "namespace", eNoExecEvent.Status.PodNamespace)
+		eNoExecEvent.EnsureLabel(ENoExecEventErrorLabel, ErrorReasonNodeNotFound)
 		return ctrl.Result{}, err
 	}
 
-	containerName, err := pod.ContainerNameFor(enoExecEvent.Status.ContainerID)
+	containerName, err := pod.ContainerNameFor(eNoExecEvent.Status.ContainerID)
 	if err != nil {
-		logger.Error(err, "Container ID not found in pod status", "containerID", enoExecEvent.Status.ContainerID)
+		logger.Error(err, "Container ID not found in pod status", "containerID", eNoExecEvent.Status.ContainerID)
+		eNoExecEvent.EnsureLabel(ENoExecEventErrorLabel, ErrorReasonContainerNotFound)
 		containerName = utils.UnknownContainer
 	}
 
@@ -152,6 +160,7 @@ func (r *Reconciler) reconcile(ctx context.Context, enoExecEvent *multiarchv1bet
 	if _, err = r.clientSet.CoreV1().Pods(pod.Namespace).Update(ctx, pod.PodObject(), metav1.UpdateOptions{}); err != nil {
 		logger.Error(err, "Failed to label the pod", "podName", pod.Name, "namespace", pod.Namespace)
 		// if the error is "not found", it means the pod has been deleted, the caller will handle this case.
+		eNoExecEvent.EnsureLabel(ENoExecEventErrorLabel, ErrorReasonPodNotFound)
 		return ctrl.Result{}, err
 	}
 	return ctrl.Result{}, nil
