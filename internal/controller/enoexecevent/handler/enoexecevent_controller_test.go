@@ -476,5 +476,55 @@ var _ = Describe("internal/Controller/ENoExecEvent/Reconciler", func() {
 				Expect(err).To(HaveOccurred(), "Should not update enne status with containerID that has invalid format", err)
 			})
 		})
+		Context("handles reconciliation errors with error labels", func() {
+			It("should mark the ENoExecEvent with error label when node is not found", func() {
+				// Create a pod first
+				podName := framework.GenerateName()
+				eneeName := framework.GenerateName()
+				pod := builder.NewPod().WithNamespace(testNamespace).WithName(podName).WithNodeName(testNodeName).
+					WithContainer("test-image", v1.PullAlways).
+					WithContainerStatuses(builder.NewContainerStatus().WithName(testContainerName).WithID(testContainerID).Build()).
+					Build()
+				createPodAndUpdateStatus(pod)
+
+				// Create ENoExecEvent with non-existent node
+				enee := defaultENoExecFormatError().WithPodName(podName).WithNodeName("non-existent-node").WithName(eneeName).Build()
+				createENEEAndUpdateStatus(enee)
+
+				// The ENoExecEvent should be deleted
+				By("Ensuring the ENoExecEvent is deleted")
+				ensureDeletion(eneeName)
+
+				By("Deleting pod")
+				deletePod(podName)
+			})
+
+			It("should handle container ID not found gracefully", func() {
+				// Create a pod with a different container ID
+				podName := framework.GenerateName()
+				eneeName := framework.GenerateName()
+				pod := builder.NewPod().WithNamespace(testNamespace).WithName(podName).WithNodeName(testNodeName).
+					WithContainer("test-image", v1.PullAlways).
+					WithContainerStatuses(builder.NewContainerStatus().WithName(testContainerName).
+						WithID("cri-o://differentcontainerid1234567890abcdef1234567890abcdef12345678").Build()).
+					Build()
+				createPodAndUpdateStatus(pod)
+
+				// Create ENoExecEvent with non-matching container ID
+				enee := defaultENoExecFormatError().WithPodName(podName).WithName(eneeName).Build()
+				createENEEAndUpdateStatus(enee)
+
+				// Should still publish event with "unknown-container"
+				By("Ensuring the event is published with unknown container")
+				ensureEvent(podName, utils.ExecFormatErrorEventMessage(utils.UnknownContainer, testNodeArch)).
+					Should(Succeed(), "failed to get event for Pod with mismatched container ID")
+
+				By("Ensuring the ENoExecEvent is deleted")
+				ensureDeletion(eneeName)
+
+				By("Deleting pod")
+				deletePod(podName)
+			})
+		})
 	})
 })
