@@ -123,6 +123,8 @@ func (pod *Pod) SetNodeAffinityArchRequirement(pullSecretDataList [][]byte) (boo
 	}
 
 	pod.setRequiredArchNodeAffinity(requirement)
+	pod.PublishEvent(corev1.EventTypeNormal, ArchitectureAwareNodeAffinitySet,
+		ArchitecturePredicateSetupMsg+fmt.Sprintf("{%s}", strings.Join(requirement.Values, ", ")))
 	return true, nil
 }
 
@@ -162,8 +164,6 @@ func (pod *Pod) setRequiredArchNodeAffinity(requirement corev1.NodeSelectorRequi
 	// if the nodeSelectorTerms were patched at least once, we set the nodeAffinity label to the set value, to keep
 	// track of the fact that the nodeAffinity was patched by the operator.
 	pod.EnsureLabel(utils.NodeAffinityLabel, utils.NodeAffinityLabelValueSet)
-	pod.PublishEvent(corev1.EventTypeNormal, ArchitectureAwareNodeAffinitySet,
-		ArchitecturePredicateSetupMsg+fmt.Sprintf("{%s}", strings.Join(requirement.Values, ", ")))
 }
 
 // SetPreferredArchNodeAffinity sets the node affinity for the pod to the preferences given in the ClusterPodPlacementConfig.
@@ -292,6 +292,32 @@ func (pod *Pod) trackAffinitySource(arch string, weight int32, source string, ap
 	} else {
 		pod.EnsureAnnotation(utils.PreferredNodeAffinitySourcesAnnotation, existingAnnotation+","+newEntry)
 	}
+}
+
+// setRequiredNodeAffinityToFallbackArchitecture sets the node affinity for the pod to the fallback architecture.
+func (pod *Pod) setRequiredNodeAffinityToFallbackArchitecture(architecture string) {
+	requirement := corev1.NodeSelectorRequirement{
+		Key:      utils.ArchLabel,
+		Operator: corev1.NodeSelectorOpIn,
+		Values:   []string{architecture},
+	}
+
+	if pod.Spec.Affinity == nil {
+		pod.Spec.Affinity = &corev1.Affinity{}
+	}
+
+	if pod.Spec.Affinity.NodeAffinity == nil {
+		pod.Spec.Affinity.NodeAffinity = &corev1.NodeAffinity{}
+	}
+
+	if pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution == nil {
+		pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution = &corev1.NodeSelector{}
+	}
+
+	pod.setRequiredArchNodeAffinity(requirement)
+	pod.EnsureLabel(utils.FallbackArchitectureLabel, architecture)
+	pod.PublishEvent(corev1.EventTypeWarning, ArchitectureAwareFallbackNodeAffinitySet,
+		ArchitectureFallbackSetupMsg+fmt.Sprintf("{%s}", architecture))
 }
 
 func (pod *Pod) getArchitecturePredicate(pullSecretDataList [][]byte) (corev1.NodeSelectorRequirement, error) {
