@@ -451,7 +451,7 @@ var _ = Describe("internal/Controller/ClusterPodPlacementConfig/ClusterPodPlacem
 					framework.NewConditionTypeStatusTuple(v1beta1.DegradedType, corev1.ConditionTrue),
 					framework.NewConditionTypeStatusTuple(v1beta1.PodPlacementControllerNotRolledOutType, corev1.ConditionTrue),
 					framework.NewConditionTypeStatusTuple(v1beta1.PodPlacementWebhookNotRolledOutType, corev1.ConditionFalse),
-					framework.NewConditionTypeStatusTuple(v1beta1.MutatingWebhookConfigurationNotAvailable, corev1.ConditionFalse),
+					framework.NewConditionTypeStatusTuple(v1beta1.MutatingWebhookConfigurationNotAvailable, corev1.ConditionTrue),
 					framework.NewConditionTypeStatusTuple(v1beta1.DeprovisioningType, corev1.ConditionFalse),
 				)).Should(Succeed(), "the ClusterPodPlacementConfig should have the correct conditions")
 				By("Verify no mutating webhook configuration is not available")
