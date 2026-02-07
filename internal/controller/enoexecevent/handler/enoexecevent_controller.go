@@ -18,6 +18,7 @@ package handler
 
 import (
 	"context"
+	"errors"
 	runtime2 "runtime"
 
 	v1 "k8s.io/api/core/v1"
@@ -76,15 +77,15 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 
 	if eNoExecEvent.Namespace != utils.Namespace() {
 		logger.Info("ENoExecEvent is not in the operator namespace, skipping reconciliation", "name", eNoExecEvent.Name, "namespace", eNoExecEvent.Namespace)
-		eNoExecEvent.EnsureLabel(ENoExecEventErrorLabel, ErrorReasonWrongNamespace)
-		return ctrl.Result{}, nil
+		err := r.markAsError(ctx, eNoExecEvent, ErrorReasonWrongNamespace)
+		return ctrl.Result{}, err
 	}
 
 	if eNoExecEvent.Status.PodName == "" {
 		// If the ENoExecEvent does not have a pod name, we ignore it
 		logger.V(5).Info("ENoExecEvent does not have a pod name, skipping reconciliation", "name", eNoExecEvent.Name, "namespace", eNoExecEvent.Namespace)
-		eNoExecEvent.EnsureLabel(ENoExecEventErrorLabel, ErrorReasonNodeNotFound)
-		return ctrl.Result{}, nil
+		err := r.markAsError(ctx, eNoExecEvent, ErrorReasonNodeNotFound)
+		return ctrl.Result{}, err
 	}
 
 	// Log the ENoExecEvent instance
@@ -94,8 +95,8 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	if client.IgnoreNotFound(err) == nil {
 		if err := r.Delete(ctx, eNoExecEvent); err != nil {
 			logger.Error(err, "Failed to delete ENoExecEvent resource after reconciliation", "name", eNoExecEvent.Name)
-			eNoExecEvent.EnsureLabel(ENoExecEventErrorLabel, ErrorReasonReconciliation)
-			return ctrl.Result{}, client.IgnoreNotFound(err)
+			markErr := r.markAsError(ctx, eNoExecEvent, ErrorReasonReconciliation)
+			return ctrl.Result{}, client.IgnoreNotFound(errors.Join(err, markErr))
 		}
 		metrics.EnoexecCounter.Inc()
 		logger.Info("Deleted ENoExecEvent resource after successful reconciliation", "name", eNoExecEvent.Name)
@@ -103,8 +104,8 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	}
 	metrics.EnoexecCounterInvalid.Inc()
 	logger.Error(err, "Failed to reconcile ENoExecEvent", "name", eNoExecEvent.Name)
-	eNoExecEvent.EnsureLabel(ENoExecEventErrorLabel, ErrorReasonReconciliation)
-	return ctrl.Result{}, err
+	markErr := r.markAsError(ctx, eNoExecEvent, ErrorReasonReconciliation)
+	return ctrl.Result{}, errors.Join(err, markErr)
 }
 
 func (r *Reconciler) reconcile(ctx context.Context, eNoExecEvent *ENoExecEvent) (ctrl.Result, error) {
@@ -116,8 +117,8 @@ func (r *Reconciler) reconcile(ctx context.Context, eNoExecEvent *ENoExecEvent) 
 		// TODO: increment counter for exec format error failures and missed ENoExecEvent reconciliations
 		logger.Error(err, "Failed to get pod for ENoExecEvent", "podName",
 			eNoExecEvent.Status.PodName, "namespace", eNoExecEvent.Status.PodNamespace)
-		eNoExecEvent.EnsureLabel(ENoExecEventErrorLabel, ErrorReasonPodNotFound)
-		return ctrl.Result{}, err
+		markErr := r.markAsError(ctx, eNoExecEvent, ErrorReasonPodNotFound)
+		return ctrl.Result{}, errors.Join(err, markErr)
 	}
 
 	pod := models.NewPod(podObj, ctx, r.recorder)
@@ -125,8 +126,8 @@ func (r *Reconciler) reconcile(ctx context.Context, eNoExecEvent *ENoExecEvent) 
 		// If the pod is not scheduled on the node where the ENoExecEvent was generated, we skip the reconciliation.
 		logger.Info("Pod is not scheduled on the node where the ENoExecEvent was generated", "podName",
 			pod.Name, "namespace", pod.Namespace, "nodeName", eNoExecEvent.Status.NodeName)
-		eNoExecEvent.EnsureLabel(ENoExecEventErrorLabel, ErrorReasonNodeNotFound)
-		return ctrl.Result{}, nil
+		err := r.markAsError(ctx, eNoExecEvent, ErrorReasonNodeNotFound)
+		return ctrl.Result{}, err
 	}
 
 	// Retrieve the node
@@ -138,14 +139,14 @@ func (r *Reconciler) reconcile(ctx context.Context, eNoExecEvent *ENoExecEvent) 
 		// TODO: increment counter for exec format error failures and missed ENoExecEvent reconciliations
 		logger.Error(err, "Failed to get node for ENoExecEvent", "nodeName", podObj.Spec.NodeName,
 			"podName", eNoExecEvent.Status.PodName, "namespace", eNoExecEvent.Status.PodNamespace)
-		eNoExecEvent.EnsureLabel(ENoExecEventErrorLabel, ErrorReasonNodeNotFound)
-		return ctrl.Result{}, err
+		markErr := r.markAsError(ctx, eNoExecEvent, ErrorReasonNodeNotFound)
+		return ctrl.Result{}, errors.Join(err, markErr)
 	}
 
 	containerName, err := pod.ContainerNameFor(eNoExecEvent.Status.ContainerID)
 	if err != nil {
 		logger.Error(err, "Container ID not found in pod status", "containerID", eNoExecEvent.Status.ContainerID)
-		eNoExecEvent.EnsureLabel(ENoExecEventErrorLabel, ErrorReasonContainerNotFound)
+		_ = r.markAsError(ctx, eNoExecEvent, ErrorReasonContainerNotFound)
 		containerName = utils.UnknownContainer
 	}
 
@@ -160,8 +161,8 @@ func (r *Reconciler) reconcile(ctx context.Context, eNoExecEvent *ENoExecEvent) 
 	if _, err = r.clientSet.CoreV1().Pods(pod.Namespace).Update(ctx, pod.PodObject(), metav1.UpdateOptions{}); err != nil {
 		logger.Error(err, "Failed to label the pod", "podName", pod.Name, "namespace", pod.Namespace)
 		// if the error is "not found", it means the pod has been deleted, the caller will handle this case.
-		eNoExecEvent.EnsureLabel(ENoExecEventErrorLabel, ErrorReasonPodNotFound)
-		return ctrl.Result{}, err
+		markErr := r.markAsError(ctx, eNoExecEvent, ErrorReasonPodNotFound)
+		return ctrl.Result{}, errors.Join(err, markErr)
 	}
 	return ctrl.Result{}, nil
 }
@@ -180,4 +181,22 @@ func (r *Reconciler) SetupWithManager(mgr ctrl.Manager) error {
 			MaxConcurrentReconciles: maxConcurrentReconciles,
 		}).
 		Complete(r)
+}
+
+// markAsError marks the ENoExecEvent with an error label and persists it.
+// The errored events are kept in the cluster and cleaned up later by the operator controller's
+// deleteErroredENoExecEvents function during CPPC deletion or plugin disable.
+func (r *Reconciler) markAsError(ctx context.Context, eNoExecEvent *ENoExecEvent, errorReason string) error {
+	logger := log.FromContext(ctx)
+
+	// Set the error label
+	eNoExecEvent.EnsureLabel(ENoExecEventErrorLabel, errorReason)
+
+	// Update the ENoExecEvent to persist the label.
+	// Ignore NotFound errors - the object may have already been deleted.
+	if err := r.Update(ctx, eNoExecEvent); client.IgnoreNotFound(err) != nil {
+		logger.Error(err, "Failed to update ENoExecEvent with error label", "name", eNoExecEvent.Name, "reason", errorReason)
+		return err
+	}
+	return nil
 }
