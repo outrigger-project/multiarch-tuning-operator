@@ -11,7 +11,7 @@ ARG TARGETARCH
 USER 0
 RUN if ! pkg-config --exists gpgme 2>/dev/null; then \
         if which apt-get; then apt-get update && apt-get install -y libgpgme-dev && apt-get -y clean autoclean; \
-        elif which dnf; then dnf install -y gpgme-devel && dnf clean all -y; fi; \
+        elif which microdnf; then microdnf install -y gpgme-devel && microdnf clean all; fi; \
     fi
 
 WORKDIR /workspace
