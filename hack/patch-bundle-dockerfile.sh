@@ -21,7 +21,9 @@ LABEL summary="The Multiarch Tuning Operator enhances the user experience for ad
                    clusters with multi-architecture compute nodes or Site Reliability Engineers willing to \
                    migrate from single-arch to multi-arch OpenShift"
 LABEL io.k8s.display-name="Multiarch Tuning Operator"
-LABEL io.openshift.tags="openshift,operator,multiarch,scheduling"'
+LABEL io.openshift.tags="openshift,operator,multiarch,scheduling"
+LABEL maintainer="tzivkovi@redhat.com"'
+
 
 # Remove the content of the bundle.konflux.Dockerfile starting from the line with the comment "# Labels from hack/patch-bundle-dockerfile.sh"
 if [[ "$(uname)" == "Darwin" ]]; then

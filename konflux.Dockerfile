@@ -54,6 +54,7 @@ LABEL summary="The Multiarch Tuning Operator enhances the user experience for ad
                    migrate from single-arch to multi-arch OpenShift"
 LABEL io.k8s.display-name="Multiarch Tuning Operator"
 LABEL io.openshift.tags="openshift,operator,multiarch,scheduling"
+LABEL maintainer="tzivkovi@redhat.com"
 
 ENTRYPOINT ["/manager"]
 
