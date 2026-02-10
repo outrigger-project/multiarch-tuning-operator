@@ -18,7 +18,6 @@ package handler
 
 import (
 	"context"
-	"errors"
 	runtime2 "runtime"
 
 	v1 "k8s.io/api/core/v1"
@@ -69,23 +68,27 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	logger := log.FromContext(ctx)
 	metrics.InitMetrics()
 	// Fetch the ENoExecEvent instance
-	eNoExecEvent := NewENoExecEvent(&multiarchv1beta1.ENoExecEvent{}, ctx, r.recorder)
-	if err := r.Get(ctx, req.NamespacedName, eNoExecEvent); err != nil {
+	enoExecEventObj := &multiarchv1beta1.ENoExecEvent{}
+	if err := r.Get(ctx, req.NamespacedName, enoExecEventObj); err != nil {
 		// If the resource is not found, we simply return. This is not an error.
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
+	eNoExecEvent := NewENoExecEvent(enoExecEventObj, ctx, r.recorder)
+
 	if eNoExecEvent.Namespace != utils.Namespace() {
 		logger.Info("ENoExecEvent is not in the operator namespace, skipping reconciliation", "name", eNoExecEvent.Name, "namespace", eNoExecEvent.Namespace)
-		err := r.markAsError(ctx, eNoExecEvent, ErrorReasonWrongNamespace)
-		return ctrl.Result{}, err
+		_ = r.markAsError(ctx, eNoExecEvent, ErrorReasonWrongNamespace)
+		// Return nil to avoid requeuing - this event will be cleaned up by deleteErroredENoExecEvents
+		return ctrl.Result{}, nil
 	}
 
 	if eNoExecEvent.Status.PodName == "" {
 		// If the ENoExecEvent does not have a pod name, we ignore it
 		logger.V(5).Info("ENoExecEvent does not have a pod name, skipping reconciliation", "name", eNoExecEvent.Name, "namespace", eNoExecEvent.Namespace)
-		err := r.markAsError(ctx, eNoExecEvent, ErrorReasonNodeNotFound)
-		return ctrl.Result{}, err
+		_ = r.markAsError(ctx, eNoExecEvent, ErrorReasonNodeNotFound)
+		// Return nil to avoid requeuing - this event will be cleaned up by deleteErroredENoExecEvents
+		return ctrl.Result{}, nil
 	}
 
 	// Log the ENoExecEvent instance
@@ -93,10 +96,11 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	ret, err := r.reconcile(ctx, eNoExecEvent)
 	// If the reconciliation was successful, or one of the objects was not found, we delete the ENoExecEvent resource.
 	if client.IgnoreNotFound(err) == nil {
-		if err := r.Delete(ctx, eNoExecEvent); err != nil {
+		if err := r.Delete(ctx, &eNoExecEvent.ENoExecEvent); err != nil {
 			logger.Error(err, "Failed to delete ENoExecEvent resource after reconciliation", "name", eNoExecEvent.Name)
-			markErr := r.markAsError(ctx, eNoExecEvent, ErrorReasonReconciliation)
-			return ctrl.Result{}, client.IgnoreNotFound(errors.Join(err, markErr))
+			// Mark as error but return the original error so client.IgnoreNotFound works
+			_ = r.markAsError(ctx, eNoExecEvent, ErrorReasonReconciliation)
+			return ctrl.Result{}, client.IgnoreNotFound(err)
 		}
 		metrics.EnoexecCounter.Inc()
 		logger.Info("Deleted ENoExecEvent resource after successful reconciliation", "name", eNoExecEvent.Name)
@@ -104,8 +108,9 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	}
 	metrics.EnoexecCounterInvalid.Inc()
 	logger.Error(err, "Failed to reconcile ENoExecEvent", "name", eNoExecEvent.Name)
-	markErr := r.markAsError(ctx, eNoExecEvent, ErrorReasonReconciliation)
-	return ctrl.Result{}, errors.Join(err, markErr)
+	// Mark as error - this is a real reconciliation error that will be retried
+	_ = r.markAsError(ctx, eNoExecEvent, ErrorReasonReconciliation)
+	return ctrl.Result{}, err
 }
 
 func (r *Reconciler) reconcile(ctx context.Context, eNoExecEvent *ENoExecEvent) (ctrl.Result, error) {
@@ -117,8 +122,9 @@ func (r *Reconciler) reconcile(ctx context.Context, eNoExecEvent *ENoExecEvent) 
 		// TODO: increment counter for exec format error failures and missed ENoExecEvent reconciliations
 		logger.Error(err, "Failed to get pod for ENoExecEvent", "podName",
 			eNoExecEvent.Status.PodName, "namespace", eNoExecEvent.Status.PodNamespace)
-		markErr := r.markAsError(ctx, eNoExecEvent, ErrorReasonPodNotFound)
-		return ctrl.Result{}, errors.Join(err, markErr)
+		// Mark as error but return the original error so client.IgnoreNotFound works
+		_ = r.markAsError(ctx, eNoExecEvent, ErrorReasonPodNotFound)
+		return ctrl.Result{}, err
 	}
 
 	pod := models.NewPod(podObj, ctx, r.recorder)
@@ -126,8 +132,9 @@ func (r *Reconciler) reconcile(ctx context.Context, eNoExecEvent *ENoExecEvent) 
 		// If the pod is not scheduled on the node where the ENoExecEvent was generated, we skip the reconciliation.
 		logger.Info("Pod is not scheduled on the node where the ENoExecEvent was generated", "podName",
 			pod.Name, "namespace", pod.Namespace, "nodeName", eNoExecEvent.Status.NodeName)
-		err := r.markAsError(ctx, eNoExecEvent, ErrorReasonNodeNotFound)
-		return ctrl.Result{}, err
+		// This is not an error case - mark it and return nil so it gets deleted
+		_ = r.markAsError(ctx, eNoExecEvent, ErrorReasonNodeNotFound)
+		return ctrl.Result{}, nil
 	}
 
 	// Retrieve the node
@@ -139,8 +146,9 @@ func (r *Reconciler) reconcile(ctx context.Context, eNoExecEvent *ENoExecEvent) 
 		// TODO: increment counter for exec format error failures and missed ENoExecEvent reconciliations
 		logger.Error(err, "Failed to get node for ENoExecEvent", "nodeName", podObj.Spec.NodeName,
 			"podName", eNoExecEvent.Status.PodName, "namespace", eNoExecEvent.Status.PodNamespace)
-		markErr := r.markAsError(ctx, eNoExecEvent, ErrorReasonNodeNotFound)
-		return ctrl.Result{}, errors.Join(err, markErr)
+		// Mark as error but return the original error so client.IgnoreNotFound works
+		_ = r.markAsError(ctx, eNoExecEvent, ErrorReasonNodeNotFound)
+		return ctrl.Result{}, err
 	}
 
 	containerName, err := pod.ContainerNameFor(eNoExecEvent.Status.ContainerID)
@@ -161,8 +169,9 @@ func (r *Reconciler) reconcile(ctx context.Context, eNoExecEvent *ENoExecEvent) 
 	if _, err = r.clientSet.CoreV1().Pods(pod.Namespace).Update(ctx, pod.PodObject(), metav1.UpdateOptions{}); err != nil {
 		logger.Error(err, "Failed to label the pod", "podName", pod.Name, "namespace", pod.Namespace)
 		// if the error is "not found", it means the pod has been deleted, the caller will handle this case.
-		markErr := r.markAsError(ctx, eNoExecEvent, ErrorReasonPodNotFound)
-		return ctrl.Result{}, errors.Join(err, markErr)
+		// Mark as error but return the original error so client.IgnoreNotFound works
+		_ = r.markAsError(ctx, eNoExecEvent, ErrorReasonPodNotFound)
+		return ctrl.Result{}, err
 	}
 	return ctrl.Result{}, nil
 }
@@ -194,7 +203,7 @@ func (r *Reconciler) markAsError(ctx context.Context, eNoExecEvent *ENoExecEvent
 
 	// Update the ENoExecEvent to persist the label.
 	// Ignore NotFound errors - the object may have already been deleted.
-	if err := r.Update(ctx, eNoExecEvent); client.IgnoreNotFound(err) != nil {
+	if err := r.Update(ctx, &eNoExecEvent.ENoExecEvent); client.IgnoreNotFound(err) != nil {
 		logger.Error(err, "Failed to update ENoExecEvent with error label", "name", eNoExecEvent.Name, "reason", errorReason)
 		return err
 	}
