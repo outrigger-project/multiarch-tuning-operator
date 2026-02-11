@@ -93,14 +93,17 @@ func deletePod(podName string) {
 func createENEEAndUpdateStatus(enee *v1beta1.ENoExecEvent) {
 	By("Creating the ENoExecEvent")
 	Expect(k8sClient.Create(ctx, enee.DeepCopy())).To(Succeed(), "failed to create ENoExecEvent")
-	var eneeToUpdate = &v1beta1.ENoExecEvent{}
-	Expect(k8sClient.Get(ctx, crclient.ObjectKey{
-		Name:      enee.Name,
-		Namespace: enee.Namespace,
-	}, eneeToUpdate)).To(Succeed(), "failed to get ENoExecEvent after creation")
-	eneeToUpdate.Status = enee.Status
 	By("Updating the ENoExecEvent status")
-	Expect(k8sClient.Status().Update(ctx, eneeToUpdate)).To(Succeed(), "failed to update ENoExecEvent status")
+	// Retry on conflict in case the reconciler modifies the object concurrently
+	Eventually(func(g Gomega) {
+		var eneeToUpdate = &v1beta1.ENoExecEvent{}
+		g.Expect(k8sClient.Get(ctx, crclient.ObjectKey{
+			Name:      enee.Name,
+			Namespace: enee.Namespace,
+		}, eneeToUpdate)).To(Succeed(), "failed to get ENoExecEvent after creation")
+		eneeToUpdate.Status = enee.Status
+		g.Expect(k8sClient.Status().Update(ctx, eneeToUpdate)).To(Succeed(), "failed to update ENoExecEvent status")
+	}).WithPolling(e2e.PollingInterval).WithTimeout(e2e.WaitShort).Should(Succeed(), "failed to update ENoExecEvent status with retries")
 }
 
 func createPodAndUpdateStatus(pod *v1.Pod) {
@@ -114,6 +117,31 @@ func createPodAndUpdateStatus(pod *v1.Pod) {
 	podToUpdate.Status = pod.Status
 	By("Updating the Pod status")
 	Expect(k8sClient.Status().Update(ctx, podToUpdate)).To(Succeed(), "failed to update Pod status")
+}
+
+// updateENEEStatusWithRetry updates ENoExecEvent status with retry logic to handle conflicts from concurrent reconciler updates
+func updateENEEStatusWithRetry(name, namespace string, status v1beta1.ENoExecEventStatus) error {
+	var lastErr error
+	// Retry up to 5 times with refetch to handle conflicts
+	for i := 0; i < 5; i++ {
+		eneeToUpdate := &v1beta1.ENoExecEvent{}
+		if err := k8sClient.Get(ctx, crclient.ObjectKey{
+			Name:      name,
+			Namespace: namespace,
+		}, eneeToUpdate); err != nil {
+			return err
+		}
+		eneeToUpdate.Status = status
+		if err := k8sClient.Status().Update(ctx, eneeToUpdate); err != nil {
+			if apierrors.IsConflict(err) {
+				lastErr = err
+				continue // Retry on conflict
+			}
+			return err
+		}
+		return nil // Success
+	}
+	return lastErr // Return last conflict error after retries
 }
 
 var _ = Describe("internal/Controller/ENoExecEvent/Reconciler", func() {
@@ -246,14 +274,13 @@ var _ = Describe("internal/Controller/ENoExecEvent/Reconciler", func() {
 				err := k8sClient.Create(ctx, enee)
 				Expect(err).NotTo(HaveOccurred(), "failed to create ENoExecEvent", err)
 
-				// Set status manually (after creation)
-				enee.Status = v1beta1.ENoExecEventStatus{
+				// Set status manually (after creation) - use helper to handle race with reconciler
+				err = updateENEEStatusWithRetry("test-name", testNamespace, v1beta1.ENoExecEventStatus{
 					NodeName:     "test-node",
 					PodName:      "test-pod",
 					PodNamespace: "test-namespace",
 					ContainerID:  "docker://d34db33fd34db33fd34db33fa34db33fd34db33fd34db33fd34db33fd34db3d3",
-				}
-				err = k8sClient.Status().Update(ctx, enee)
+				})
 				Expect(err).NotTo(HaveOccurred())
 				Eventually(func(g Gomega) {
 					// Get enee from the API server
@@ -341,10 +368,9 @@ var _ = Describe("internal/Controller/ENoExecEvent/Reconciler", func() {
 			})
 			It("should accept a NodeName that has valid character", func() {
 				By("Updating the ENoExecEvent")
-				enee.Status = v1beta1.ENoExecEventStatus{
+				err := updateENEEStatusWithRetry(eneeName, testNamespace, v1beta1.ENoExecEventStatus{
 					NodeName: "test.node.name",
-				}
-				err := k8sClient.Status().Update(ctx, enee)
+				})
 				Expect(err).NotTo(HaveOccurred(), "Should update enne status with nodeName that starts with an valid character", err)
 			})
 			It("should reject a PodName that exceeds 253 character", func() {
@@ -371,10 +397,9 @@ var _ = Describe("internal/Controller/ENoExecEvent/Reconciler", func() {
 			})
 			It("should accept valid PodName", func() {
 				By("Updating the ENoExecEvent")
-				enee.Status = v1beta1.ENoExecEventStatus{
+				err := updateENEEStatusWithRetry(eneeName, testNamespace, v1beta1.ENoExecEventStatus{
 					PodName: "valid.pod-name-26",
-				}
-				err := k8sClient.Status().Update(ctx, enee)
+				})
 				Expect(err).NotTo(HaveOccurred(), "Should update enne status with valid podName", err)
 			})
 			It("should reject a PodName that does not start or end with alphanumeric character", func() {
@@ -421,10 +446,9 @@ var _ = Describe("internal/Controller/ENoExecEvent/Reconciler", func() {
 			})
 			It("should accept valid PodNamespace", func() {
 				By("Updating the ENoExecEvent")
-				enee.Status = v1beta1.ENoExecEventStatus{
+				err := updateENEEStatusWithRetry(eneeName, testNamespace, v1beta1.ENoExecEventStatus{
 					PodNamespace: "valid-pod-namespace-26",
-				}
-				err := k8sClient.Status().Update(ctx, enee)
+				})
 				Expect(err).NotTo(HaveOccurred(), "Should update enne status with valid podNamespace", err)
 			})
 			It("should reject a PodNamespace that does not start or end with alphanumeric character", func() {
