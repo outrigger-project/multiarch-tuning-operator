@@ -13,6 +13,7 @@ import (
 	. "github.com/onsi/gomega"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 
@@ -197,7 +198,9 @@ func createRegistryConfigTestData() {
 		},
 	}
 	err = client.Create(ctx, registryNS)
-	Expect(err).NotTo(HaveOccurred())
+	if err != nil && !apierrors.IsAlreadyExists(err) {
+		Expect(err).NotTo(HaveOccurred())
+	}
 	inSecureRegistryConfig = runRegistry(ctx, client, registryNS, e2e.InsecureRegistryName, false)
 	notTrustedRegistryConfig = runRegistry(ctx, client, registryNS, e2e.NotTrustedRegistryName, false)
 	trustedRegistryConfig = runRegistry(ctx, client, registryNS, e2e.TrustedRegistryName, true)
@@ -279,13 +282,15 @@ func deleteRegistryConfigTestData() {
 		ObjectMeta: metav1.ObjectMeta{Name: e2e.ITMSName},
 	}, "ImageTagMirrorSet")
 	By("Restoring image.config")
-	image, err := framework.GetImageConfig(ctx, client)
-	Expect(err).NotTo(HaveOccurred())
-	image.Spec = imageForRemove.Spec
-	err = client.Update(ctx, image)
-	Expect(err).NotTo(HaveOccurred())
+	if imageForRemove != nil {
+		image, err := framework.GetImageConfig(ctx, client)
+		Expect(err).NotTo(HaveOccurred())
+		image.Spec = imageForRemove.Spec
+		err = client.Update(ctx, image)
+		Expect(err).NotTo(HaveOccurred())
+	}
 	By("Deleting registry namespace")
-	err = client.Delete(ctx, registryNS)
+	err := client.Delete(ctx, registryNS)
 	Expect(err).NotTo(HaveOccurred())
 	By("Cleaning up certificate files for registry")
 	deleteTestRegistry(ctx, client, inSecureRegistryConfig)
