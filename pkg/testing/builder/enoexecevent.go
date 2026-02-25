@@ -44,6 +44,11 @@ func (p *ENoExecEventBuilder) WithContainerID(containerID string) *ENoExecEventB
 	return p
 }
 
+func (p *ENoExecEventBuilder) WithFinalizer(finalizer string) *ENoExecEventBuilder {
+	p.Finalizers = append(p.Finalizers, finalizer)
+	return p
+}
+
 func (p *ENoExecEventBuilder) Build() *v1beta1.ENoExecEvent {
 	return p.ENoExecEvent
 }
