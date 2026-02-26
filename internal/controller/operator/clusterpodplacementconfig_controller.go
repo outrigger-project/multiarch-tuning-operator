@@ -396,6 +396,14 @@ func (r *ClusterPodPlacementConfigReconciler) handleDelete(ctx context.Context,
 			log.Error(err, "Deletion blocked due to existing PodPlacementConfig resources")
 			return err
 		}
+		// All PPCs are gone, remove the finalizer
+		log.V(1).Info("No PodPlacementConfig resources found, removing no-pod-placement-config finalizer")
+		controllerutil.RemoveFinalizer(clusterPodPlacementConfig, utils.CPPCNoPPCObjectFinalizer)
+		if err := r.Update(ctx, clusterPodPlacementConfig); err != nil {
+			log.Error(err, "Unable to remove no-pod-placement-config finalizer from ClusterPodPlacementConfig")
+			return err
+		}
+		return nil
 	}
 
 	log.Info("Looking for pods with the scheduling gate")

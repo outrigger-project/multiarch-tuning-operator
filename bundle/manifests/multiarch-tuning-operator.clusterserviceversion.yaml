@@ -27,7 +27,7 @@ metadata:
     categories: OpenShift Optional, Other
     console.openshift.io/disable-operand-delete: "false"
     containerImage: registry.ci.openshift.org/origin/multiarch-tuning-operator:main
-    createdAt: "2026-01-14T07:07:10Z"
+    createdAt: "2026-01-28T21:24:08Z"
     features.operators.openshift.io/cnf: "false"
     features.operators.openshift.io/cni: "false"
     features.operators.openshift.io/csi: "false"

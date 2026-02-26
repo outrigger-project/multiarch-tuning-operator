@@ -195,6 +195,11 @@ func buildClusterRoleWebhook() *rbacv1.ClusterRole {
 			Verbs:     []string{LIST, WATCH, GET},
 		},
 		{
+			APIGroups: []string{v1beta1.GroupVersion.Group},
+			Resources: []string{v1beta1.PodPlacementConfigResource},
+			Verbs:     []string{LIST, WATCH, GET},
+		},
+		{
 			APIGroups: []string{""},
 			Resources: []string{"pods"},
 			Verbs:     []string{LIST, WATCH, GET},
