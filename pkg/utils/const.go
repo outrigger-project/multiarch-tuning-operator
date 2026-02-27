@@ -102,13 +102,13 @@ func ExecFormatErrorEventMessage(containerName, nodeArch string) string {
 	if containerName == UnknownContainer {
 		b.WriteString("A container ")
 	} else {
-		b.WriteString(fmt.Sprintf("Container %q ", containerName))
+		fmt.Fprintf(&b, "Container %q ", containerName)
 	}
 
 	b.WriteString("is running a binary")
 	b.WriteString(" that is not compatible with the node architecture")
 	if nodeArch != "" {
-		b.WriteString(fmt.Sprintf(" (%s)", nodeArch))
+		fmt.Fprintf(&b, " (%s)", nodeArch)
 	}
 	b.WriteString(`. This is likely due to an error in the image build process or a misconfiguration 
 in the container's startup scripts. Please ensure that the container image is built 
