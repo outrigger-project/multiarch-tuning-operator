@@ -146,15 +146,39 @@ func (i *registryInspector) GetCompatibleArchitecturesSet(ctx context.Context, i
 			return nil, err
 		}
 		for _, m := range index.Manifests {
+			// Skip manifests with Docker reference annotations - they are not runnable platform images
+			// Per Docker spec, these annotations indicate special manifest types (e.g., attestation-manifest)
+			// vnd.docker.reference.type: indicates the manifest type (e.g., "attestation-manifest")
+			// vnd.docker.reference.digest: points to the subject manifest being attested
+			// If either annotation is present, the manifest should be ignored as it's not a platform image
+			if m.Annotations != nil {
+				if refType, exists := m.Annotations["vnd.docker.reference.type"]; exists {
+					log.V(3).Info("Skipping manifest with reference type annotation", "type", refType, "digest", m.Digest)
+					continue
+				}
+				if refDigest, exists := m.Annotations["vnd.docker.reference.digest"]; exists {
+					log.V(3).Info("Skipping manifest with reference digest annotation", "refDigest", refDigest, "digest", m.Digest)
+					continue
+				}
+			}
+			// Skip manifests with unknown architecture
+			if m.Platform == nil || (m.Platform.Architecture == "unknown") {
+				log.V(3).Info("Skipping manifest with unknown platform", "architecture", m.Platform.Architecture, "os", m.Platform.OS, "digest", m.Digest)
+				continue
+			}
 			supportedArchitectures = sets.Insert(supportedArchitectures, m.Platform.Architecture)
+			// Store the first valid manifest digest for bundle image detection
+			if instanceDigest == nil {
+				instanceDigest = &m.Digest
+			}
 		}
 		// In the case of non-manifest-list images, we will not execute this code path and the instanceDigest will be nil.
 		// The architecture will be only one, i.e., the one from the config object of the single manifest.
-		// In the case of manifest-list images, we will get the first manifest and check the config object for the operator-sdk label.
-		// The set of architectures will be the union of the architectures of all the manifests in the index and computed later.
-		// In this way, we can avoid the library from looking for the manifest that matches the architecture of the node where this
-		// code is running. That would lead to a failure if the node architecture is not present in the list of architectures of the image.
-		instanceDigest = &index.Manifests[0].Digest
+		// In the case of manifest-list images, we will get the first valid (non-attestation, non-unknown) manifest and check
+		// the config object for the operator-sdk label. The set of architectures will be the union of the architectures of all
+		// the valid manifests in the index and computed later. In this way, we can avoid the library from looking for the manifest
+		// that matches the architecture of the node where this code is running. That would lead to a failure if the node
+		// architecture is not present in the list of architectures of the image.
 	}
 
 	unparsedImage := image.UnparsedInstance(src, instanceDigest)

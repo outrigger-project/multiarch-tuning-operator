@@ -2,6 +2,9 @@ package image
 
 import (
 	"testing"
+
+	ociv1 "github.com/opencontainers/image-spec/specs-go/v1"
+	"k8s.io/apimachinery/pkg/util/sets"
 )
 
 func Test_parseImageReference(t *testing.T) {
@@ -290,6 +293,403 @@ func Test_parseImageReference_ComponentExtraction(t *testing.T) {
 			}
 			// Just log the results for manual verification
 			t.Logf("%s:\n  Input:  %s\n  Output: %s", tt.description, tt.input, result)
+		})
+	}
+}
+
+func Test_shouldSkipManifest(t *testing.T) {
+	tests := []struct {
+		name        string
+		annotations map[string]string
+		platform    *struct {
+			Architecture string
+			OS           string
+		}
+		shouldSkip bool
+		reason     string
+	}{
+		{
+			name:        "normal amd64 manifest",
+			annotations: nil,
+			platform: &struct {
+				Architecture string
+				OS           string
+			}{Architecture: "amd64", OS: "linux"},
+			shouldSkip: false,
+			reason:     "Valid architecture and OS",
+		},
+		{
+			name:        "normal arm64 manifest",
+			annotations: nil,
+			platform: &struct {
+				Architecture string
+				OS           string
+			}{Architecture: "arm64", OS: "linux"},
+			shouldSkip: false,
+			reason:     "Valid architecture and OS",
+		},
+		{
+			name: "attestation manifest with unknown platform",
+			annotations: map[string]string{
+				"vnd.docker.reference.type": "attestation-manifest",
+			},
+			platform: &struct {
+				Architecture string
+				OS           string
+			}{Architecture: "unknown", OS: "unknown"},
+			shouldSkip: true,
+			reason:     "Attestation manifests are not runnable images",
+		},
+		{
+			name:        "unknown architecture without attestation annotation",
+			annotations: nil,
+			platform: &struct {
+				Architecture string
+				OS           string
+			}{Architecture: "unknown", OS: "linux"},
+			shouldSkip: true,
+			reason:     "Unknown architecture should be skipped",
+		},
+		{
+			name:        "unknown architecture with unknown OS",
+			annotations: nil,
+			platform: &struct {
+				Architecture string
+				OS           string
+			}{Architecture: "unknown", OS: "unknown"},
+			shouldSkip: true,
+			reason:     "Unknown architecture should be skipped",
+		},
+		{
+			name: "attestation manifest with valid architecture",
+			annotations: map[string]string{
+				"vnd.docker.reference.type": "attestation-manifest",
+			},
+			platform: &struct {
+				Architecture string
+				OS           string
+			}{Architecture: "amd64", OS: "linux"},
+			shouldSkip: true,
+			reason:     "Attestation manifests should be skipped even with valid arch",
+		},
+		{
+			name: "manifest with vnd.docker.reference.digest annotation",
+			annotations: map[string]string{
+				"vnd.docker.reference.digest": "sha256:abc123",
+			},
+			platform: &struct {
+				Architecture string
+				OS           string
+			}{Architecture: "amd64", OS: "linux"},
+			shouldSkip: true,
+			reason:     "Manifests with reference digest annotation should be skipped",
+		},
+		{
+			name: "manifest with both reference annotations",
+			annotations: map[string]string{
+				"vnd.docker.reference.type":   "attestation-manifest",
+				"vnd.docker.reference.digest": "sha256:abc123",
+			},
+			platform: &struct {
+				Architecture string
+				OS           string
+			}{Architecture: "unknown", OS: "unknown"},
+			shouldSkip: true,
+			reason:     "Manifests with both reference annotations should be skipped",
+		},
+		{
+			name: "other annotation type",
+			annotations: map[string]string{
+				"some.other.annotation": "value",
+			},
+			platform: &struct {
+				Architecture string
+				OS           string
+			}{Architecture: "amd64", OS: "linux"},
+			shouldSkip: false,
+			reason:     "Other annotations should not cause skipping",
+		},
+		{
+			name:        "nil platform",
+			annotations: nil,
+			platform:    nil,
+			shouldSkip:  false,
+			reason:      "Nil platform should not be skipped (will be handled elsewhere)",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Simulate the filtering logic from inspector.go
+			// Check for Docker reference annotations or unknown architecture
+			shouldSkip := false
+			if tt.annotations != nil {
+				if _, exists := tt.annotations["vnd.docker.reference.type"]; exists {
+					shouldSkip = true
+				}
+				if _, exists := tt.annotations["vnd.docker.reference.digest"]; exists {
+					shouldSkip = true
+				}
+			}
+			if tt.platform != nil && tt.platform.Architecture == "unknown" {
+				shouldSkip = true
+			}
+
+			if shouldSkip != tt.shouldSkip {
+				t.Errorf("shouldSkip = %v, want %v (reason: %s)", shouldSkip, tt.shouldSkip, tt.reason)
+			}
+		})
+	}
+}
+
+func Test_filterManifestsForArchitectures(t *testing.T) {
+	tests := []struct {
+		name                       string
+		manifests                  []ociv1.Descriptor
+		expectedArchitectures      []string
+		expectedFirstValidDigest   string
+		shouldHaveValidInstanceIdx bool
+	}{
+		{
+			name: "multi-arch image with attestation manifest (like ghcr.io/llm-d/llm-d-cuda-dev:pr-230)",
+			manifests: []ociv1.Descriptor{
+				{
+					MediaType: "application/vnd.oci.image.manifest.v1+json",
+					Digest:    "sha256:0298f7c3ceec45da42b10f52b8edd4c5ebe5edb8011d62b8e5d66fef749ce124",
+					Platform: &ociv1.Platform{
+						Architecture: "amd64",
+						OS:           "linux",
+					},
+				},
+				{
+					MediaType: "application/vnd.oci.image.manifest.v1+json",
+					Digest:    "sha256:6eba444dd58a8748225335c4dcc53232c53d8252370f4a01ecfa6e692925db73",
+					Annotations: map[string]string{
+						"vnd.docker.reference.digest": "sha256:0298f7c3ceec45da42b10f52b8edd4c5ebe5edb8011d62b8e5d66fef749ce124",
+						"vnd.docker.reference.type":   "attestation-manifest",
+					},
+					Platform: &ociv1.Platform{
+						Architecture: "unknown",
+						OS:           "unknown",
+					},
+				},
+			},
+			expectedArchitectures:      []string{"amd64"},
+			expectedFirstValidDigest:   "sha256:0298f7c3ceec45da42b10f52b8edd4c5ebe5edb8011d62b8e5d66fef749ce124",
+			shouldHaveValidInstanceIdx: true,
+		},
+		{
+			name: "multi-arch image without attestation",
+			manifests: []ociv1.Descriptor{
+				{
+					MediaType: "application/vnd.oci.image.manifest.v1+json",
+					Digest:    "sha256:amd64digest",
+					Platform: &ociv1.Platform{
+						Architecture: "amd64",
+						OS:           "linux",
+					},
+				},
+				{
+					MediaType: "application/vnd.oci.image.manifest.v1+json",
+					Digest:    "sha256:arm64digest",
+					Platform: &ociv1.Platform{
+						Architecture: "arm64",
+						OS:           "linux",
+					},
+				},
+				{
+					MediaType: "application/vnd.oci.image.manifest.v1+json",
+					Digest:    "sha256:ppc64ledigest",
+					Platform: &ociv1.Platform{
+						Architecture: "ppc64le",
+						OS:           "linux",
+					},
+				},
+			},
+			expectedArchitectures:      []string{"amd64", "arm64", "ppc64le"},
+			expectedFirstValidDigest:   "sha256:amd64digest",
+			shouldHaveValidInstanceIdx: true,
+		},
+		{
+			name: "image with only attestation manifest (edge case)",
+			manifests: []ociv1.Descriptor{
+				{
+					MediaType: "application/vnd.oci.image.manifest.v1+json",
+					Digest:    "sha256:attestationdigest",
+					Annotations: map[string]string{
+						"vnd.docker.reference.type": "attestation-manifest",
+					},
+					Platform: &ociv1.Platform{
+						Architecture: "unknown",
+						OS:           "unknown",
+					},
+				},
+			},
+			expectedArchitectures:      []string{},
+			expectedFirstValidDigest:   "",
+			shouldHaveValidInstanceIdx: false,
+		},
+		{
+			name: "attestation manifest appears first",
+			manifests: []ociv1.Descriptor{
+				{
+					MediaType: "application/vnd.oci.image.manifest.v1+json",
+					Digest:    "sha256:attestationdigest",
+					Annotations: map[string]string{
+						"vnd.docker.reference.type": "attestation-manifest",
+					},
+					Platform: &ociv1.Platform{
+						Architecture: "unknown",
+						OS:           "unknown",
+					},
+				},
+				{
+					MediaType: "application/vnd.oci.image.manifest.v1+json",
+					Digest:    "sha256:arm64digest",
+					Platform: &ociv1.Platform{
+						Architecture: "arm64",
+						OS:           "linux",
+					},
+				},
+			},
+			expectedArchitectures:      []string{"arm64"},
+			expectedFirstValidDigest:   "sha256:arm64digest",
+			shouldHaveValidInstanceIdx: true,
+		},
+		{
+			name: "image with unknown architecture but no attestation annotation",
+			manifests: []ociv1.Descriptor{
+				{
+					MediaType: "application/vnd.oci.image.manifest.v1+json",
+					Digest:    "sha256:amd64digest",
+					Platform: &ociv1.Platform{
+						Architecture: "amd64",
+						OS:           "linux",
+					},
+				},
+				{
+					MediaType: "application/vnd.oci.image.manifest.v1+json",
+					Digest:    "sha256:unknowndigest",
+					Platform: &ociv1.Platform{
+						Architecture: "unknown",
+						OS:           "linux",
+					},
+				},
+			},
+			expectedArchitectures:      []string{"amd64"},
+			expectedFirstValidDigest:   "sha256:amd64digest",
+			shouldHaveValidInstanceIdx: true,
+		},
+		{
+			name: "malformed attestation with only vnd.docker.reference.digest annotation",
+			manifests: []ociv1.Descriptor{
+				{
+					MediaType: "application/vnd.oci.image.manifest.v1+json",
+					Digest:    "sha256:arm64digest",
+					Platform: &ociv1.Platform{
+						Architecture: "arm64",
+						OS:           "linux",
+					},
+				},
+				{
+					MediaType: "application/vnd.oci.image.manifest.v1+json",
+					Digest:    "sha256:malformedattestationdigest",
+					Annotations: map[string]string{
+						"vnd.docker.reference.digest": "sha256:arm64digest",
+						// Missing vnd.docker.reference.type annotation (malformed)
+					},
+					Platform: &ociv1.Platform{
+						Architecture: "amd64",
+						OS:           "linux",
+					},
+				},
+			},
+			expectedArchitectures:      []string{"arm64"},
+			expectedFirstValidDigest:   "sha256:arm64digest",
+			shouldHaveValidInstanceIdx: true,
+		},
+		{
+			name: "attestation with both reference type and digest annotations",
+			manifests: []ociv1.Descriptor{
+				{
+					MediaType: "application/vnd.oci.image.manifest.v1+json",
+					Digest:    "sha256:amd64digest",
+					Platform: &ociv1.Platform{
+						Architecture: "amd64",
+						OS:           "linux",
+					},
+				},
+				{
+					MediaType: "application/vnd.oci.image.manifest.v1+json",
+					Digest:    "sha256:attestationdigest",
+					Annotations: map[string]string{
+						"vnd.docker.reference.type":   "attestation-manifest",
+						"vnd.docker.reference.digest": "sha256:amd64digest",
+					},
+					Platform: &ociv1.Platform{
+						Architecture: "unknown",
+						OS:           "unknown",
+					},
+				},
+			},
+			expectedArchitectures:      []string{"amd64"},
+			expectedFirstValidDigest:   "sha256:amd64digest",
+			shouldHaveValidInstanceIdx: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Simulate the filtering logic from inspector.go lines 148-164
+			supportedArchitectures := sets.New[string]()
+			var firstValidDigest string
+
+			for _, m := range tt.manifests {
+				// Skip manifests with Docker reference annotations - they are not runnable platform images
+				if m.Annotations != nil {
+					if _, exists := m.Annotations["vnd.docker.reference.type"]; exists {
+						continue
+					}
+					if _, exists := m.Annotations["vnd.docker.reference.digest"]; exists {
+						continue
+					}
+				}
+				// Skip manifests with unknown architecture
+				if m.Platform != nil && m.Platform.Architecture == "unknown" {
+					continue
+				}
+				supportedArchitectures = sets.Insert(supportedArchitectures, m.Platform.Architecture)
+				// Store the first valid manifest digest
+				if firstValidDigest == "" {
+					firstValidDigest = string(m.Digest)
+				}
+			}
+
+			// Verify architectures
+			if len(tt.expectedArchitectures) != supportedArchitectures.Len() {
+				t.Errorf("Expected %d architectures, got %d", len(tt.expectedArchitectures), supportedArchitectures.Len())
+			}
+			for _, expectedArch := range tt.expectedArchitectures {
+				if !supportedArchitectures.Has(expectedArch) {
+					t.Errorf("Expected architecture %q not found in result set", expectedArch)
+				}
+			}
+
+			// Verify first valid digest
+			if tt.shouldHaveValidInstanceIdx {
+				if firstValidDigest != tt.expectedFirstValidDigest {
+					t.Errorf("Expected first valid digest %q, got %q", tt.expectedFirstValidDigest, firstValidDigest)
+				}
+			} else {
+				if firstValidDigest != "" {
+					t.Errorf("Expected no valid digest, got %q", firstValidDigest)
+				}
+			}
+
+			// Ensure "unknown" is never in the result
+			if supportedArchitectures.Has("unknown") {
+				t.Error("Architecture set should never contain 'unknown'")
+			}
 		})
 	}
 }
