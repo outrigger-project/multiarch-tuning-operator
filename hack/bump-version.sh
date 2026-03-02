@@ -14,6 +14,10 @@ fi
 
 echo "Bumping version to: $VERSION"
 
+# Extract major.minor version for CPE label (e.g., 1.3.4 -> 1.3)
+MAJOR_MINOR=$(echo "$VERSION" | sed -E 's/^([0-9]+\.[0-9]+).*/\1/')
+echo "CPE version (major.minor): $MAJOR_MINOR"
+
 yq -i ".spec.version=\"${VERSION}\"" config/manifests/bases/multiarch-tuning-operator.clusterserviceversion.yaml
 yq -i ".metadata.name=\"multiarch-tuning-operator.v${VERSION}\"" config/manifests/bases/multiarch-tuning-operator.clusterserviceversion.yaml
 yq -i ".spec.startingCSV=\"multiarch-tuning-operator.v${VERSION}\"" deploy/base/operators.coreos.com/subscriptions/openshift-multiarch-tuning-operator/subscription.yaml
@@ -24,15 +28,23 @@ if [[ "$(uname)" == "Darwin" ]]; then
     # macOS BSD sed
     sed -i '' "s/^LABEL release=.*/LABEL release=\"${VERSION}\"/" Dockerfile
     sed -i '' "s/^LABEL version=.*/LABEL version=\"${VERSION}\"/" Dockerfile
+    sed -i '' "s/^LABEL cpe=.*/LABEL cpe=\"cpe:\/a:redhat:multiarch_tuning_operator:${MAJOR_MINOR}::el9\"/" Dockerfile
     sed -i '' "s/^LABEL release=.*/LABEL release=\"${VERSION}\"/" konflux.Dockerfile
     sed -i '' "s/^LABEL version=.*/LABEL version=\"${VERSION}\"/" konflux.Dockerfile
+    sed -i '' "s/^LABEL cpe=.*/LABEL cpe=\"cpe:\/a:redhat:multiarch_tuning_operator:${MAJOR_MINOR}::el9\"/" konflux.Dockerfile
+    sed -i '' "s/^LABEL cpe=.*/LABEL cpe=\"cpe:\/a:redhat:multiarch_tuning_operator:${MAJOR_MINOR}::el9\"/" bundle.Dockerfile
+    sed -i '' "s/^LABEL cpe=.*/LABEL cpe=\"cpe:\/a:redhat:multiarch_tuning_operator:${MAJOR_MINOR}::el9\"/" bundle.konflux.Dockerfile
     sed -i '' "s/^VERSION ?= .*/VERSION ?= ${VERSION}/" Makefile
 else
     # Linux GNU sed
     sed -i "s/^LABEL release=.*/LABEL release=\"${VERSION}\"/" Dockerfile
     sed -i "s/^LABEL version=.*/LABEL version=\"${VERSION}\"/" Dockerfile
+    sed -i "s/^LABEL cpe=.*/LABEL cpe=\"cpe:\/a:redhat:multiarch_tuning_operator:${MAJOR_MINOR}::el9\"/" Dockerfile
     sed -i "s/^LABEL release=.*/LABEL release=\"${VERSION}\"/" konflux.Dockerfile
     sed -i "s/^LABEL version=.*/LABEL version=\"${VERSION}\"/" konflux.Dockerfile
+    sed -i "s/^LABEL cpe=.*/LABEL cpe=\"cpe:\/a:redhat:multiarch_tuning_operator:${MAJOR_MINOR}::el9\"/" konflux.Dockerfile
+    sed -i "s/^LABEL cpe=.*/LABEL cpe=\"cpe:\/a:redhat:multiarch_tuning_operator:${MAJOR_MINOR}::el9\"/" bundle.Dockerfile
+    sed -i "s/^LABEL cpe=.*/LABEL cpe=\"cpe:\/a:redhat:multiarch_tuning_operator:${MAJOR_MINOR}::el9\"/" bundle.konflux.Dockerfile
     sed -i "s/^VERSION ?= .*/VERSION ?= ${VERSION}/" Makefile
 fi
 echo "make bundle"
