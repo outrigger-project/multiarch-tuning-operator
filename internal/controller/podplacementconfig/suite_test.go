@@ -25,7 +25,10 @@ import (
 	"time"
 
 	"github.com/openshift/multiarch-tuning-operator/pkg/e2e"
+	"github.com/openshift/multiarch-tuning-operator/pkg/utils"
 
+	v1 "k8s.io/api/admissionregistration/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
@@ -37,6 +40,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
+	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -118,6 +122,9 @@ func startTestEnv() {
 	testEnv = &envtest.Environment{
 		CRDDirectoryPaths:     []string{filepath.Join("..", "..", "config", "crd", "bases")},
 		ErrorIfCRDPathMissing: true,
+		WebhookInstallOptions: envtest.WebhookInstallOptions{
+			ValidatingWebhooks: []*v1.ValidatingWebhookConfiguration{getPodPlacementConfigValidatingWebHook()},
+		},
 	}
 	var err error
 	// cfg is defined in this file globally.
@@ -135,14 +142,24 @@ func startTestEnv() {
 
 func runManager() {
 	By("Creating the manager")
+	webhookServer := webhook.NewServer(webhook.Options{
+		Port:    testEnv.WebhookInstallOptions.LocalServingPort,
+		Host:    testEnv.WebhookInstallOptions.LocalServingHost,
+		CertDir: testEnv.WebhookInstallOptions.LocalServingCertDir,
+	})
 	mgr, err := ctrl.NewManager(cfg, ctrl.Options{
 		Scheme:                 scheme.Scheme,
 		HealthProbeBindAddress: ":4980",
 		Logger:                 suiteLog,
+		WebhookServer:          webhookServer,
 	})
 	Expect(err).NotTo(HaveOccurred())
 
 	suiteLog.Info("Manager created")
+
+	By("Setting up PodPlacement controller")
+	mgr.GetWebhookServer().Register("/validate-multiarch-openshift-io-v1beta1-podplacementconfig", &webhook.Admission{
+		Handler: NewPodPlacementConfigWebhook(mgr.GetAPIReader(), mgr.GetScheme())})
 
 	err = mgr.AddReadyzCheck("readyz", healthz.Ping)
 	Expect(err).NotTo(HaveOccurred())
@@ -163,4 +180,41 @@ func runManager() {
 	}).MustPassRepeatedly(3).Should(
 		Succeed(), "manager is not ready yet")
 	suiteLog.Info("Manager is ready")
+}
+
+func getPodPlacementConfigValidatingWebHook() *v1.ValidatingWebhookConfiguration {
+	return &v1.ValidatingWebhookConfiguration{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "validating-webhook-configuration",
+		},
+		Webhooks: []v1.ValidatingWebhook{
+			{
+				Name:                    "validate-podplacementconfig.multiarch.openshift.io",
+				AdmissionReviewVersions: []string{"v1"},
+				ClientConfig: v1.WebhookClientConfig{
+					Service: &v1.ServiceReference{
+						Name:      "webhook-service",
+						Namespace: "system",
+						Path:      utils.NewPtr("/validate-multiarch-openshift-io-v1beta1-podplacementconfig"),
+					},
+				},
+				FailurePolicy: utils.NewPtr(v1.Fail),
+				SideEffects:   utils.NewPtr(v1.SideEffectClassNone),
+				Rules: []v1.RuleWithOperations{
+					{
+						Operations: []v1.OperationType{
+							v1.Create,
+							v1.Update,
+							v1.Delete,
+						},
+						Rule: v1.Rule{
+							APIGroups:   []string{"multiarch.openshift.io"},
+							APIVersions: []string{"v1beta1"},
+							Resources:   []string{"podplacementconfigs"},
+						},
+					},
+				},
+			},
+		},
+	}
 }
