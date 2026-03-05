@@ -144,6 +144,11 @@ spec:
                 minimum: 0
                 type: integer
             type: object
+          status:
+            description: PodPlacementConfigStatus defines the observed state of PodPlacementConfig
+            type: object
         type: object
     served: true
     storage: true
+    subresources:
+      status: {}

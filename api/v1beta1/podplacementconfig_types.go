@@ -44,12 +44,14 @@ type PodPlacementConfigSpec struct {
 // PodPlacementConfig defines the configuration for the architecture aware pod placement operand in a given namespace for a subset of its pods based on the provided labelSelector.
 // +kubebuilder:object:root=true
 // +kubebuilder:storageversion
+// +kubebuilder:subresource:status
 // +kubebuilder:resource:path=podplacementconfigs,scope=Namespaced
 type PodPlacementConfig struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Spec PodPlacementConfigSpec `json:"spec,omitempty"`
+	Spec   PodPlacementConfigSpec   `json:"spec,omitempty"`
+	Status PodPlacementConfigStatus `json:"status,omitempty"`
 }
 
 //+kubebuilder:object:root=true
@@ -59,6 +61,11 @@ type PodPlacementConfigList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
 	Items           []PodPlacementConfig `json:"items"`
+}
+
+// PodPlacementConfigStatus defines the observed state of PodPlacementConfig
+type PodPlacementConfigStatus struct {
+	//TODO: Define the status fields for PodPlacementConfig
 }
 
 func init() {
