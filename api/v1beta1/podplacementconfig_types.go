@@ -17,8 +17,12 @@ limitations under the License.
 package v1beta1
 
 import (
+	"fmt"
+
+	"github.com/openshift/multiarch-tuning-operator/api/common"
 	"github.com/openshift/multiarch-tuning-operator/api/common/plugins"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	runtime "k8s.io/apimachinery/pkg/runtime"
 )
 
 // PodPlacementConfigSpec defines the desired state of PodPlacementConfig
@@ -52,6 +56,55 @@ type PodPlacementConfig struct {
 
 	Spec   PodPlacementConfigSpec   `json:"spec,omitempty"`
 	Status PodPlacementConfigStatus `json:"status,omitempty"`
+}
+
+// PluginsEnabled checks if a specific plugin is enabled.
+func (p *PodPlacementConfig) PluginsEnabled(plugin common.Plugin) bool {
+	if p.Spec.Plugins != nil {
+		return p.Spec.Plugins.PluginEnabled(plugin)
+	}
+	return false
+}
+
+// ValidatePriorityUpdate checks whether the updated Priority value is valid
+func (p *PodPlacementConfig) ValidatePriorityUpdate(old *PodPlacementConfig, list runtime.Object) (bool, error) {
+	// Assert list type to *PodPlacementConfigList
+	ppcList, ok := list.(*PodPlacementConfigList)
+	if !ok {
+		return false, fmt.Errorf("invalid list type: expected *PodPlacementConfigList")
+	}
+
+	// Skip if priority hasn't changed
+	if p.Spec.Priority == old.Spec.Priority {
+		return true, nil
+	}
+
+	// Check for duplicate priority in the list
+	for _, item := range ppcList.Items {
+		if item.Name != p.Name && item.Spec.Priority == p.Spec.Priority {
+			return false, fmt.Errorf("priority %q already used by %q", p.Spec.Priority, item.Name)
+		}
+	}
+
+	return true, nil
+}
+
+// ValidatePriorityNew checks whether the Priority value for a new object is valid
+func (p *PodPlacementConfig) ValidatePriorityNew(list runtime.Object) (bool, error) {
+	// Assert list type to *PodPlacementConfigList
+	ppcList, ok := list.(*PodPlacementConfigList)
+	if !ok {
+		return false, fmt.Errorf("invalid list type: expected *PodPlacementConfigList")
+	}
+
+	// Check for duplicate priority in the list
+	for _, item := range ppcList.Items {
+		if item.Spec.Priority == p.Spec.Priority {
+			return false, fmt.Errorf("priority %q already used by %q", p.Spec.Priority, item.Name)
+		}
+	}
+
+	return true, nil
 }
 
 //+kubebuilder:object:root=true
