@@ -37,6 +37,13 @@ spec:
   apiservicedefinitions: {}
   customresourcedefinitions:
     owned:
+    - description: PodPlacementConfig defines the configuration for the architecture
+        aware pod placement operand. Users can only deploy a single object named "Namespaced".
+        Creating the object enables the operand.
+      displayName: Pod Placement Config
+      kind: PodPlacementConfig
+      name: podplacementconfigs.multiarch.openshift.io
+      version: v1beta1
     - description: ClusterPodPlacementConfig defines the configuration for the architecture
         aware pod placement operand. Users can only deploy a single object named "cluster".
         Creating the object enables the operand.
