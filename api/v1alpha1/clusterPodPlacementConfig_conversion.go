@@ -22,6 +22,8 @@ import (
 	multiarchv1beta1 "github.com/openshift/multiarch-tuning-operator/api/v1beta1"
 )
 
+const FallbackArchAnnotation = "multiarch.openshift.io/fallback-architecture"
+
 // ConvertTo converts this ClusterPodPlacementConfig to the Hub version v1beta1.
 func (src *ClusterPodPlacementConfig) ConvertTo(dstRaw conversion.Hub) error {
 	dst := dstRaw.(*multiarchv1beta1.ClusterPodPlacementConfig)
@@ -32,6 +34,11 @@ func (src *ClusterPodPlacementConfig) ConvertTo(dstRaw conversion.Hub) error {
 	// Spec
 	dst.Spec.LogVerbosity = src.Spec.LogVerbosity
 	dst.Spec.NamespaceSelector = src.Spec.NamespaceSelector
+	// Restore FallbackArchitecture from the annotation, if present.
+	// This ensures the value is preserved across API version conversions.
+	if arch, ok := src.Annotations[FallbackArchAnnotation]; ok {
+		dst.Spec.FallbackArchitecture = arch
+	}
 
 	// Status
 	dst.Status.Conditions = src.Status.Conditions
@@ -51,6 +58,17 @@ func (dst *ClusterPodPlacementConfig) ConvertFrom(srcRaw conversion.Hub) error {
 
 	// ObjectMeta
 	dst.ObjectMeta = src.ObjectMeta
+	// v1alpha1 does not have the FallbackArchitecture field.
+	// Preserve the value in an annotation to avoid data loss during
+	// v1beta1 -> v1alpha1 -> v1beta1 round-trip conversions.
+	if dst.Annotations == nil {
+		dst.Annotations = make(map[string]string)
+	}
+	if src.Spec.FallbackArchitecture != "" {
+		dst.Annotations[FallbackArchAnnotation] = src.Spec.FallbackArchitecture
+	} else {
+		delete(dst.Annotations, FallbackArchAnnotation)
+	}
 
 	// Spec
 	dst.Spec.LogVerbosity = src.Spec.LogVerbosity

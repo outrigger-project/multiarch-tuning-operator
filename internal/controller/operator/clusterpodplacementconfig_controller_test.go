@@ -18,6 +18,7 @@ package operator
 
 import (
 	"fmt"
+	"strings"
 
 	admissionv1 "k8s.io/api/admissionregistration/v1"
 	appsv1 "k8s.io/api/apps/v1"
@@ -663,6 +664,206 @@ var _ = Describe("internal/Controller/ClusterPodPlacementConfig/ClusterPodPlacem
 			}), &d)
 			Expect(err).NotTo(HaveOccurred(), "failed to get deployment "+utils.EnoexecControllerName, err)
 			Expect(d.Finalizers).To(ContainElement(utils.ExecFormatErrorFinalizerName))
+		})
+	})
+	Context("the webhook shoud deny PodPlacementConfig creation", func() {
+		It("when the ClusterPodPlacementConfig doesn't exist", func() {
+			By("Ensure the ClusterPodPlacementConfig doesn't exist")
+			cppc := &v1beta1.ClusterPodPlacementConfig{}
+			err := k8sClient.Get(ctx, crclient.ObjectKey{Name: common.SingletonResourceObjectName}, cppc)
+			Expect(errors.IsNotFound(err)).To(BeTrue(), "the ClusterPodPlacementConfig should not exist", err)
+			By("Create an ephemeral namespace")
+			ns := framework.NewEphemeralNamespace()
+			err = k8sClient.Create(ctx, ns)
+			Expect(err).NotTo(HaveOccurred())
+			//nolint:errcheck
+			defer k8sClient.Delete(ctx, ns)
+			By("Creating a local PodPlacementConfig")
+			err = k8sClient.Create(ctx,
+				builder.NewPodPlacementConfig().
+					WithName("test-ppc").
+					WithNamespace(ns.Name).
+					WithPriority(50).
+					WithPlugins().
+					WithNodeAffinityScoring(true).
+					WithNodeAffinityScoringTerm(utils.ArchitectureAmd64, 50).
+					Build(),
+			)
+			//nolint:errcheck
+			defer k8sClient.Delete(ctx, builder.NewPodPlacementConfig().WithName("test-ppc").WithNamespace(ns.Name).Build())
+			Expect(err).To(HaveOccurred(), "the PodPlacementConfig should not be accepted", err)
+		})
+	})
+	Context("when local PodPlacementConfigs exist", func() {
+		AfterEach(func() {
+			By("Ensure the ClusterPodPlacementConfig is deleted")
+			err := k8sClient.Delete(ctx, builder.NewClusterPodPlacementConfig().WithName(common.SingletonResourceObjectName).Build())
+			Expect(crclient.IgnoreNotFound(err)).NotTo(HaveOccurred(), "failed to delete ClusterPodPlacementConfig", err)
+			Eventually(framework.ValidateDeletion(k8sClient, ctx)).Should(Succeed(), "the ClusterPodPlacementConfig should be deleted")
+		})
+		It("should deny deletion of ClusterPodPlacementConfig", func() {
+			By("Creating ClusterPodPlacementConfig")
+			err := k8sClient.Create(ctx, builder.NewClusterPodPlacementConfig().WithName(common.SingletonResourceObjectName).Build())
+			Expect(err).NotTo(HaveOccurred(), "failed to create ClusterPodPlacementConfig", err)
+			validateReconcile()
+			By("Create an ephemeral namespace")
+			ns := framework.NewEphemeralNamespace()
+			err = k8sClient.Create(ctx, ns)
+			Expect(err).NotTo(HaveOccurred())
+			//nolint:errcheck
+			defer k8sClient.Delete(ctx, ns)
+			By("Creating a local PodPlacementConfig")
+			err = k8sClient.Create(ctx,
+				builder.NewPodPlacementConfig().
+					WithName("test-ppc").
+					WithNamespace(ns.Name).
+					WithPriority(50).
+					WithPlugins().
+					WithNodeAffinityScoring(true).
+					WithNodeAffinityScoringTerm(utils.ArchitectureAmd64, 50).
+					Build(),
+			)
+			Expect(err).NotTo(HaveOccurred(), "failed to create local PodPlacementConfig", err)
+			//nolint:errcheck
+			defer k8sClient.Delete(ctx, builder.NewPodPlacementConfig().WithName("test-ppc").WithNamespace(ns.Name).Build())
+			By("Attempting to delete ClusterPodPlacementConfig")
+			err = k8sClient.Delete(ctx, builder.NewClusterPodPlacementConfig().WithName(common.SingletonResourceObjectName).Build())
+			Expect(err).To(HaveOccurred(), "the ClusterPodPlacementConfig should not be able to deleted when local PodPlacementConfigs exist", err)
+			By("Deleting the local PodPlacementConfig")
+			err = k8sClient.Delete(ctx, builder.NewPodPlacementConfig().
+				WithName("test-ppc").
+				WithNamespace(ns.Name).Build())
+			Expect(err).NotTo(HaveOccurred(), "failed to delete PodPlacementConfig")
+			By("Verifying the cppc removing the no-pod-placement-config finalizer")
+			Eventually(func(g Gomega) {
+				cppc := &v1beta1.ClusterPodPlacementConfig{}
+				err = k8sClient.Get(ctx, crclient.ObjectKey{
+					Name: common.SingletonResourceObjectName,
+				}, cppc)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(cppc.Finalizers).NotTo(ContainElement(utils.CPPCNoPPCObjectFinalizer))
+			}).Should(Succeed(), "the ClusterPodPlacementConfig should remove the no-pod-placement-config finalizer")
+			By("Deleting ClusterPodPlacementConfig after local configs are removed")
+			err = k8sClient.Delete(ctx, builder.NewClusterPodPlacementConfig().WithName(common.SingletonResourceObjectName).Build())
+			Expect(err).NotTo(HaveOccurred(), "failed to delete ClusterPodPlacementConfig", err)
+			Eventually(framework.ValidateDeletion(k8sClient, ctx)).Should(Succeed(), "the ClusterPodPlacementConfig should be deleted")
+		})
+	})
+	Context("when managing the no-pod-placement-config finalizer", func() {
+		BeforeEach(func() {
+			By("Creating the ClusterPodPlacementConfig")
+			err := k8sClient.Create(ctx, builder.NewClusterPodPlacementConfig().
+				WithName(common.SingletonResourceObjectName).
+				Build())
+			Expect(err).NotTo(HaveOccurred(), "failed to create ClusterPodPlacementConfig", err)
+			validateReconcile()
+		})
+		AfterEach(func() {
+			By("Deleting the ClusterPodPlacementConfig")
+			err := k8sClient.Delete(ctx, builder.NewClusterPodPlacementConfig().WithName(common.SingletonResourceObjectName).Build())
+			Expect(crclient.IgnoreNotFound(err)).NotTo(HaveOccurred(), "failed to delete ClusterPodPlacementConfig", err)
+			Eventually(framework.ValidateDeletion(k8sClient, ctx)).Should(Succeed(), "the ClusterPodPlacementConfig should be deleted")
+		})
+		It("should add the finalizer when a namespaced PodPlacementConfig exists and remove it when none exist", func() {
+			By("Create an ephemeral namespace")
+			ns := framework.NewEphemeralNamespace()
+			err := k8sClient.Create(ctx, ns)
+			Expect(err).NotTo(HaveOccurred())
+			//nolint:errcheck
+			defer k8sClient.Delete(ctx, ns)
+			By("Creating a local PodPlacementConfig with a Priority setting")
+			err = k8sClient.Create(ctx,
+				builder.NewPodPlacementConfig().
+					WithName("test-ppc").
+					WithNamespace(ns.Name).
+					WithPriority(50).
+					WithPlugins().
+					WithNodeAffinityScoring(true).
+					WithNodeAffinityScoringTerm(utils.ArchitectureAmd64, 50).
+					Build(),
+			)
+			Expect(err).NotTo(HaveOccurred(), "the PodPlacementConfig should be accepted", err)
+			//nolint:errcheck
+			defer k8sClient.Delete(ctx, builder.NewPodPlacementConfig().WithName("test-ppc").WithNamespace(ns.Name).Build())
+			By("Verifying the cppc adding the no-pod-placement-config finalizer")
+			Eventually(func(g Gomega) {
+				cppc := &v1beta1.ClusterPodPlacementConfig{}
+				err = k8sClient.Get(ctx, crclient.ObjectKey{
+					Name: common.SingletonResourceObjectName,
+				}, cppc)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(cppc.Finalizers).To(ContainElement(utils.CPPCNoPPCObjectFinalizer))
+			}).Should(Succeed(), "the ClusterPodPlacementConfig should have the correct finalizer")
+			By("Deleting above created PodPlacementConfig")
+			err = k8sClient.Delete(ctx, builder.NewPodPlacementConfig().
+				WithName("test-ppc").
+				WithNamespace(ns.Name).Build())
+			Expect(err).NotTo(HaveOccurred())
+			By("Check the PodPlacementConfig is deleted")
+			Eventually(func(g Gomega) {
+				ppc := &v1beta1.PodPlacementConfig{}
+				err := k8sClient.Get(ctx, crclient.ObjectKey{
+					Name:      "test-ppc",
+					Namespace: ns.Name,
+				}, ppc)
+				Expect(errors.IsNotFound(err)).To(BeTrue(), "failed to delete podplacementconfig", err)
+			}).Should(Succeed(), "the PodPlacementConfig should be deleted")
+			By("Verifying the cppc removing the no-pod-placement-config finalizer")
+			Eventually(func(g Gomega) {
+				cppc := &v1beta1.ClusterPodPlacementConfig{}
+				err = k8sClient.Get(ctx, crclient.ObjectKey{
+					Name: common.SingletonResourceObjectName,
+				}, cppc)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(cppc.Finalizers).NotTo(ContainElement(utils.CPPCNoPPCObjectFinalizer))
+			}).Should(Succeed(), "the ClusterPodPlacementConfig should remove the no-pod-placement-config finalizer")
+		})
+	})
+	Context("Validating FallbackArchitecture field", func() {
+		DescribeTable("should validate ClusterPodPlacementConfig correctly",
+			func(arch string, expectValid bool) {
+				By("Ensure no ClusterPodPlacementConfig exists")
+				cppc := &v1beta1.ClusterPodPlacementConfig{}
+				err := k8sClient.Get(ctx, crclient.ObjectKey{
+					Name: common.SingletonResourceObjectName,
+				}, cppc)
+				Expect(errors.IsNotFound(err)).To(BeTrue(), "ClusterPodPlacementConfig should not exist")
+
+				By("Create the ClusterPodPlacementConfig")
+				object := builder.NewClusterPodPlacementConfig().
+					WithName(common.SingletonResourceObjectName).
+					WithFallbackArchitecture(arch).
+					Build()
+				err = k8sClient.Create(ctx, object)
+				if expectValid {
+					By("Verify it is created successfully")
+					Expect(err).NotTo(HaveOccurred(), "Failed to create ClusterPodPlacementConfig with valid FallbackArchitecture")
+				} else {
+					By("Verify the creation fails")
+					Expect(err).To(HaveOccurred(), "ClusterPodPlacementConfig creation should fail for invalid FallbackArchitecture")
+					Expect(errors.IsInvalid(err)).To(BeTrue(), "Error should indicate invalid object")
+				}
+			},
+			// Valid architectures
+			Entry("amd64", "amd64", true),
+			Entry("arm64", "arm64", true),
+			Entry("ppc64le", "ppc64le", true),
+			Entry("s390x", "s390x", true),
+			Entry("empty string", "", true),
+			// Invalid architectures
+			Entry("wrong string", "wrong", false),
+			Entry("space string", " ", false),
+			Entry("uppercase architecture", "AMD64", false),
+			Entry("unsupported architecture", "arm32", false),
+			Entry("special characters", "@!$", false),
+			Entry("too long string", strings.Repeat("a", 100), false),
+		)
+		AfterEach(func() {
+			By("Clean up ClusterPodPlacementConfig")
+			err := k8sClient.Delete(ctx, builder.NewClusterPodPlacementConfig().
+				WithName(common.SingletonResourceObjectName).Build())
+			Expect(crclient.IgnoreNotFound(err)).NotTo(HaveOccurred(), "failed to delete ClusterPodPlacementConfig")
+			Eventually(framework.ValidateDeletion(k8sClient, ctx, framework.MainPlugin, framework.ENoExecPlugin)).Should(Succeed(), "the ClusterPodPlacementConfig should be deleted")
 		})
 	})
 })

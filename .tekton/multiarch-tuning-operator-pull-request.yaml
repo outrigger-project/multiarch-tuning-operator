@@ -1,4 +1,4 @@
-apiVersion: tekton.dev/v1beta1
+apiVersion: tekton.dev/v1
 kind: PipelineRun
 metadata:
   annotations:
@@ -8,7 +8,7 @@ metadata:
     build.appstudio.redhat.com/target_branch: '{{target_branch}}'
     pipelinesascode.tekton.dev/max-keep-runs: "3"
     pipelinesascode.tekton.dev/on-cel-expression: |
-      event == "pull_request" && target_branch == "v1.x" && (".tekton/***".pathChanged() || "api/***".pathChanged() || "internal/controller/***".pathChanged() || "pkg/***".pathChanged() || "test/***".pathChanged() || "konflux.Dockerfile".pathChanged() || "go.mod".pathChanged() || "main.go".pathChanged() || "go.sum".pathChanged() || "trigger-konflux-builds.txt".pathChanged() )
+      event == "pull_request" && target_branch == "v1.x" && (".tekton/***".pathChanged() || "api/***".pathChanged() || "internal/controller/***".pathChanged() || "pkg/***".pathChanged() || "test/***".pathChanged() || "konflux.Dockerfile".pathChanged() || "go.mod".pathChanged() || "cmd/***".pathChanged() || "go.sum".pathChanged() || "trigger-konflux-builds.txt".pathChanged() )
   creationTimestamp: null
   labels:
     appstudio.openshift.io/application: multiarch-tuning-operator-v1-x
@@ -44,14 +44,16 @@ spec:
     - name: build-source-image
       value: "true"
   pipelineRef:
-    resolver: bundles
+    resolver: git
     params:
-      - name: name
-        value: docker-build-multi-platform-oci-ta
-      - name: bundle
-        value: quay.io/konflux-ci/tekton-catalog/pipeline-docker-build-multi-platform-oci-ta:devel@sha256:33727f2c1da1e1563e2b3108fb620c3ed64acfcc9830e53666b9789758b3ff9c
-      - name: kind
-        value: pipeline
+      - name: url
+        value: https://github.com/openshift/multiarch-tuning-operator.git
+      - name: revision
+        value: main
+      - name: pathInRepo
+        value: .tekton/multi-arch-build-pipeline.yaml
+  taskRunTemplate:
+    serviceAccountName: build-pipeline-multiarch-tuning-operator-v1-x
   workspaces:
     - name: workspace
       volumeClaimTemplate:

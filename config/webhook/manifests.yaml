@@ -21,6 +21,28 @@ webhooks:
     operations:
     - CREATE
     - UPDATE
+    - DELETE
     resources:
     - clusterpodplacementconfigs
+  sideEffects: None
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: webhook-service
+      namespace: system
+      path: /validate-multiarch-openshift-io-v1beta1-podplacementconfig
+  failurePolicy: Fail
+  name: validate-podplacementconfig.multiarch.openshift.io
+  rules:
+  - apiGroups:
+    - multiarch.openshift.io
+    apiVersions:
+    - v1beta1
+    operations:
+    - CREATE
+    - UPDATE
+    - DELETE
+    resources:
+    - podplacementconfigs
   sideEffects: None

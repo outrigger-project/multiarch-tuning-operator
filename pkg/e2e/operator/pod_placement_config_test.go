@@ -3,6 +3,7 @@ package operator_test
 import (
 	"fmt"
 	"os"
+	"strconv"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -10,7 +11,9 @@ import (
 	"github.com/openshift/multiarch-tuning-operator/api/common"
 	"github.com/openshift/multiarch-tuning-operator/api/v1alpha1"
 	"github.com/openshift/multiarch-tuning-operator/api/v1beta1"
+	"github.com/openshift/multiarch-tuning-operator/internal/controller/podplacement"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	runtimeclient "sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -52,6 +55,14 @@ var _ = Describe("The Multiarch Tuning Operator", Serial, func() {
 			_ = framework.StorePodsLog(ctx, clientset, client, utils.Namespace(), "controller", utils.EnoexecControllerName, utils.EnoexecControllerName, os.Getenv("ARTIFACT_DIR"))
 			_ = framework.StorePodsLog(ctx, clientset, client, utils.Namespace(), "app", utils.EnoexecDaemonSet, utils.EnoexecDaemonSet, os.Getenv("ARTIFACT_DIR"))
 		}
+		By("Waiting for any PodPlacementConfigs to be deleted")
+		Eventually(func(g Gomega) {
+			ppcList := &v1beta1.PodPlacementConfigList{}
+			err := client.List(ctx, ppcList)
+			g.Expect(err).NotTo(HaveOccurred())
+			g.Expect(ppcList.Items).To(BeEmpty(), "all PodPlacementConfigs should be deleted")
+		}).Should(Succeed())
+		By("Deleting ClusterPodPlacementConfig")
 		err := client.Delete(ctx, &v1beta1.ClusterPodPlacementConfig{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: "cluster",
@@ -319,7 +330,7 @@ var _ = Describe("The Multiarch Tuning Operator", Serial, func() {
 			Entry(utils.MasterNodeSelectorLabel, utils.MasterNodeSelectorLabel),
 		)
 	})
-	Context("When a pod placement config is created", func() {
+	Context("When a cluster pod placement config is created", func() {
 		It("should create a v1beta1 CPPC with plugins and succeed getting the v1alpha1 version of the CPPC", func() {
 			By("Creating the ClusterPodPlacementConfig")
 			err := client.Create(ctx,
@@ -356,7 +367,7 @@ var _ = Describe("The Multiarch Tuning Operator", Serial, func() {
 				NamespaceSelector: nil,
 			}))
 		})
-		It("should succeed creating a v1alpha1 CPPC and get the v1beta1 version with no plugins field", func() {
+		It("should succeed creating a v1alpha1 CPPC and get the v1beta1 version with no plugins/fallbackArchitecture field", func() {
 			By("Creating a v1alpha1 ClusterPodPlacementConfig")
 			err := client.Create(ctx, &v1alpha1.ClusterPodPlacementConfig{
 				ObjectMeta: metav1.ObjectMeta{
@@ -376,6 +387,53 @@ var _ = Describe("The Multiarch Tuning Operator", Serial, func() {
 			Expect(err).NotTo(HaveOccurred(), "failed to get the v1beta1 version of the ClusterPodPlacementConfig", err)
 			By("Validate a v1beta1 ClusterPodPlacementConfig plugins ommit empty")
 			Expect(ppc.Spec.Plugins).To(BeNil())
+			By("Validate a v1beta1 ClusterPodPlacementConfig fallbackArchitecture ommit empty")
+			Expect(ppc.Spec.FallbackArchitecture).To(Equal(""))
+		})
+		It("should create a v1beta1 CPPC with fallbackArchitecture and succeed converting to v1alpha1", func() {
+			By("Creating a v1beta1 ClusterPodPlacementConfig with fallbackArchitecture set")
+			err := client.Create(ctx,
+				NewClusterPodPlacementConfig().
+					WithName(common.SingletonResourceObjectName).
+					WithFallbackArchitecture("amd64").
+					Build(),
+			)
+			Expect(err).NotTo(HaveOccurred())
+			By("Fetching the v1beta1 ClusterPodPlacementConfig")
+			v1beta1obj := &v1beta1.ClusterPodPlacementConfig{}
+			err = client.Get(ctx, runtimeclient.ObjectKey{
+				Name: common.SingletonResourceObjectName,
+			}, v1beta1obj)
+			Expect(err).NotTo(HaveOccurred())
+			By("Verifying the FallbackArchitecture field is set to amd64")
+			Expect(v1beta1obj.Spec.FallbackArchitecture).To(Equal("amd64"))
+			By("Fetching the v1alpha1 ClusterPodPlacementConfig via conversion")
+			v1alpha1obj := &v1alpha1.ClusterPodPlacementConfig{}
+			err = client.Get(ctx, runtimeclient.ObjectKey{
+				Name: common.SingletonResourceObjectName,
+			}, v1alpha1obj)
+			Expect(err).NotTo(HaveOccurred())
+			By("Verifying the FallbackArchitecture value is preserved in annotations")
+			Expect(v1alpha1obj.Annotations).To(HaveKeyWithValue(v1alpha1.FallbackArchAnnotation, "amd64"))
+			By("Performing a round-trip conversion back to v1beta1")
+			v1beta1obj = &v1beta1.ClusterPodPlacementConfig{}
+			err = client.Get(ctx, runtimeclient.ObjectKey{
+				Name: common.SingletonResourceObjectName,
+			}, v1beta1obj)
+			Expect(err).NotTo(HaveOccurred())
+			By("Verifying the FallbackArchitecture field is still set after round-trip conversion")
+			Expect(v1beta1obj.Spec.FallbackArchitecture).To(Equal("amd64"))
+			By("Clearing the FallbackArchitecture field")
+			v1beta1obj.Spec.FallbackArchitecture = ""
+			err = client.Update(ctx, v1beta1obj)
+			Expect(err).NotTo(HaveOccurred())
+			v1alpha1obj = &v1alpha1.ClusterPodPlacementConfig{}
+			err = client.Get(ctx, runtimeclient.ObjectKey{
+				Name: common.SingletonResourceObjectName,
+			}, v1alpha1obj)
+			Expect(err).NotTo(HaveOccurred())
+			By("Verifying the FallbackArchitecture annotation is removed")
+			Expect(v1alpha1obj.Annotations).NotTo(HaveKey(v1alpha1.FallbackArchAnnotation))
 		})
 		It("should fail creating the CPPC with multiple items for the same architecture in the plugins.nodeAffinityScoring.Platforms list", func() {
 			By("Creating a v1beta1 ClusterPodPlacementConfig")
@@ -478,6 +536,101 @@ var _ = Describe("The Multiarch Tuning Operator", Serial, func() {
 			err = client.Create(ctx, d)
 			Expect(err).NotTo(HaveOccurred(), "failed to create deployment", err)
 			Eventually(framework.VerifyPodLabels(ctx, client, ns, "app", "test", e2e.Present, schedulingGateLabel), e2e.WaitShort).Should(Succeed())
+		})
+	})
+	Context("with an image that cannot be inspected", func() {
+		It("remove the scheduling gate after the max retries count", func() {
+			var err error
+			By("Creating a v1beta1 ClusterPodPlacementConfig")
+			err = client.Create(ctx,
+				NewClusterPodPlacementConfig().
+					WithName(common.SingletonResourceObjectName).
+					WithNodeAffinityScoring(true).
+					WithNodeAffinityScoringTerm(utils.ArchitectureAmd64, 24).
+					Build(),
+			)
+			Expect(err).NotTo(HaveOccurred(), "failed to create the ClusterPodPlacementConfig", err)
+			Eventually(framework.ValidateCreation(client, ctx)).Should(Succeed())
+			By("Create an ephemeral namespace")
+			ns := framework.NewEphemeralNamespace()
+			err = client.Create(ctx, ns)
+			Expect(err).NotTo(HaveOccurred())
+			//nolint:errcheck
+			defer client.Delete(ctx, ns)
+			ps := NewPodSpec().
+				WithContainersImages("quay.io/non-existing/image:latest").
+				Build()
+			d := NewDeployment().
+				WithSelectorAndPodLabels(podLabel).
+				WithPodSpec(ps).
+				WithReplicas(utils.NewPtr(int32(1))).
+				WithName("test-deployment").
+				WithNamespace(ns.Name).
+				Build()
+			err = client.Create(ctx, d)
+			Expect(err).NotTo(HaveOccurred())
+			By("The scheduling gate label should be removed")
+			Eventually(framework.VerifyPodLabels(ctx, client, ns, "app", "test", e2e.Present, schedulingGateLabel), e2e.WaitShort).Should(Succeed())
+			By("Verify node affinity label are set correctly")
+			Eventually(framework.VerifyPodLabelsAreSet(ctx, client, ns, "app", "test",
+				utils.NodeAffinityLabel, utils.LabelValueNotSet,
+				utils.PreferredNodeAffinityLabel, utils.NodeAffinityLabelValueSet,
+			), e2e.WaitShort).Should(Succeed())
+			By("Verify image inspection retry count reaches the maximum")
+			Eventually(framework.VerifyPodLabelsAreSet(ctx, client, ns, "app", "test",
+				utils.ImageInspectionErrorCountLabel, strconv.Itoa(podplacement.MaxRetryCount),
+			), e2e.WaitShort).Should(Succeed())
+		})
+		It("Set the node affinity to the fallback architecture if we configure fallbackArchitecture it in CPPC spec", func() {
+			var err error
+			By("Creating a v1beta1 ClusterPodPlacementConfig")
+			err = client.Create(ctx,
+				NewClusterPodPlacementConfig().
+					WithName(common.SingletonResourceObjectName).
+					WithNodeAffinityScoring(true).
+					WithNodeAffinityScoringTerm(utils.ArchitectureAmd64, 24).
+					WithFallbackArchitecture(utils.ArchitectureAmd64).
+					Build(),
+			)
+			Expect(err).NotTo(HaveOccurred(), "failed to create the ClusterPodPlacementConfig", err)
+			Eventually(framework.ValidateCreation(client, ctx)).Should(Succeed())
+			By("Create an ephemeral namespace")
+			ns := framework.NewEphemeralNamespace()
+			err = client.Create(ctx, ns)
+			Expect(err).NotTo(HaveOccurred())
+			//nolint:errcheck
+			defer client.Delete(ctx, ns)
+			ps := NewPodSpec().
+				WithContainersImages("quay.io/non-existing/image:latest").
+				Build()
+			d := NewDeployment().
+				WithSelectorAndPodLabels(podLabel).
+				WithPodSpec(ps).
+				WithReplicas(utils.NewPtr(int32(1))).
+				WithName("test-deployment").
+				WithNamespace(ns.Name).
+				Build()
+			err = client.Create(ctx, d)
+			Expect(err).NotTo(HaveOccurred())
+			archLabelNSR := NewNodeSelectorRequirement().
+				WithKeyAndValues(utils.ArchLabel, corev1.NodeSelectorOpIn, utils.ArchitectureAmd64).
+				Build()
+			expectedNSTs := NewNodeSelectorTerm().WithMatchExpressions(archLabelNSR).Build()
+			By("The scheduling gate label should be removed")
+			Eventually(framework.VerifyPodLabels(ctx, client, ns, "app", "test", e2e.Present, schedulingGateLabel), e2e.WaitShort).Should(Succeed())
+			By("Verify image inspection retry count reaches the maximum")
+			Eventually(framework.VerifyPodLabelsAreSet(ctx, client, ns, "app", "test",
+				utils.ImageInspectionErrorCountLabel, strconv.Itoa(podplacement.MaxRetryCount),
+			), e2e.WaitShort).Should(Succeed())
+			By("Verify fallback arch label are set correctly")
+			Eventually(framework.VerifyPodLabelsAreSet(ctx, client, ns, "app", "test", utils.FallbackArchitectureLabel, utils.ArchitectureAmd64), e2e.WaitShort).Should(Succeed())
+			By("Verify node affinity label are set correctly")
+			Eventually(framework.VerifyPodLabelsAreSet(ctx, client, ns, "app", "test",
+				utils.NodeAffinityLabel, utils.NodeAffinityLabelValueSet,
+				utils.PreferredNodeAffinityLabel, utils.NodeAffinityLabelValueSet,
+			), e2e.WaitShort).Should(Succeed())
+			By("The pod should have been set node affinity of arch info.")
+			Eventually(framework.VerifyPodNodeAffinity(ctx, client, ns, "app", "test", *expectedNSTs), e2e.WaitShort).Should(Succeed())
 		})
 	})
 	Context("the ClusterPodPlacementConfig is deleted within 1s after creation", func() {
@@ -820,6 +973,157 @@ var _ = Describe("The Multiarch Tuning Operator", Serial, func() {
 			err = client.Delete(ctx, enee)
 			Expect(err).NotTo(HaveOccurred())
 			Eventually(framework.ValidateDeletion(client, ctx, framework.MainPlugin, framework.ENoExecPlugin)).Should(Succeed())
+		})
+	})
+	Context("the webhook shoud deny local PodPlacementConfig creation", func() {
+		It("when the ClusterPodPlacementConfig doesn't exist", func() {
+			By("Ensure the ClusterPodPlacementConfig doesn't exist")
+			cppc := &v1beta1.ClusterPodPlacementConfig{}
+			err := client.Get(ctx, runtimeclient.ObjectKey{Name: common.SingletonResourceObjectName}, cppc)
+			Expect(errors.IsNotFound(err)).To(BeTrue(), "the ClusterPodPlacementConfig should not exist", err)
+			By("Create an ephemeral namespace")
+			ns := framework.NewEphemeralNamespace()
+			err = client.Create(ctx, ns)
+			Expect(err).NotTo(HaveOccurred())
+			//nolint:errcheck
+			defer client.Delete(ctx, ns)
+			By("Creating a local PodPlacementConfig")
+			err = client.Create(ctx,
+				NewPodPlacementConfig().
+					WithName("test-ppc").
+					WithNamespace(ns.Name).
+					WithPriority(50).
+					WithPlugins().
+					WithNodeAffinityScoring(true).
+					WithNodeAffinityScoringTerm(utils.ArchitectureAmd64, 50).
+					Build(),
+			)
+			Expect(err).To(HaveOccurred(), "the PodPlacementConfig should not be accepted", err)
+			//nolint:errcheck
+			defer client.Delete(ctx, NewPodPlacementConfig().WithName("test-ppc").WithNamespace(ns.Name).Build())
+		})
+	})
+	Context("when local PodPlacementConfigs exist", func() {
+		It("should deny deletion of ClusterPodPlacementConfig", func() {
+			By("Create ClusterPodPlacementConfig")
+			err := client.Create(ctx, NewClusterPodPlacementConfig().WithName(common.SingletonResourceObjectName).Build())
+			Expect(err).NotTo(HaveOccurred(), "failed to create ClusterPodPlacementConfig", err)
+			Eventually(framework.ValidateCreation(client, ctx)).Should(Succeed())
+			By("Create an ephemeral namespace")
+			ns := framework.NewEphemeralNamespace()
+			err = client.Create(ctx, ns)
+			Expect(err).NotTo(HaveOccurred())
+			//nolint:errcheck
+			defer client.Delete(ctx, ns)
+			By("Creating a local PodPlacementConfig")
+			err = client.Create(ctx,
+				NewPodPlacementConfig().
+					WithName("test-ppc").
+					WithNamespace(ns.Name).
+					WithPriority(50).
+					WithPlugins().
+					WithNodeAffinityScoring(true).
+					WithNodeAffinityScoringTerm(utils.ArchitectureAmd64, 50).
+					Build(),
+			)
+			Expect(err).NotTo(HaveOccurred(), "failed to create local PodPlacementConfig", err)
+			//nolint:errcheck
+			defer client.Delete(ctx, NewPodPlacementConfig().WithName("test-ppc").WithNamespace(ns.Name).Build())
+			By("Attempting to delete ClusterPodPlacementConfig")
+			err = client.Delete(ctx, NewClusterPodPlacementConfig().WithName(common.SingletonResourceObjectName).Build())
+			Expect(err).To(HaveOccurred(), "the ClusterPodPlacementConfig should not be able to deleted when local PodPlacementConfigs exist", err)
+			By("Deleting the local PodPlacementConfig")
+			err = client.Delete(ctx, NewPodPlacementConfig().
+				WithName("test-ppc").
+				WithNamespace(ns.Name).Build())
+			Expect(err).NotTo(HaveOccurred(), "failed to delete PodPlacementConfig")
+			By("Verifying the cppc removing the no-pod-placement-config finalizer")
+			Eventually(func(g Gomega) {
+				cppc := &v1beta1.ClusterPodPlacementConfig{}
+				err = client.Get(ctx, runtimeclient.ObjectKeyFromObject(&v1beta1.ClusterPodPlacementConfig{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: common.SingletonResourceObjectName,
+					},
+				}), cppc)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(cppc.Finalizers).NotTo(ContainElement(utils.CPPCNoPPCObjectFinalizer))
+			}).Should(Succeed(), "the ClusterPodPlacementConfig should remove the no-pod-placement-config finalizer")
+			By("Deleting ClusterPodPlacementConfig after local configs are removed")
+			err = client.Delete(ctx, NewClusterPodPlacementConfig().WithName(common.SingletonResourceObjectName).Build())
+			Expect(err).NotTo(HaveOccurred(), "failed to delete ClusterPodPlacementConfig", err)
+			Expect(runtimeclient.IgnoreNotFound(err)).NotTo(HaveOccurred())
+			Eventually(framework.ValidateDeletion(client, ctx)).Should(Succeed())
+		})
+	})
+	Context("when managing the no-pod-placement-config finalizer", func() {
+		BeforeEach(func() {
+			err := client.Create(ctx,
+				NewClusterPodPlacementConfig().
+					WithName(common.SingletonResourceObjectName).
+					Build(),
+			)
+			Expect(err).NotTo(HaveOccurred(), "failed to create the ClusterPodPlacementConfig", err)
+			Eventually(framework.ValidateCreation(client, ctx)).Should(Succeed())
+		})
+		It("should add the finalizer when a namespaced PodPlacementConfig exists and remove it when none exist", func() {
+			By("Create an ephemeral namespace")
+			ns := framework.NewEphemeralNamespace()
+			err := client.Create(ctx, ns)
+			Expect(err).NotTo(HaveOccurred())
+			//nolint:errcheck
+			defer client.Delete(ctx, ns)
+			By("Creating a local PodPlacementConfig with a Priority setting")
+			err = client.Create(ctx,
+				NewPodPlacementConfig().
+					WithName("test-ppc").
+					WithNamespace(ns.Name).
+					WithPriority(50).
+					WithPlugins().
+					WithNodeAffinityScoring(true).
+					WithNodeAffinityScoringTerm(utils.ArchitectureAmd64, 50).
+					Build(),
+			)
+			Expect(err).NotTo(HaveOccurred(), "the PodPlacementConfig should be accepted", err)
+			//nolint:errcheck
+			defer client.Delete(ctx, NewPodPlacementConfig().WithName("test-ppc").WithNamespace(ns.Name).Build())
+			By("Verifying the cppc adding the no-pod-placement-config finalizer")
+			Eventually(func(g Gomega) {
+				cppc := &v1beta1.ClusterPodPlacementConfig{}
+				err = client.Get(ctx, runtimeclient.ObjectKeyFromObject(&v1beta1.ClusterPodPlacementConfig{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: common.SingletonResourceObjectName,
+					},
+				}), cppc)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(cppc.Finalizers).To(ContainElement(utils.CPPCNoPPCObjectFinalizer))
+			}).Should(Succeed(), "the ClusterPodPlacementConfig should have the correct finalizer")
+			By("Deleting above created PodPlacementConfig")
+			err = client.Delete(ctx, NewPodPlacementConfig().
+				WithName("test-ppc").
+				WithNamespace(ns.Name).Build())
+			Expect(err).NotTo(HaveOccurred())
+			By("Check the PodPlacementConfig is deleted")
+			Eventually(func(g Gomega) {
+				ppc := &v1beta1.PodPlacementConfig{}
+				err := client.Get(ctx, runtimeclient.ObjectKeyFromObject(&v1beta1.PodPlacementConfig{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-ppc",
+						Namespace: ns.Name,
+					},
+				}), ppc)
+				g.Expect(errors.IsNotFound(err)).To(BeTrue(), "failed to delete podplacementconfig", err)
+			}).Should(Succeed(), "the PodPlacementConfig should be deleted")
+			By("Verifying the cppc removing the no-pod-placement-config finalizer")
+			Eventually(func(g Gomega) {
+				cppc := &v1beta1.ClusterPodPlacementConfig{}
+				err = client.Get(ctx, runtimeclient.ObjectKeyFromObject(&v1beta1.ClusterPodPlacementConfig{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: common.SingletonResourceObjectName,
+					},
+				}), cppc)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(cppc.Finalizers).NotTo(ContainElement(utils.CPPCNoPPCObjectFinalizer))
+			}).Should(Succeed(), "the ClusterPodPlacementConfig should remove the no-pod-placement-config finalizer")
 		})
 	})
 })

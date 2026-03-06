@@ -20,7 +20,30 @@ import "github.com/openshift/multiarch-tuning-operator/api/common"
 
 // +k8s:deepcopy-gen=package
 
-// Plugins represents the plugins configuration.
+// LocalPlugins represents the plugins configuration for podplacementconfigs resource.
+// +kubebuilder:object:generate=true
+type LocalPlugins struct {
+	NodeAffinityScoring *NodeAffinityScoring `json:"nodeAffinityScoring,omitempty"`
+}
+
+// localPluginChecks is a map that associates a plugin name with a function that can
+// safely check if that specific plugin is enabled on a LocalPlugins struct.
+var localPluginChecks = map[common.Plugin]func(lp *LocalPlugins) bool{
+	common.NodeAffinityScoringPluginName: func(lp *LocalPlugins) bool {
+		return lp.NodeAffinityScoring != nil && lp.NodeAffinityScoring.IsEnabled()
+	},
+}
+
+// PluginEnabled provides a generic and safe way to check if a specific plugin is enabled.
+// It handles the case where the LocalPlugins struct itself is nil.
+func (lp *LocalPlugins) PluginEnabled(plugin common.Plugin) bool {
+	if checkFunc, found := localPluginChecks[plugin]; found {
+		return checkFunc(lp)
+	}
+	return false
+}
+
+// Plugins represents the plugins configuration for cluster pod placement config.
 // +kubebuilder:object:generate=true
 type Plugins struct {
 	NodeAffinityScoring *NodeAffinityScoring `json:"nodeAffinityScoring,omitempty"`

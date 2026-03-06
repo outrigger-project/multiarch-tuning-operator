@@ -9,8 +9,10 @@ ARG TARGETARCH
 # This only affects the builder stage (used during compilation) and does not impact the
 # security of the final runtime image, which runs as USER 65532:65532 (non-root).
 USER 0
-RUN if which apt-get; then apt-get update && apt-get install -y libgpgme-dev && apt-get -y clean autoclean; \
-    elif which dnf; then dnf install -y gpgme-devel && dnf clean all -y; fi;
+RUN if ! pkg-config --exists gpgme 2>/dev/null; then \
+        if which apt-get; then apt-get update && apt-get install -y libgpgme-dev && apt-get -y clean autoclean; \
+        elif which dnf; then dnf install -y gpgme-devel && dnf clean all -y; fi; \
+    fi
 
 WORKDIR /workspace
 # Copy the Go Modules manifests
@@ -47,7 +49,7 @@ LABEL distribution-scope="public"
 LABEL name="multiarch-tuning/multiarch-tuning-operator"
 LABEL release="1.2.2"
 LABEL version="1.2.2"
-LABEL cpe="cpe:/a:redhat:multiarch_tuning_operator:1.1::el9"
+LABEL cpe="cpe:/a:redhat:multiarch_tuning_operator:1.2::el9"
 LABEL url="https://github.com/openshift/multiarch-tuning-operator"
 LABEL vendor="Red Hat, Inc."
 LABEL description="The Multiarch Tuning Operator enhances the user experience for administrators of Openshift \

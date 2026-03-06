@@ -16,6 +16,8 @@ limitations under the License.
 
 package plugins
 
+import "fmt"
+
 const (
 	// PluginName for NodeAffinityScoring.
 	NodeAffinityScoringPluginName = "NodeAffinityScoring"
@@ -28,6 +30,19 @@ type NodeAffinityScoring struct {
 	// Platforms is a required field and must contain at least one entry.
 	// +kubebuilder:validation:MinItems=1
 	Platforms []NodeAffinityScoringPlatformTerm `json:"platforms" protobuf:"bytes,2,opt,name=platforms"`
+}
+
+// ValidateArchitecturesSet checks whether duplicate architectures are set in NodeAffinityScoring
+func (n *NodeAffinityScoring) ValidateArchitecturesSet() (bool, error) {
+	seen := make(map[string]struct{})
+	for _, term := range n.Platforms {
+		if _, exists := seen[term.Architecture]; exists {
+			return false, fmt.Errorf("duplicate architecture %q found in nodeAffinityScoring.platforms", term.Architecture)
+		}
+
+		seen[term.Architecture] = struct{}{}
+	}
+	return true, nil
 }
 
 // NodeAffinityScoringPlatformTerm holds configuration for specific platforms, with required fields validated.

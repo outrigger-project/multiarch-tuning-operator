@@ -114,7 +114,7 @@ We prefer **Option 2**, as it simplifies certificate lifecycle management and is
 Remove hardcoded registry configuration paths and make them configurable or auto-detected at runtime to support non-OpenShift deployments.
 
 #### Add Validation for Newly Added Fields
-For OpenShift clusters, users should not be allowed to configure the two newly added fields. Validation logic will be added in [clusterpodplacementconfig_webhook.go](https://github.com/openshift/multiarch-tuning-operator/blob/main/apis/multiarch/v1beta1/clusterpodplacementconfig_webhook.go) to restrict users from setting or modifying these fields when the operator is running on an OpenShift cluster.
+For OpenShift clusters, users should not be allowed to configure the two newly added fields. Validation logic will be added in [clusterpodplacementconfig_webhook.go](https://github.com/openshift/multiarch-tuning-operator/blob/main/api/v1beta1/clusterpodplacementconfig_webhook.go) to restrict users from setting or modifying these fields when the operator is running on an OpenShift cluster.
 For non-OpenShift clusters, specifying a reference to the global pull secret in the `ClusterPodPlacementConfig` custom resource will be mandatory. This requirement will also be validated through logic implemented in the same webhook.
 
 #### ClusterPodPlacementConfig CR
