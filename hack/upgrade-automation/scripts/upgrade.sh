@@ -111,6 +111,7 @@ step_update_base_images() {
     update_tekton_files "$go_minor"
     update_dockerfile "$go_minor"
     update_makefile_build_image "$go_minor" "$ocp_version"
+    # Note: These functions check if files exist before updating
     update_bundle_konflux_dockerfile "$go_minor"
     update_konflux_dockerfile "$go_minor"
 
@@ -118,7 +119,9 @@ step_update_base_images() {
 
     # Commit changes
     echo "Committing changes..." >&2
-    git add .ci-operator.yaml .tekton/ Dockerfile Makefile bundle.konflux.Dockerfile konflux.Dockerfile 2>/dev/null || true
+    # Add updated files (ignore errors if files don't exist)
+    git add .ci-operator.yaml Dockerfile Makefile 2>/dev/null || true
+    git add .tekton/ bundle.konflux.Dockerfile konflux.Dockerfile 2>/dev/null || true
     git commit -m "Update Makefile and Dockerfiles to use the new Golang version base image to ${go_minor}"
 
     echo "✅ Step 1 complete" >&2
