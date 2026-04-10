@@ -30,16 +30,19 @@ func main() {
 }
 
 func bindFlags() {
-	flag.IntVar(&initialLogLevel, "initial-log-level", 0, "Initial log level. From 0 (Normal) to 5 (TraceAll)")
+	flag.IntVar(&initialLogLevel, "initial-log-level", 0, "Initial log level. From 0 (Normal) to 10 (maximum verbosity)")
 	flag.BoolVar(&logDevMode, "log-dev-mode", false, "Enable development mode for zap logger")
 	flag.Parse()
 }
 
 func initContext() (context.Context, context.CancelFunc) {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	if initialLogLevel < 0 || initialLogLevel > 10 {
+		must(fmt.Errorf("initial-log-level must be in range [0,10], got %d", initialLogLevel), "invalid flag value")
+	}
 	var logImpl *zap.Logger
 	var err error
-	logLevel := zapcore.Level(int8(-initialLogLevel)) // #nosec G115 -- initialLogLevel is constrained to 0-5 range
+	logLevel := zapcore.Level(-initialLogLevel)
 	if logDevMode {
 		cfg := zap.NewDevelopmentConfig()
 		cfg.Level = zap.NewAtomicLevelAt(logLevel)
