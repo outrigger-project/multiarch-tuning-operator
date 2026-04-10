@@ -21,6 +21,8 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/openshift/multiarch-tuning-operator/api/common"
+
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -71,6 +73,9 @@ func (v *ClusterPodPlacementConfigValidator) validate(obj runtime.Object) (warni
 	cppc, ok := obj.(*ClusterPodPlacementConfig)
 	if !ok {
 		return nil, errors.New("not a ClusterPodPlacementConfig")
+	}
+	if cppc.Name != common.SingletonResourceObjectName {
+		return nil, fmt.Errorf("ClusterPodPlacementConfig must be named %q", common.SingletonResourceObjectName)
 	}
 	if cppc.Spec.Plugins == nil || cppc.Spec.Plugins.NodeAffinityScoring == nil {
 		return nil, nil
