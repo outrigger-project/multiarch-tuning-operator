@@ -297,6 +297,9 @@ func validateFlags() error {
 	if btoi(enableOperator)+btoi(enableClusterPodPlacementConfigOperandControllers)+btoi(enableClusterPodPlacementConfigOperandWebHook)+btoi(enableENoExecEventControllers) > 1 {
 		return errors.New("only one of the following flags can be set: --enable-operator, --enable-ppc-controllers, --enable-ppc-webhook, --enable-enoexec-event-controllers")
 	}
+	if initialLogLevel < 0 || initialLogLevel > 10 {
+		return fmt.Errorf("initial-log-level must be in range [0,10], got %d", initialLogLevel)
+	}
 	return nil
 }
 
@@ -319,11 +322,13 @@ func bindFlags() {
 	// This may be deprecated in the future. It is used to support the current way of setting the log level for operands
 	// If operands will start to support a controller that watches the ClusterPodPlacementConfig, this flag may be removed
 	// and the log level will be set in the ClusterPodPlacementConfig at runtime (with no need for reconciliation)
-	flag.IntVar(&initialLogLevel, "initial-log-level", common.LogVerbosityLevelNormal.ToZapLevelInt(), "Initial log level. Converted to zap")
+	flag.IntVar(&initialLogLevel, "initial-log-level", common.LogVerbosityLevelNormal.ToZapLevelInt(), "Initial log level (0-10). Converted to zap. CRD levels: 0=Normal, 1=Debug, 2=Trace, 3=TraceAll")
 	klog.InitFlags(nil)
 	flag.Parse()
 	// Set the Log Level as AtomicLevel to allow runtime changes
-	utils.AtomicLevel = zapuber.NewAtomicLevelAt(zapcore.Level(int8(-initialLogLevel))) // #nosec G115 -- initialLogLevel is constrained to 0-3 range
+	// Safe to convert: initialLogLevel is validated to be in range [0,10] by validateFlags(),
+	// so -initialLogLevel is in range [-10,0] which fits in int8 range [-128,127]
+	utils.AtomicLevel = zapuber.NewAtomicLevelAt(zapcore.Level(int8(-initialLogLevel)))
 	zapLogger := zap.New(zap.Level(utils.AtomicLevel), zap.UseDevMode(false))
 	klog.SetLogger(zapLogger)
 	ctrllog.SetLogger(zapLogger)
