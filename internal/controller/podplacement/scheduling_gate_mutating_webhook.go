@@ -1,5 +1,5 @@
 /*
-Copyright 2023 Red Hat, Inc.
+caCopyright 2023 Red Hat, Inc.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -85,8 +85,9 @@ func (a *PodSchedulingGateMutatingWebHook) Handle(ctx context.Context, req admis
 	ppcList := &multiarchv1beta1.PodPlacementConfigList{}
 	if err := a.client.List(ctx, ppcList, client.InNamespace(pod.Namespace)); err != nil {
 		log.Error(err, "Failed to list existing PodPlacementConfigs in namespace")
-		// On error, proceed without PPC filtering - fail open
-		ppcList.Items = []multiarchv1beta1.PodPlacementConfig{}
+		// True fail-open for admission: admit without mutating when namespace config
+		// cannot be read.
+		return a.patchedPodResponse(pod.PodObject(), req)
 	}
 
 	// Filter to only PPCs that match this pod's labels - do this once for efficiency
