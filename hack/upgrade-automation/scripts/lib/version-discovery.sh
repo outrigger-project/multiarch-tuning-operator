@@ -23,12 +23,13 @@ discover_k8s_from_ocp_release() {
         echo "$k8s_version"
     else
         # Fallback: discover from openshift/api go.mod
-        local k8s_minor
-        k8s_minor=$(curl -sf "https://raw.githubusercontent.com/openshift/api/release-$ocp_version/go.mod" | \
-            grep 'k8s.io/api ' | awk '{print $2}' | grep -oP 'v0\.\K[0-9]+')
+        local k8s_module_version
+        k8s_module_version=$(curl -sf "https://raw.githubusercontent.com/openshift/api/release-$ocp_version/go.mod" | \
+            grep 'k8s.io/api ' | awk '{print $2}' | grep -oP '^v0\.[0-9]+\.[0-9]+$')
 
-        if [[ -n "$k8s_minor" ]]; then
-            echo "1.$k8s_minor.0"
+        if [[ -n "$k8s_module_version" ]]; then
+            # Transform v0.X.Y to 1.X.Y (preserving patch version)
+            echo "${k8s_module_version/v0./1.}"
         else
             echo ""
         fi
