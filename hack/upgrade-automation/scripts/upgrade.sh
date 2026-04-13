@@ -523,10 +523,10 @@ step_update_vendor() {
 
     if [[ "$actual_go_version" != "$go_version" ]]; then
         echo "" >&2
-        echo "⚠️  Go directive was upgraded to $actual_go_version (required by dependencies)" >&2
-        echo "   Restoring to container version $go_version for build compatibility..." >&2
-        update_go_mod_directive "$go_version"
-        echo "✅ Restored go directive to $go_version" >&2
+        echo "❌ ERROR: vendoring resolved dependencies that require Go $actual_go_version" >&2
+        echo "   The selected dependencies require a higher Go version than the container ($go_version)." >&2
+        echo "   Refusing to rewrite go.mod to a lower version." >&2
+        return 1
     else
         echo "✅ go directive is already at container version: $go_version" >&2
     fi
