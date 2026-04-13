@@ -24,7 +24,7 @@ func initMetrics() {
 		EnoexecCounterInvalid = prometheus.NewCounter(
 			prometheus.CounterOpts{
 				Name: "mto_enoexecevents_invalid_total",
-				Help: "The counter for ENoExecEvents objects that faled the reconciliation and report as pod events",
+				Help: "The counter for ENoExecEvents objects that failed reconciliation and were reported as pod events",
 			},
 		)
 		EnoexecCounterStale = prometheus.NewCounter(
