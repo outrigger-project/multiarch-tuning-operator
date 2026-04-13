@@ -219,7 +219,7 @@ sed_inplace() {
 | `validate_prerequisites()` | All above checks | Exit on any failure |
 
 **Branch naming:**
-```
+```text
 upgrade-ocp-{ocp}-go-{go_minor}-k8s-{k8s_minor}
 
 Example: upgrade-ocp-4.20-go-1.24-k8s-1.34
@@ -276,19 +276,19 @@ hack/upgrade-automation/scripts/upgrade.sh 4.20 1.24 1.34.1
 **Common causes and fixes:**
 
 **API deprecation:**
-```
+```text
 Error: undefined: corev1.SomeOldAPI
 ```
 Solution: Update code to use new API (check K8s release notes)
 
 **Test helper changes:**
-```
+```text
 Error: cannot use X (type Y) as type Z
 ```
 Solution: Update test setup code for new types
 
 **Import path changes:**
-```
+```text
 Error: package X is not in GOROOT
 ```
 Solution: Update import paths (check go.mod for correct versions)
