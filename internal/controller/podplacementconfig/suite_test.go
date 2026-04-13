@@ -218,6 +218,7 @@ func runManager() {
 	Eventually(func(g Gomega) {
 		resp, err := http.Get("http://127.0.0.1:4980/readyz")
 		g.Expect(err).NotTo(HaveOccurred())
+		defer resp.Body.Close() //nolint:errcheck
 		g.Expect(resp.StatusCode).To(Equal(http.StatusOK))
 	}).MustPassRepeatedly(3).Should(
 		Succeed(), "manager is not ready yet")
