@@ -79,11 +79,10 @@ Updates all Go dependencies (smart handling skips incompatible versions):
 
 Re-vendors all dependencies:
 1. `go mod tidy`
-2. `rm -rf vendor/`
-3. `go mod vendor`
-4. Restores go directive if `go mod tidy` upgraded it
+2. `make vendor`
+3. Restores go directive if `go mod tidy` upgraded it
 
-**Commit:** `go mod vendor`
+**Commit:** `make vendor`
 
 ### Step 5: Run code generation
 
