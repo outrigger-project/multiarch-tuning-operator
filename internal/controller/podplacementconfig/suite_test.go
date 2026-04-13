@@ -136,8 +136,9 @@ var _ = SynchronizedAfterSuite(func() {}, func() {
 	err := k8sClient.Delete(ctx, builder.NewClusterPodPlacementConfig().WithName(common.SingletonResourceObjectName).Build())
 	Expect(err).NotTo(HaveOccurred(), "failed to delete ClusterPodPlacementConfig", err)
 	Eventually(testingutils.ValidateDeletion(k8sClient, ctx)).Should(Succeed(), "the ClusterPodPlacementConfig should be deleted")
-	By("Checking the cache is empty")
-	Expect(clusterpodplacementconfig.GetClusterPodPlacementConfig()).To(BeNil())
+	By("Waiting for the cache to become empty")
+	Eventually(clusterpodplacementconfig.GetClusterPodPlacementConfig).
+		Should(BeNil(), "cache still contains ClusterPodPlacementConfig after deletion")
 
 	By("tearing down the test environment")
 	stopMgr()
