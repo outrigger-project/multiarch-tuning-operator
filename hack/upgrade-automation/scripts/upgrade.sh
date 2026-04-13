@@ -117,11 +117,14 @@ step_update_base_images() {
     echo "" >&2
 
     # Commit changes
-    echo "Committing changes..." >&2
     git add .ci-operator.yaml .tekton/ Dockerfile Makefile bundle.konflux.Dockerfile konflux.Dockerfile 2>/dev/null || true
-    git commit -m "Update Makefile and Dockerfiles to use the new Golang version base image to ${go_minor}"
-
-    echo "✅ Step 1 complete" >&2
+    if [[ -n "$(git status --porcelain)" ]]; then
+        echo "Committing changes..." >&2
+        git commit -m "Update Makefile and Dockerfiles to use the new Golang version base image to ${go_minor}"
+        echo "✅ Step 1 complete (changes committed)" >&2
+    else
+        echo "✅ Step 1 complete (no changes)" >&2
+    fi
 }
 
 # ==============================================================================
@@ -147,11 +150,14 @@ step_update_tools() {
         "$golint_version"
 
     echo "" >&2
-    echo "Committing changes..." >&2
     git add Makefile
-    git commit -m "Update tools in Makefile"
-
-    echo "✅ Step 2 complete" >&2
+    if [[ -n "$(git status --porcelain)" ]]; then
+        echo "Committing changes..." >&2
+        git commit -m "Update tools in Makefile"
+        echo "✅ Step 2 complete (changes committed)" >&2
+    else
+        echo "✅ Step 2 complete (no changes)" >&2
+    fi
 }
 
 # ==============================================================================
@@ -510,11 +516,8 @@ step_update_vendor() {
 
     echo "" >&2
 
-    echo "Removing existing vendor directory..." >&2
-    rm -rf vendor/
-
-    echo "Running go mod vendor..." >&2
-    go mod vendor
+    echo "Running make vendor..." >&2
+    make vendor
 
     # After vendoring is complete, restore the go directive to match the container version
     # The vendor directory doesn't depend on the go directive - only builds do
@@ -607,6 +610,14 @@ step_run_tests() {
         return 1
     fi
     echo "✅ build passed" >&2
+
+    echo "" >&2
+    echo "Running code quality auto-fixes..." >&2
+    echo "Running make fmt..." >&2
+    make fmt || true
+    echo "Running make goimports..." >&2
+    make goimports || true
+    echo "✅ auto-fixes complete" >&2
 
     echo "" >&2
     echo "Running make test..." >&2

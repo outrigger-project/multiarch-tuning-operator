@@ -69,8 +69,8 @@ validate_and_create_branch() {
         read -p "Do you want to delete and recreate it? (y/N) " -n 1 -r >&2
         echo "" >&2
         if [[ $REPLY =~ ^[Yy]$ ]]; then
-            git branch -D "$branch_name"
-            git checkout -b "$branch_name"
+            # Use checkout -B to force recreation (works even if currently checked out)
+            git checkout -B "$branch_name"
         else
             echo "ERROR: Branch '$branch_name' already exists. Please delete it or choose a different version." >&2
             return 1
@@ -124,12 +124,12 @@ validate_k8s_version_consistency() {
     echo "Validating k8s.io version consistency in go.mod..." >&2
 
     local versions_count
-    versions_count=$(grep '^\s*k8s\.io/' go.mod | grep -v '//' | awk '{print $2}' | grep -oP 'v\d+\.\d+' | sort -u | wc -l)
+    versions_count=$(grep '^\s*k8s\.io/' go.mod | grep -v '//' | awk '{print $2}' | sed -E 's/(v[0-9]+\.[0-9]+).*/\1/' | sort -u | wc -l)
 
     if [[ "$versions_count" -gt 1 ]]; then
         echo "⚠️  WARNING: Multiple k8s.io minor versions detected in go.mod" >&2
         echo "   Found versions:" >&2
-        grep '^\s*k8s\.io/' go.mod | grep -v '//' | awk '{print $1, $2}' | grep -oP 'v\d+\.\d+' | sort -u >&2
+        grep '^\s*k8s\.io/' go.mod | grep -v '//' | awk '{print $1, $2}' | sed -E 's/.*(v[0-9]+\.[0-9]+).*/\1/' | sort -u >&2
         echo "   This is expected for packages like k8s.io/klog and k8s.io/utils" >&2
     else
         echo "✅ All k8s.io dependencies at consistent minor version" >&2
@@ -160,7 +160,7 @@ validate_prerequisites() {
     local current_go current_k8s current_ocp
     current_go=$(grep '^go ' go.mod | awk '{print $2}')
     current_k8s=$(grep 'k8s.io/api' go.mod | head -1 | awk '{print $2}')
-    current_ocp=$(grep 'BUILD_IMAGE' Makefile | grep -oP 'openshift-\K[0-9]+\.[0-9]+')
+    current_ocp=$(grep 'BUILD_IMAGE' Makefile | sed -E 's/.*openshift-([0-9]+\.[0-9]+).*/\1/')
 
     echo "Current versions:" >&2
     echo "  Go: $current_go" >&2
@@ -170,6 +170,18 @@ validate_prerequisites() {
     echo "Target versions:" >&2
     echo "  Go: $go_version" >&2
     echo "  Kubernetes: $k8s_version" >&2
+    echo "" >&2
+
+    # Validate golang image exists
+    if ! validate_golang_image_exists "$go_version"; then
+        return 1
+    fi
+
+    echo "" >&2
+
+    # Validate k8s version consistency (warning only)
+    validate_k8s_version_consistency
+
     echo "" >&2
 
     return 0
