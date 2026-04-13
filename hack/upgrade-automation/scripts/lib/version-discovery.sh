@@ -140,7 +140,7 @@ discover_controller_runtime_version() {
     echo "Discovering compatible controller-runtime version..." >&2
 
     local releases
-    releases=$(curl -s https://api.github.com/repos/kubernetes-sigs/controller-runtime/releases | grep '"tag_name"' | grep -E '"v0\.' | sed -E 's/.*"v([^"]+)".*/\1/')
+    releases=$(curl -s https://api.github.com/repos/kubernetes-sigs/controller-runtime/releases | grep '"tag_name"' | grep -E '"v0\.' | grep -Ev -- '-(alpha|beta|rc)[0-9.]*"' | sed -E 's/.*"v([^"]+)".*/\1/')
 
     for version in $releases; do
         local gomod
@@ -207,7 +207,7 @@ discover_controller_tools_version() {
     echo "Discovering compatible controller-tools version..." >&2
 
     local releases
-    releases=$(curl -s https://api.github.com/repos/kubernetes-sigs/controller-tools/releases | grep '"tag_name"' | grep -E '"v0\.' | sed -E 's/.*"v([^"]+)".*/\1/')
+    releases=$(curl -s https://api.github.com/repos/kubernetes-sigs/controller-tools/releases | grep '"tag_name"' | grep -E '"v0\.' | grep -Ev -- '-(alpha|beta|rc)[0-9.]*"' | sed -E 's/.*"v([^"]+)".*/\1/')
 
     for version in $releases; do
         local gomod
@@ -293,7 +293,7 @@ discover_golangci_lint_version() {
     echo "Discovering compatible golangci-lint version..." >&2
 
     local releases
-    releases=$(curl -s https://api.github.com/repos/golangci/golangci-lint/releases | grep '"tag_name"' | sed -E 's/.*"v([^"]+)".*/\1/')
+    releases=$(curl -s https://api.github.com/repos/golangci/golangci-lint/releases | grep '"tag_name"' | grep -Ev -- '-(alpha|beta|rc)[0-9.]*"' | sed -E 's/.*"v([^"]+)".*/\1/')
 
     for version in $releases; do
         local go_req
