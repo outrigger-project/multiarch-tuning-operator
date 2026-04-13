@@ -120,6 +120,20 @@ var _ = Describe("Internal/Controller/Podplacement/PodReconciler", func() {
 				cppc := &v1beta1.ClusterPodPlacementConfig{}
 				err := k8sClient.Get(ctx, crclient.ObjectKey{Name: common.SingletonResourceObjectName}, cppc)
 				Expect(err).NotTo(HaveOccurred(), "failed to get ClusterPodPlacementConfig")
+				originalFallback := cppc.Spec.FallbackArchitecture
+				DeferCleanup(func() {
+					latest := &v1beta1.ClusterPodPlacementConfig{}
+					Expect(k8sClient.Get(ctx, crclient.ObjectKey{Name: common.SingletonResourceObjectName}, latest)).To(Succeed())
+					latest.Spec.FallbackArchitecture = originalFallback
+					Expect(k8sClient.Update(ctx, latest)).To(Succeed())
+					Eventually(func() string {
+						cppc := clusterpodplacementconfig.GetClusterPodPlacementConfig()
+						if cppc == nil {
+							return "nil"
+						}
+						return cppc.Spec.FallbackArchitecture
+					}).Should(Equal(originalFallback), "cache did not update with reverted ClusterPodPlacementConfig")
+				})
 				cppc.Spec.FallbackArchitecture = utils.ArchitectureAmd64
 				err = k8sClient.Update(ctx, cppc)
 				Expect(err).NotTo(HaveOccurred(), "failed to update ClusterPodPlacementConfig")
@@ -173,18 +187,6 @@ var _ = Describe("Internal/Controller/Podplacement/PodReconciler", func() {
 					g.Expect(pod.Labels).To(HaveKeyWithValue(utils.NodeAffinityLabel, utils.NodeAffinityLabelValueSet),
 						"node affinity label not found")
 				}).WithTimeout(e2e.WaitShort).Should(Succeed(), "failed to process fallback architecture")
-
-				// Cleanup: Revert CPPC changes
-				cppc.Spec.FallbackArchitecture = ""
-				err = k8sClient.Update(ctx, cppc)
-				Expect(err).NotTo(HaveOccurred(), "failed to revert ClusterPodPlacementConfig")
-				Eventually(func() string {
-					cppc := clusterpodplacementconfig.GetClusterPodPlacementConfig()
-					if cppc == nil {
-						return "nil"
-					}
-					return cppc.Spec.FallbackArchitecture
-				}).Should(Equal(""), "cache did not update with reverted ClusterPodPlacementConfig")
 			})
 		})
 		Context("with different pull secrets", func() {
