@@ -25,7 +25,7 @@ discover_k8s_from_ocp_release() {
         # Fallback: discover from openshift/api go.mod
         local k8s_module_version
         k8s_module_version=$(curl -sf "https://raw.githubusercontent.com/openshift/api/release-$ocp_version/go.mod" | \
-            grep 'k8s.io/api ' | awk '{print $2}' | grep -oP '^v0\.[0-9]+\.[0-9]+$')
+            grep 'k8s.io/api ' | awk '{print $2}' | sed -E -n '/^v0\.[0-9]+\.[0-9]+$/p')
 
         if [[ -n "$k8s_module_version" ]]; then
             # Transform v0.X.Y to 1.X.Y (preserving patch version)
@@ -75,7 +75,7 @@ discover_required_ocp_version() {
     # Check each branch to find which uses our target K8s version
     for ocp_version in $branches; do
         local openshift_api_k8s
-        openshift_api_k8s=$(curl -sf "https://raw.githubusercontent.com/openshift/api/release-$ocp_version/go.mod" | grep 'k8s.io/api ' | awk '{print $2}' | grep -oP 'v0\.\K[0-9]+')
+        openshift_api_k8s=$(curl -sf "https://raw.githubusercontent.com/openshift/api/release-$ocp_version/go.mod" | grep 'k8s.io/api ' | awk '{print $2}' | sed -E 's/^v0\.([0-9]+).*/\1/')
 
         if [[ "$openshift_api_k8s" == "$k8s_minor" ]]; then
             echo "✅ Found OCP $ocp_version uses K8s 1.$k8s_minor" >&2
@@ -114,7 +114,7 @@ validate_k8s_ocp_compatibility() {
 
     # Check openshift/api release branch for K8s version
     local openshift_api_k8s
-    openshift_api_k8s=$(curl -sf "https://raw.githubusercontent.com/openshift/api/release-$ocp_version/go.mod" | grep 'k8s.io/api ' | awk '{print $2}' | grep -oP 'v0\.\K[0-9]+')
+    openshift_api_k8s=$(curl -sf "https://raw.githubusercontent.com/openshift/api/release-$ocp_version/go.mod" | grep 'k8s.io/api ' | awk '{print $2}' | sed -E 's/^v0\.([0-9]+).*/\1/')
 
     if [[ "$openshift_api_k8s" != "$k8s_minor" ]]; then
         echo "ERROR: K8s version mismatch" >&2
@@ -151,7 +151,7 @@ discover_controller_runtime_version() {
         fi
 
         local cr_k8s_minor cr_go_minor
-        cr_k8s_minor=$(echo "$gomod" | grep 'k8s.io/apimachinery' | awk '{print $2}' | grep -oP 'v0\.\K[0-9]+' | head -1)
+        cr_k8s_minor=$(echo "$gomod" | grep 'k8s.io/apimachinery' | awk '{print $2}' | sed -E 's/^v0\.([0-9]+).*/\1/' | head -1)
         cr_go_minor=$(echo "$gomod" | grep '^go ' | awk '{print $2}' | cut -d. -f2)
 
         if [[ "$cr_k8s_minor" == "$k8s_minor" ]] && [[ "$cr_go_minor" -le "$go_minor" ]]; then
@@ -201,7 +201,7 @@ discover_controller_tools_version() {
 
     local k8s_minor go_minor
     # Extract minor version from k8s_version parameter (e.g., "1.34.1" -> "34")
-    k8s_minor=$(echo "$k8s_version" | grep -oP '1\.\K[0-9]+')
+    k8s_minor=$(echo "$k8s_version" | sed -E 's/^1\.([0-9]+).*/\1/')
     go_minor=$(echo "$go_version" | cut -d. -f2)
 
     echo "Discovering compatible controller-tools version..." >&2
@@ -218,7 +218,7 @@ discover_controller_tools_version() {
         fi
 
         local ct_k8s_minor ct_go_minor
-        ct_k8s_minor=$(echo "$gomod" | grep 'k8s.io/apimachinery' | awk '{print $2}' | grep -oP 'v0\.\K[0-9]+' | head -1)
+        ct_k8s_minor=$(echo "$gomod" | grep 'k8s.io/apimachinery' | awk '{print $2}' | sed -E 's/^v0\.([0-9]+).*/\1/' | head -1)
         ct_go_minor=$(echo "$gomod" | grep '^go ' | awk '{print $2}' | cut -d. -f2)
 
         if [[ "$ct_k8s_minor" == "$k8s_minor" ]] && [[ "$ct_go_minor" -le "$go_minor" ]]; then
