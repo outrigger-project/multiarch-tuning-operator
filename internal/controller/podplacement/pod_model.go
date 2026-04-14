@@ -436,7 +436,7 @@ func (pod *Pod) shouldIgnorePod(cppc *v1beta1.ClusterPodPlacementConfig, matchin
 		pod.Spec.NodeName != "" || pod.HasControlPlaneNodeSelector() || pod.IsFromDaemonSet() ||
 		pod.isNodeSelectorConfiguredForArchitecture() &&
 			(pod.isPreferredAffinityConfiguredForArchitecture() ||
-				(!cppc.PluginsEnabled(common.NodeAffinityScoringPluginName) && !pod.hasMatchingPPCWithPlugin(matchingPPCs)))
+				((cppc == nil || !cppc.PluginsEnabled(common.NodeAffinityScoringPluginName)) && !pod.hasMatchingPPCWithPlugin(matchingPPCs)))
 }
 
 // isNodeSelectorConfiguredForArchitecture returns true if the pod has already a nodeSelector for the architecture label
