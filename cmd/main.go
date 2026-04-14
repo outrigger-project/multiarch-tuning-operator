@@ -328,7 +328,7 @@ func bindFlags() {
 	// Set the Log Level as AtomicLevel to allow runtime changes
 	// Safe to convert: initialLogLevel is validated to be in range [0,10] by validateFlags(),
 	// so -initialLogLevel is in range [-10,0] which fits in int8 range [-128,127]
-	utils.AtomicLevel = zapuber.NewAtomicLevelAt(zapcore.Level(int8(-initialLogLevel)))
+	utils.AtomicLevel = zapuber.NewAtomicLevelAt(zapcore.Level(int8(-initialLogLevel))) //nolint:gosec // G115 - conversion is safe, value validated to be in range
 	zapLogger := zap.New(zap.Level(utils.AtomicLevel), zap.UseDevMode(false))
 	klog.SetLogger(zapLogger)
 	ctrllog.SetLogger(zapLogger)
