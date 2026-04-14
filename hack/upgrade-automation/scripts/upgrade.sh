@@ -418,7 +418,8 @@ step_update_go_mod() {
         echo "⚠️  Found $require_count require blocks, consolidating to 2..." >&2
 
         # Create temporary file to rebuild go.mod
-        local temp_gomod=$(mktemp)
+        local temp_gomod
+        temp_gomod=$(mktemp) || { echo "ERROR: Failed to create temporary file" >&2; return 1; }
 
         # Copy everything before first require block
         awk '/^require \(/{exit} {print}' go.mod > "$temp_gomod"
