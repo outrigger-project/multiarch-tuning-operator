@@ -208,6 +208,7 @@ func runManager() {
 
 	By("Starting the manager")
 	go func() {
+		defer GinkgoRecover()
 		var mgrCtx context.Context
 		mgrCtx, stopMgr = context.WithCancel(ctx)
 		err = mgr.Start(mgrCtx)
