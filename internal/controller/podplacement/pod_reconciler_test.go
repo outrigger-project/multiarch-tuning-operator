@@ -190,11 +190,11 @@ var _ = Describe("Internal/Controller/Podplacement/PodReconciler", func() {
 			})
 		})
 		Context("with different pull secrets", func() {
-			It("handles images with global pull secrets correctly", func() {
+			PIt("handles images with global pull secrets correctly", func() {
 				// TODO: Test logic for handling a Pod with one container and image using global pull secret
 			})
 
-			It("handles images with local pull secrets correctly", func() {
+			PIt("handles images with local pull secrets correctly", func() {
 				// TODO: Test logic for handling a Pod with one container and image using local pull secret
 			})
 		})
@@ -419,11 +419,11 @@ var _ = Describe("Internal/Controller/Podplacement/PodReconciler", func() {
 	})
 	When("Handling Multi-container Pods", func() {
 		Context("with different image types and different auth credentials sources", func() {
-			It("handles node affinity as the intersection of the compatible architectures of each multi-arch image", func() {
+			PIt("handles node affinity as the intersection of the compatible architectures of each multi-arch image", func() {
 				// TODO: Test logic for handling a Pod with multiple multi-arch image-based containers
 			})
 
-			It("handles node affinity of multi-arch images and single-arch image setting the only one possible", func() {
+			PIt("handles node affinity of multi-arch images and single-arch image setting the only one possible", func() {
 				// TODO: Test logic for handling a Pod with multiple multi-arch image-based containers
 			})
 
