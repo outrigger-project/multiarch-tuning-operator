@@ -76,7 +76,7 @@ We propose introducing a new plugin called `celArchitecturePlacement` that can b
 
 1. The namespace administrator creates or updates a `PodPlacementConfig` resource in their namespace with the `celArchitecturePlacement` plugin enabled
 2. The administrator defines:
-   - A list of default architectures (required, e.g., `[ppc64le, amd64]`)
+   - A list of fallback architectures (required, e.g., `[ppc64le, amd64]`)
    - One or more `ArchitectureRule` objects, each containing:
      - A name for the rule
      - A CEL expression that evaluates against Pod resources
@@ -129,7 +129,7 @@ spec:
   plugins:
     celArchitecturePlacement:
       enabled: true
-      defaultArchitectures:
+      fallbackArchitectures:
         - amd64
       rules:
         - name: postgres-on-ppc64le
@@ -227,13 +227,13 @@ const (
 type celArchitecturePlacement struct {
     BasePlugin `json:",inline"`
     
-    // DefaultArchitectures is a required list of architectures to use when no rules match.
+    // fallbackArchitectures is a required list of architectures to use when no rules match.
     // This limits the explosion of possible rules by providing a sensible default.
     // When applied, existing architecture constraints are removed and replaced with these architectures.
     // +kubebuilder:validation:Required
     // +kubebuilder:validation:MinItems=1
     // +kubebuilder:validation:MaxItems=4
-    DefaultArchitectures []string `json:"defaultArchitectures" protobuf:"bytes,2,rep,name=defaultArchitectures"`
+    fallbackArchitectures []string `json:"fallbackArchitectures" protobuf:"bytes,2,rep,name=fallbackArchitectures"`
     
     // Rules is a list of architecture selection rules evaluated in order.
     // The first matching rule determines the target architecture.
@@ -278,8 +278,8 @@ func (c *celArchitecturePlacement) ValidateArchitectures() error {
         "amd64": true, "arm64": true, "ppc64le": true, "s390x": true,
     }
     
-    // Validate default architectures
-    for _, arch := range c.DefaultArchitectures {
+    // Validate fallback architectures
+    for _, arch := range c.fallbackArchitectures {
         if !validArchs[arch] {
             return fmt.Errorf("invalid default architecture: %s", arch)
         }
@@ -498,7 +498,7 @@ spec:
   plugins:
     celArchitecturePlacement:
       enabled: true
-      defaultArchitectures:
+      fallbackArchitectures:
         - ppc64le
         - amd64
 ```
@@ -518,9 +518,9 @@ The plugin respects the existing namespace filtering logic in the MTO, which exc
 - System namespaces matching `kube-*` pattern (unless explicitly configured)
 - Namespaces matching `hypershift-*` pattern (unless explicitly configured)
 
-### Default Architectures Rationale
+### Fallback Architectures Rationale
 
-The `defaultArchitectures` field is required for several important reasons:
+The `fallbackArchitectures` field is required for several important reasons:
 
 1. **Limits Rule Explosion and Configuration Burden** Without a default, administrators would need to create rules for every possible pod pattern, leading to complex and hard-to-maintain configurations. The plugin supports _exceptional_ cases in the same namespace.
 
@@ -530,10 +530,12 @@ The `defaultArchitectures` field is required for several important reasons:
 
 4. **Consistent Behavior** Whether a rule matches or not, the plugin always removes existing architecture constraints and sets new ones, ensuring predictable behavior
 
+Further, `fallbackArchitectures` follows the `ClusterPodPlacementConfig` field `fallbackArchitecture`. If no `fallbackArchitectures` are configured, the logic falls back to the `fallbackArchitecture` field in the `ClusterPodPlacementConfig` resource.
+
 **Example** An administrator migrating a namespace from x86_64 to a mixed x86_64/ppc64le cluster might configure:
 
 ```yaml
-defaultArchitectures:
+fallbackArchitectures:
   - amd64  # Safe default for existing workloads
 rules:
   - name: new-services-on-ppc64le
@@ -598,7 +600,7 @@ Only a single `PodPlacementConfig` resource in the same namespace is allowed.
 1. Configs are evaluated in order of their `priority` field (higher priority first)
 2. Within each configuration, rules are evaluated in the order they appear
 3. The first matching rule from the highest priority config determines the architecture
-4. If no rules match in any config, the `defaultArchitectures` from the highest priority config with `celArchitecturePlacement` enabled is used
+4. If no rules match in any config, the `fallbackArchitectures` from the highest priority config with `celArchitecturePlacement` enabled is used
 5. In all cases, existing architecture constraints are removed before new ones are applied
 
 #### Performance Considerations
