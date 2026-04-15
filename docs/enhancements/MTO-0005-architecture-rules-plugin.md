@@ -585,7 +585,7 @@ When the plugin applies architecture rules, it performs these operations in orde
    - Remove existing architecture constraints from pods
    - Apply new architecture rules based on CEL evaluation results
 
-2. **Mutating Webhook** No changes required; continues to add scheduling gates
+2. **Mutating Webhook** Continue to add scheduling gates, and add annotations with the rulename and `PodPlacementConfig` responsible for the placement.
 
 3. **Image Inspection** The `celArchitecturePlacement` plugin takes precedence over image-based detection when enabled. Existing architecture constraints (including those set by image inspection) are removed.
 
@@ -735,6 +735,7 @@ The plugin is implemented in the Pod Placement Controller and does not depend on
 ## Implementation History
 
 - 2026-03-31: Initial proposal
+- 2026-04-15: Refined the language, add fallback architecture, refine the traceability of the rule's application
 
 ## Alternatives
 
