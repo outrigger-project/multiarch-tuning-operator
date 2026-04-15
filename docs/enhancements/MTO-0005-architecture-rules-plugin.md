@@ -44,7 +44,7 @@ The current Multiarch Tuning Operator automatically determines Pod image archite
 
 ### User Stories
 
-- As a platform engineer, I want to override pod pacement behavior to specific architectures without modifying the underlying application.
+- As a platform engineer, I want to override pod placement behavior to specific architectures without modifying the underlying application.
 - As a namespace administrator, I want to use well-known Kubernetes labels (like `app.kubernetes.io/component`) to determine architecture placement for different application tiers in my namespace, tuning any architecture constraints.
 
 ### Goals
