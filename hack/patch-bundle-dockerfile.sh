@@ -26,20 +26,8 @@ LABEL summary="The Multiarch Tuning Operator enhances the user experience for ad
 LABEL io.k8s.display-name="Multiarch Tuning Operator"
 LABEL io.openshift.tags="openshift,operator,multiarch,scheduling"'
 
-# Remove the content of the bundle.konflux.Dockerfile starting from the line with the comment "# Labels from hack/patch-bundle-dockerfile.sh"
-if [[ "$(uname)" == "Darwin" ]]; then
-    # macOS BSD sed
-    sed -i '' '/# Labels from hack\/patch-bundle-dockerfile.sh/,$d' bundle.konflux.Dockerfile
-else
-    # Linux GNU sed
-    sed -i '/# Labels from hack\/patch-bundle-dockerfile.sh/,$d' bundle.konflux.Dockerfile
-fi
-# Append the content to the bundle.Dockerfile and bundle.konflux.Dockerfile
+# Append the content to the bundle.Dockerfile
 cat <<EOF >>bundle.Dockerfile
 
-$CONTENT
-EOF
-# DO NOT ADD an empty line for the bundle.konflux.Dockerfile.
-cat <<EOF >>bundle.konflux.Dockerfile
 $CONTENT
 EOF
