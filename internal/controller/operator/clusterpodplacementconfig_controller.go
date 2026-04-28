@@ -343,6 +343,31 @@ func (r *ClusterPodPlacementConfigReconciler) handleDelete(ctx context.Context,
 	// We execute the update here because this function returns multiple times before the whole deletion process is completed.
 	// Executing it here ensures that the conditions are updated throughout the deletion process.
 	_ = r.updateStatus(ctx, clusterPodPlacementConfig)
+
+	// Prevent deletion while PodPlacementConfig resources still exist
+	// Check this BEFORE tearing down webhook/operand resources to prevent orphaning PPCs
+	if controllerutil.ContainsFinalizer(clusterPodPlacementConfig, utils.CPPCNoPPCObjectFinalizer) {
+		log.V(1).Info("Checking for existing PodPlacementConfig resources before deletion")
+		ppcList := &multiarchv1beta1.PodPlacementConfigList{}
+		if err := r.List(ctx, ppcList); err != nil {
+			log.Error(err, "Unable to list PodPlacementConfigs during deletion")
+			return err
+		}
+		if len(ppcList.Items) > 0 {
+			// Block deletion - PPCs still exist
+			err := errors.New(RemainingPodPlacementConfig)
+			log.Error(err, "Deletion blocked due to existing PodPlacementConfig resources")
+			return err
+		}
+		// All PPCs are gone, remove the finalizer and continue with deletion
+		log.V(1).Info("No PodPlacementConfig resources found, removing no-pod-placement-config finalizer")
+		controllerutil.RemoveFinalizer(clusterPodPlacementConfig, utils.CPPCNoPPCObjectFinalizer)
+		if err := r.Update(ctx, clusterPodPlacementConfig); err != nil {
+			log.Error(err, "Unable to remove no-pod-placement-config finalizer from ClusterPodPlacementConfig")
+			return err
+		}
+	}
+
 	objsToDelete := []utils.ToDeleteRef{
 		{
 			NamespacedTypedClient: r.ClientSet.AdmissionregistrationV1().MutatingWebhookConfigurations(),
@@ -382,29 +407,6 @@ func (r *ClusterPodPlacementConfigReconciler) handleDelete(ctx context.Context,
 	// pods gating status and the webhook stopping to communicate with the API server.
 	if err == nil || client.IgnoreNotFound(err) != nil {
 		return errors.New(waitingForWebhookSInterruptionError)
-	}
-
-	// Prevent deletion while PodPlacementConfig resources still exist
-	if controllerutil.ContainsFinalizer(clusterPodPlacementConfig, utils.CPPCNoPPCObjectFinalizer) {
-		log.V(1).Info("Checking for existing PodPlacementConfig resources before deletion")
-		ppcList := &multiarchv1beta1.PodPlacementConfigList{}
-		if err := r.List(ctx, ppcList); err != nil {
-			log.Error(err, "Unable to list PodPlacementConfigs during deletion")
-			return err
-		}
-		if len(ppcList.Items) > 0 {
-			err := errors.New(RemainingPodPlacementConfig)
-			log.Error(err, "Deletion blocked due to existing PodPlacementConfig resources")
-			return err
-		}
-		// All PPCs are gone, remove the finalizer
-		log.V(1).Info("No PodPlacementConfig resources found, removing no-pod-placement-config finalizer")
-		controllerutil.RemoveFinalizer(clusterPodPlacementConfig, utils.CPPCNoPPCObjectFinalizer)
-		if err := r.Update(ctx, clusterPodPlacementConfig); err != nil {
-			log.Error(err, "Unable to remove no-pod-placement-config finalizer from ClusterPodPlacementConfig")
-			return err
-		}
-		return nil
 	}
 
 	log.Info("Looking for pods with the scheduling gate")
