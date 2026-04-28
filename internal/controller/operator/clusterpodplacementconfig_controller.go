@@ -582,7 +582,11 @@ func (r *ClusterPodPlacementConfigReconciler) handleEnoexecDelete(ctx context.Co
 	}
 
 	// Delete errored ENoExecEvent resources and count remaining non-errored ones
-	nonErroredCount, _ := r.deleteErroredENoExecEvents(ctx, enoexecEventList)
+	nonErroredCount, _, err := r.deleteErroredENoExecEvents(ctx, enoexecEventList)
+	if err != nil {
+		log.Error(err, "Failed to delete errored ENoExecEvent resources")
+		return err
+	}
 
 	// Only block cleanup if there are non-errored ENoExecEvent resources
 	if nonErroredCount > 0 {
@@ -941,9 +945,10 @@ func isDeploymentUpToDate(deployment *appsv1.Deployment) bool {
 }
 
 // deleteErroredENoExecEvents deletes ENoExecEvent resources that are marked with an error label.
-// Returns the count of non-errored and errored events found.
-func (r *ClusterPodPlacementConfigReconciler) deleteErroredENoExecEvents(ctx context.Context, enoexecEventList *multiarchv1beta1.ENoExecEventList) (nonErroredCount, erroredCount int) {
+// Returns the count of non-errored and errored events found, and any delete errors encountered.
+func (r *ClusterPodPlacementConfigReconciler) deleteErroredENoExecEvents(ctx context.Context, enoexecEventList *multiarchv1beta1.ENoExecEventList) (nonErroredCount, erroredCount int, err error) {
 	log := ctrllog.FromContext(ctx)
+	var errs []error
 	for i := range enoexecEventList.Items {
 		enoexecEvent := &enoexecEventList.Items[i]
 		// Check if this ENoExecEvent is marked as errored
@@ -959,6 +964,7 @@ func (r *ClusterPodPlacementConfigReconciler) deleteErroredENoExecEvents(ctx con
 		erroredCount++
 		if deleteErr := r.Delete(ctx, enoexecEvent); deleteErr != nil {
 			log.Error(deleteErr, "Failed to delete errored ENoExecEvent", "name", enoexecEvent.Name)
+			errs = append(errs, deleteErr)
 		} else {
 			log.V(1).Info("Deleted errored ENoExecEvent", "name", enoexecEvent.Name)
 		}
@@ -967,7 +973,7 @@ func (r *ClusterPodPlacementConfigReconciler) deleteErroredENoExecEvents(ctx con
 	if erroredCount > 0 {
 		log.Info("Deleted errored ENoExecEvent resources during cleanup", "erroredCount", erroredCount)
 	}
-	return nonErroredCount, erroredCount
+	return nonErroredCount, erroredCount, errorutils.NewAggregate(errs)
 }
 
 // SetupWithManager sets up the controller with the Manager.

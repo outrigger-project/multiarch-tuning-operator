@@ -90,7 +90,7 @@ func Test_GetClusterMinorVersion(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			g := NewGomegaWithT(t)
-			client := fake.NewSimpleClientset()
+			client := fake.NewClientset()
 			client.Discovery().(*fakediscovery.FakeDiscovery).FakedServerVersion = tt.serverInfo
 
 			version, err := GetClusterMinorVersion(client)
