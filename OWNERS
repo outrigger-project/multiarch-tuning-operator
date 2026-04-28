@@ -3,9 +3,11 @@ reviewers:
   - AnnaZivkovic 
   - Prashanth684
   - lwan-wanglin
+  - jcpowermac
 approvers:
   - aleskandro
   - AnnaZivkovic 
   - Prashanth684
   - lwan-wanglin
+  - jcpowermac
 components: multiarch-tuning-operator
