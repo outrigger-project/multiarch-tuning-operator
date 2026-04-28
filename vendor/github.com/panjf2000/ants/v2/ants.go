@@ -139,6 +139,14 @@ func ReleaseTimeout(timeout time.Duration) error {
 	return defaultAntsPool.ReleaseTimeout(timeout)
 }
 
+// ReleaseContext is like Release but with a context, it waits all workers to exit before the context is done.
+//
+// Note that if the context is nil, it is the same as Release,
+// just return immediately without waiting for all workers to exit.
+func ReleaseContext(ctx context.Context) error {
+	return defaultAntsPool.ReleaseContext(ctx)
+}
+
 // Reboot reboots the default pool.
 func Reboot() {
 	defaultAntsPool.Reboot()
@@ -323,8 +331,8 @@ func (p *poolCommon) goTicktock() {
 	go p.ticktock()
 }
 
-func (p *poolCommon) nowTime() time.Time {
-	return time.Unix(0, atomic.LoadInt64(&p.now))
+func (p *poolCommon) nowTime() int64 {
+	return atomic.LoadInt64(&p.now)
 }
 
 // Running returns the number of workers currently running.
@@ -398,11 +406,30 @@ func (p *poolCommon) Release() {
 
 // ReleaseTimeout is like Release but with a timeout, it waits all workers to exit before timing out.
 func (p *poolCommon) ReleaseTimeout(timeout time.Duration) error {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	err := p.ReleaseContext(ctx)
+	if errors.Is(err, context.DeadlineExceeded) {
+		return ErrTimeout
+	}
+	return err
+}
+
+// ReleaseContext is like Release but with a context, it waits all workers to exit before the context is done.
+//
+// Note that if the context is nil, it is the same as Release,
+// just return immediately without waiting for all workers to exit.
+func (p *poolCommon) ReleaseContext(ctx context.Context) error {
 	if p.IsClosed() || (!p.options.DisablePurge && p.stopPurge == nil) || p.stopTicktock == nil {
 		return ErrPoolClosed
 	}
 
 	p.Release()
+
+	// Don't wait for all workers to exit, just return immediately if the context is nil.
+	if ctx == nil {
+		return nil
+	}
 
 	var purgeCh <-chan struct{}
 	if !p.options.DisablePurge {
@@ -417,12 +444,10 @@ func (p *poolCommon) ReleaseTimeout(timeout time.Duration) error {
 		})
 	}
 
-	timer := time.NewTimer(timeout)
-	defer timer.Stop()
 	for {
 		select {
-		case <-timer.C:
-			return ErrTimeout
+		case <-ctx.Done():
+			return ctx.Err()
 		case <-p.allDone:
 			<-purgeCh
 			<-p.ticktockCtx.Done()
