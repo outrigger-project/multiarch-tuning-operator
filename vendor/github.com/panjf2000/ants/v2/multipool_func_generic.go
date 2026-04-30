@@ -23,14 +23,10 @@
 package ants
 
 import (
-	"errors"
-	"fmt"
+	"context"
 	"math"
-	"strings"
 	"sync/atomic"
 	"time"
-
-	"golang.org/x/sync/errgroup"
 )
 
 // MultiPoolWithFuncGeneric is the generic version of MultiPoolWithFunc.
@@ -168,40 +164,23 @@ func (mp *MultiPoolWithFuncGeneric[T]) IsClosed() bool {
 // ReleaseTimeout closes the multi-pool with a timeout,
 // it waits all pools to be closed before timing out.
 func (mp *MultiPoolWithFuncGeneric[T]) ReleaseTimeout(timeout time.Duration) error {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	return mp.ReleaseContext(ctx)
+}
+
+// ReleaseContext closes the multi-pool with a context,
+// it waits all pools to be closed before the context is done.
+func (mp *MultiPoolWithFuncGeneric[T]) ReleaseContext(ctx context.Context) error {
 	if !atomic.CompareAndSwapInt32(&mp.state, OPENED, CLOSED) {
 		return ErrPoolClosed
 	}
 
-	errCh := make(chan error, len(mp.pools))
-	var wg errgroup.Group
-	for i, pool := range mp.pools {
-		func(p *PoolWithFuncGeneric[T], idx int) {
-			wg.Go(func() error {
-				err := p.ReleaseTimeout(timeout)
-				if err != nil {
-					err = fmt.Errorf("pool %d: %v", idx, err)
-				}
-				errCh <- err
-				return err
-			})
-		}(pool, i)
+	pools := make([]contextReleaser, len(mp.pools))
+	for i, p := range mp.pools {
+		pools[i] = p
 	}
-
-	_ = wg.Wait()
-
-	var errStr strings.Builder
-	for i := 0; i < len(mp.pools); i++ {
-		if err := <-errCh; err != nil {
-			errStr.WriteString(err.Error())
-			errStr.WriteString(" | ")
-		}
-	}
-
-	if errStr.Len() == 0 {
-		return nil
-	}
-
-	return errors.New(strings.TrimSuffix(errStr.String(), " | "))
+	return releasePools(ctx, pools)
 }
 
 // Reboot reboots a released multi-pool.
