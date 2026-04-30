@@ -64,6 +64,7 @@ type ClusterPodPlacementConfigStatus struct {
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 
 	// The following fields are used to derive the conditions. They are not exposed to the user.
+	// nolint:staticcheck,revive // controller-gen requires json tags on all fields, even unexported ones
 	available                                bool `json:"-"`
 	progressing                              bool `json:"-"`
 	degraded                                 bool `json:"-"`

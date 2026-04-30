@@ -392,7 +392,7 @@ var _ = Describe("internal/Controller/ClusterPodPlacementConfig/ClusterPodPlacem
 						framework.NewConditionTypeStatusTuple(v1beta1.MutatingWebhookConfigurationNotAvailable, corev1.ConditionTrue),
 						framework.NewConditionTypeStatusTuple(v1beta1.DeprovisioningType, corev1.ConditionTrue),
 					)
-				})
+				}).Should(Succeed(), "CPPC should remain in deprovisioning state while gated pod exists")
 				By("Manually delete the gated pod")
 				err = k8sClient.Delete(ctx, pod)
 				Expect(err).NotTo(HaveOccurred(), "failed to delete pod", err)
@@ -983,7 +983,8 @@ var _ = Describe("internal/Controller/ClusterPodPlacementConfig/ClusterPodPlacem
 			Expect(k8sClient.List(ctx, enoexecEventList, crclient.InNamespace(utils.Namespace()))).To(Succeed())
 
 			By("Calling deleteErroredENoExecEvents")
-			nonErroredCount, erroredCount := reconciler.deleteErroredENoExecEvents(ctx, enoexecEventList)
+			nonErroredCount, erroredCount, err := reconciler.deleteErroredENoExecEvents(ctx, enoexecEventList)
+			Expect(err).NotTo(HaveOccurred())
 
 			By("Verifying the counts")
 			Expect(nonErroredCount).To(Equal(2), "should have 2 non-errored events")
@@ -1005,7 +1006,7 @@ var _ = Describe("internal/Controller/ClusterPodPlacementConfig/ClusterPodPlacem
 			}).Should(Succeed())
 
 			By("Verifying non-errored events still exist")
-			err := k8sClient.Get(ctx, crclient.ObjectKey{
+			err = k8sClient.Get(ctx, crclient.ObjectKey{
 				Name:      nonErroredENEE1.Name,
 				Namespace: utils.Namespace(),
 			}, &v1beta1.ENoExecEvent{})
@@ -1024,7 +1025,8 @@ var _ = Describe("internal/Controller/ClusterPodPlacementConfig/ClusterPodPlacem
 
 		It("should handle empty list gracefully", func() {
 			emptyList := &v1beta1.ENoExecEventList{}
-			nonErroredCount, erroredCount := reconciler.deleteErroredENoExecEvents(ctx, emptyList)
+			nonErroredCount, erroredCount, err := reconciler.deleteErroredENoExecEvents(ctx, emptyList)
+			Expect(err).NotTo(HaveOccurred())
 			Expect(nonErroredCount).To(Equal(0))
 			Expect(erroredCount).To(Equal(0))
 		})
@@ -1040,7 +1042,8 @@ var _ = Describe("internal/Controller/ClusterPodPlacementConfig/ClusterPodPlacem
 			enoexecEventList := &v1beta1.ENoExecEventList{}
 			Expect(k8sClient.List(ctx, enoexecEventList, crclient.InNamespace(utils.Namespace()))).To(Succeed())
 
-			nonErroredCount, erroredCount := reconciler.deleteErroredENoExecEvents(ctx, enoexecEventList)
+			nonErroredCount, erroredCount, err := reconciler.deleteErroredENoExecEvents(ctx, enoexecEventList)
+			Expect(err).NotTo(HaveOccurred())
 			Expect(nonErroredCount).To(BeNumerically(">", 0), "should count events with no labels as non-errored")
 			Expect(erroredCount).To(Equal(0))
 

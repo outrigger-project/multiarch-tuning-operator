@@ -167,7 +167,7 @@ func applyResources(resources resmap.ResMap) error {
 		Expect(err).NotTo(HaveOccurred())
 
 		if len(raw) == 0 {
-			return nil // Nothing to process
+			continue // Skip empty resource, continue processing others
 		}
 
 		// Decode the resource from the buffer

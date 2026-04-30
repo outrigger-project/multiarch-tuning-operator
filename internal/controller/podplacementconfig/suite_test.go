@@ -136,8 +136,9 @@ var _ = SynchronizedAfterSuite(func() {}, func() {
 	err := k8sClient.Delete(ctx, builder.NewClusterPodPlacementConfig().WithName(common.SingletonResourceObjectName).Build())
 	Expect(err).NotTo(HaveOccurred(), "failed to delete ClusterPodPlacementConfig", err)
 	Eventually(testingutils.ValidateDeletion(k8sClient, ctx)).Should(Succeed(), "the ClusterPodPlacementConfig should be deleted")
-	By("Checking the cache is empty")
-	Expect(clusterpodplacementconfig.GetClusterPodPlacementConfig()).To(BeNil())
+	By("Waiting for the cache to become empty")
+	Eventually(clusterpodplacementconfig.GetClusterPodPlacementConfig).
+		Should(BeNil(), "cache still contains ClusterPodPlacementConfig after deletion")
 
 	By("tearing down the test environment")
 	stopMgr()
@@ -207,6 +208,7 @@ func runManager() {
 
 	By("Starting the manager")
 	go func() {
+		defer GinkgoRecover()
 		var mgrCtx context.Context
 		mgrCtx, stopMgr = context.WithCancel(ctx)
 		err = mgr.Start(mgrCtx)
@@ -217,6 +219,7 @@ func runManager() {
 	Eventually(func(g Gomega) {
 		resp, err := http.Get("http://127.0.0.1:4980/readyz")
 		g.Expect(err).NotTo(HaveOccurred())
+		defer resp.Body.Close() //nolint:errcheck
 		g.Expect(resp.StatusCode).To(Equal(http.StatusOK))
 	}).MustPassRepeatedly(3).Should(
 		Succeed(), "manager is not ready yet")

@@ -212,7 +212,8 @@ The operator binary runs in four mutually exclusive modes (controlled by flags i
 **Mutating Webhook** (`internal/controller/podplacement/scheduling_gate_mutating_webhook.go`):
 - Adds `multiarch.openshift.io/scheduling-gate` to new pods
 - Respects namespace selector from ClusterPodPlacementConfig
-- Always excludes: `openshift-*`, `kube-*`, `hypershift-*` namespaces
+- Always excludes: `kube-*` namespaces (hardcoded)
+- Other namespaces (`openshift-*`, `hypershift-*`, etc.) can be included via namespaceSelector configuration
 - Uses worker pool for event publishing (ants library, 16 workers)
 
 **Image Inspector** (`pkg/image/inspector.go`):
@@ -244,12 +245,15 @@ The operator binary runs in four mutually exclusive modes (controlled by flags i
 
 ### Namespace Exclusions
 
-System namespaces are excluded from pod placement by default (cannot be overridden):
-- `openshift-*`
-- `kube-*`
-- `hypershift-*`
+**Hardcoded exclusions** (cannot be overridden):
+- `kube-*` - Core Kubernetes namespaces are always excluded
 
-Additional namespaces can be excluded via namespaceSelector with label `multiarch.openshift.io/exclude-pod-placement`.
+**Configurable via namespaceSelector:**
+- All other namespaces (including `openshift-*`, `hypershift-*`, user namespaces) can be included or excluded by configuring the `namespaceSelector` field in ClusterPodPlacementConfig
+- Common exclusion pattern: add label `multiarch.openshift.io/exclude-pod-placement` to namespaces you want to skip
+- Default example namespaceSelector excludes namespaces with this label
+
+The operator namespace is also always excluded from pod placement.
 
 ### Plugins System
 
@@ -340,7 +344,7 @@ RUNTIME_IMAGE=<custom-image>   # Override runtime base image
 ## Important Constraints
 
 - ClusterPodPlacementConfig must be named "cluster" (singleton enforced by webhook)
-- Namespaces `openshift-*`, `kube-*`, and `hypershift-*` are always excluded from pod placement
+- Only `kube-*` namespaces are hardcoded as always excluded from pod placement; other system namespaces (`openshift-*`, `hypershift-*`) can be included via namespaceSelector configuration
 - CGO is required for building (uses gpgme for registry authentication)
 - Only one execution mode flag can be set at a time in main.go
 - The operator uses vendored dependencies (`GOFLAGS=-mod=vendor`)

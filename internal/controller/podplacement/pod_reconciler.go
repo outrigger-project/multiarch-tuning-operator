@@ -235,7 +235,11 @@ func (r *PodReconciler) trackSkippedMatchingConfigs(ctx context.Context, pod *Po
 	}
 }
 
-// pullSecretDataList returns the list of secrets data for the given pod given its imagePullSecrets field
+// pullSecretDataList returns the list of secrets data for the given pod given its imagePullSecrets field.
+// This function implements fail-open behavior: it logs errors but does not fail if secrets cannot be
+// retrieved or parsed. The function returns whatever secret data was successfully collected, even if that's
+// an empty list. This allows image inspection to proceed without authentication if necessary, rather than
+// blocking pod scheduling due to transient pull secret issues.
 func (r *PodReconciler) pullSecretDataList(ctx context.Context, pod *Pod) ([][]byte, error) {
 	log := ctrllog.FromContext(ctx)
 	secretAuths := make([][]byte, 0)
