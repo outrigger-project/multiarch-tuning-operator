@@ -373,6 +373,6 @@ See `docs/metrics.md` for example queries and monitoring setup.
 - [KEP-3838: Pod Mutable Scheduling Directives](https://github.com/kubernetes/enhancements/blob/afad6f270c7ac2ae853f4d1b72c379a6c3c7c042/keps/sig-scheduling/3838-pod-mutable-scheduling-directives/README.md)
 - [Kubebuilder Documentation](https://book.kubebuilder.io/introduction.html)
 
-### Konflux/CI Integration
+### CI/CD Integration
 
-The repository includes .tekton/ pipeline definitions for Konflux CI/CD. Bundle Dockerfiles have konflux-specific variants (bundle.konflux.Dockerfile).
+CI/CD pipelines should be configured based on your deployment target (e.g., GitHub Actions for upstream, Konflux for downstream OpenShift releases).

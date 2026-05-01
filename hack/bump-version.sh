@@ -29,22 +29,14 @@ if [[ "$(uname)" == "Darwin" ]]; then
     sed -i '' "s/^LABEL release=.*/LABEL release=\"${VERSION}\"/" Dockerfile
     sed -i '' "s/^LABEL version=.*/LABEL version=\"${VERSION}\"/" Dockerfile
     sed -i '' "s/^LABEL cpe=.*/LABEL cpe=\"cpe:\/a:redhat:multiarch_tuning_operator:${MAJOR_MINOR}::el9\"/" Dockerfile
-    sed -i '' "s/^LABEL release=.*/LABEL release=\"${VERSION}\"/" konflux.Dockerfile
-    sed -i '' "s/^LABEL version=.*/LABEL version=\"${VERSION}\"/" konflux.Dockerfile
-    sed -i '' "s/^LABEL cpe=.*/LABEL cpe=\"cpe:\/a:redhat:multiarch_tuning_operator:${MAJOR_MINOR}::el9\"/" konflux.Dockerfile
     sed -i '' "s/^LABEL cpe=.*/LABEL cpe=\"cpe:\/a:redhat:multiarch_tuning_operator:${MAJOR_MINOR}::el9\"/" bundle.Dockerfile
-    sed -i '' "s/^LABEL cpe=.*/LABEL cpe=\"cpe:\/a:redhat:multiarch_tuning_operator:${MAJOR_MINOR}::el9\"/" bundle.konflux.Dockerfile
     sed -i '' "s/^VERSION ?= .*/VERSION ?= ${VERSION}/" Makefile
 else
     # Linux GNU sed
     sed -i "s/^LABEL release=.*/LABEL release=\"${VERSION}\"/" Dockerfile
     sed -i "s/^LABEL version=.*/LABEL version=\"${VERSION}\"/" Dockerfile
     sed -i "s/^LABEL cpe=.*/LABEL cpe=\"cpe:\/a:redhat:multiarch_tuning_operator:${MAJOR_MINOR}::el9\"/" Dockerfile
-    sed -i "s/^LABEL release=.*/LABEL release=\"${VERSION}\"/" konflux.Dockerfile
-    sed -i "s/^LABEL version=.*/LABEL version=\"${VERSION}\"/" konflux.Dockerfile
-    sed -i "s/^LABEL cpe=.*/LABEL cpe=\"cpe:\/a:redhat:multiarch_tuning_operator:${MAJOR_MINOR}::el9\"/" konflux.Dockerfile
     sed -i "s/^LABEL cpe=.*/LABEL cpe=\"cpe:\/a:redhat:multiarch_tuning_operator:${MAJOR_MINOR}::el9\"/" bundle.Dockerfile
-    sed -i "s/^LABEL cpe=.*/LABEL cpe=\"cpe:\/a:redhat:multiarch_tuning_operator:${MAJOR_MINOR}::el9\"/" bundle.konflux.Dockerfile
     sed -i "s/^VERSION ?= .*/VERSION ?= ${VERSION}/" Makefile
 fi
 echo "make bundle"
