@@ -799,6 +799,20 @@ var _ = Describe("internal/Controller/ClusterPodPlacementConfig/ClusterPodPlacem
 			By("Attempting to delete ClusterPodPlacementConfig")
 			err = k8sClient.Delete(ctx, builder.NewClusterPodPlacementConfig().WithName(common.SingletonResourceObjectName).Build())
 			Expect(err).To(HaveOccurred(), "the ClusterPodPlacementConfig should not be able to deleted when local PodPlacementConfigs exist", err)
+			By("Verifying webhook resources still exist after blocked deletion")
+			Eventually(func(g Gomega) {
+				mwc := &admissionv1.MutatingWebhookConfiguration{}
+				err = k8sClient.Get(ctx, crclient.ObjectKey{Name: utils.PodMutatingWebhookConfigurationName}, mwc)
+				g.Expect(err).NotTo(HaveOccurred(), "webhook configuration should still exist")
+
+				svc := &corev1.Service{}
+				err = k8sClient.Get(ctx, crclient.ObjectKey{Name: utils.PodPlacementWebhookName, Namespace: utils.Namespace()}, svc)
+				g.Expect(err).NotTo(HaveOccurred(), "webhook service should still exist")
+
+				deployment := &appsv1.Deployment{}
+				err = k8sClient.Get(ctx, crclient.ObjectKey{Name: utils.PodPlacementWebhookName, Namespace: utils.Namespace()}, deployment)
+				g.Expect(err).NotTo(HaveOccurred(), "webhook deployment should still exist")
+			}).Should(Succeed(), "webhook resources should remain intact when deletion is blocked")
 			By("Deleting the local PodPlacementConfig")
 			err = k8sClient.Delete(ctx, builder.NewPodPlacementConfig().
 				WithName("test-ppc").
