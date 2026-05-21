@@ -342,12 +342,18 @@ func buildServiceMonitor(name string) *monitoringv1.ServiceMonitor {
 					HonorLabels:     true,
 					Path:            "/metrics",
 					Port:            "metrics",
-					Scheme:          "https",
+					Scheme:          utils.NewPtr(monitoringv1.SchemeHTTPS),
 					BearerTokenFile: "/var/run/secrets/kubernetes.io/serviceaccount/token",
-					TLSConfig: &monitoringv1.TLSConfig{
-						CAFile: "/etc/prometheus/configmaps/serving-certs-ca-bundle/service-ca.crt",
-						SafeTLSConfig: monitoringv1.SafeTLSConfig{
-							ServerName: utils.NewPtr(fmt.Sprintf("%s.%s.svc", name, utils.Namespace())),
+					HTTPConfigWithProxyAndTLSFiles: monitoringv1.HTTPConfigWithProxyAndTLSFiles{
+						HTTPConfigWithTLSFiles: monitoringv1.HTTPConfigWithTLSFiles{
+							TLSConfig: &monitoringv1.TLSConfig{
+								TLSFilesConfig: monitoringv1.TLSFilesConfig{
+									CAFile: "/etc/prometheus/configmaps/serving-certs-ca-bundle/service-ca.crt",
+								},
+								SafeTLSConfig: monitoringv1.SafeTLSConfig{
+									ServerName: utils.NewPtr(fmt.Sprintf("%s.%s.svc", name, utils.Namespace())),
+								},
+							},
 						},
 					},
 				},
