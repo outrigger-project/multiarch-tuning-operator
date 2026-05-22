@@ -32,7 +32,7 @@ see-also:
 
 ## Summary
 
-This enhancement proposes a new plugin called `celArchitecturePlacement` for the Multiarch Tuning Operator (MTO) that enables fine-grained control over pod architecture placement using Common Expression Language (CEL) expressions. The plugin is available exclusively in namespace-scoped [`PodPlacementConfig`](../../api/v1beta1/podplacementconfig_types.go) resources, allowing administrators to define rules that evaluate Pod metadata and automatically adjust the target architecture based on matching criteria. When a rule matches, the plugin removes any existing architecture constraints from the pod's nodeSelector and nodeAffinity, then sets a list of allowed architectures. This approach provides a declarative and image independent architecture that goes beyond the current image-based architecture detection.
+This enhancement proposes a new plugin called `celArchitecturePlacement` for the Multiarch Tuning Operator (MTO) that enables fine-grained control over pod architecture placement using Common Expression Language (CEL) expressions. The plugin is available exclusively in namespace-scoped [`PodPlacementConfig`](../../api/v1beta1/podplacementconfig_types.go) resources, allowing administrators to define rules that evaluate a Pod's specification and automatically adjust the target architecture based on matching criteria. When a rule matches, the plugin removes any existing architecture constraints from the pod's nodeSelector and nodeAffinity, then sets a list of allowed architectures. This approach provides a declarative and image independent architecture that goes beyond the current image-based architecture detection.
 
 ## Motivation
 
@@ -89,13 +89,18 @@ We propose introducing a new plugin called `celArchitecturePlacement` that can b
 3. The Pod Placement Controller processes the pod:
    - Retrieves all `PodPlacementConfig` resources in the pod's namespace
    - Filters configs whose `labelSelector` matches the pod
-   - For matching configs with `celArchitecturePlacement` enabled, evaluates CEL expressions in priority order
+   - For matching configs with `celArchitecturePlacement.enabled` is true, evaluates CEL expressions in priority order based on weight. The priority is determined based on the highest weighted PodPlacementConfig in the namespace.
+     - If multiple configs match, the one with the highest weight is used.
+     - If `celArchitecturePlacement.enabled` is true and the rule does not match it goes to the next `PodPlacementConfig`.
+     - If no `PodPlacementConfig` match the global `ClusterPodPlacementConfig` and the default logic for the Multi-Arch Tuning Operator are used.
    - If a rule matches (CEL expression returns `true`):
-     - **Removes any existing architecture constraints** from the pod's `spec.nodeSelector` (removes `kubernetes.io/arch` key if present)
+     - **Removes any existing architecture constraints** from the `Pod` `spec.nodeSelector` (removes `kubernetes.io/arch` key if present)
      - **Removes any existing architecture-based node affinity** from the pod's `spec.affinity.nodeAffinity` (removes node selector terms with `kubernetes.io/arch` match expressions)
      - **Sets new node affinity** with the rule's target architecture list
+   - If no configs match or no rules match, uses the default architecture list from the plugin configuration
    - If no rules match, uses the default architecture list specified in the plugin configuration (also removing existing constraints)
    - The scheduling gate is removed
+4. The updated `Pod` is sent to the scheduler
 
 #### Architecture Constraint Removal
 
@@ -736,6 +741,7 @@ The plugin is implemented in the Pod Placement Controller and does not depend on
 
 - 2026-03-31: Initial proposal
 - 2026-04-15: Refined the language, add fallback architecture, refine the traceability of the rule's application
+- 2026-05-19: Elaborated on PodPlacementConfig ordering and processing
 
 ## Alternatives
 
