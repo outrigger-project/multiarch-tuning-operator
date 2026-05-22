@@ -1039,13 +1039,6 @@ Test with actual pod objects matching the documented patterns:
 - Test rules affecting operator-managed workloads
 - Test operand pods inherit architecture from operator rules
 
-### 3. **Migration Scenarios**
-
-- Test gradual migration from amd64 to mixed architecture cluster
-- Test pods marked with migration-ready label
-- Test unmarked pods use fallback architecture
-- Test controlled rollout of architecture changes
-
 ### Graduation Criteria
 
 #### Dev Preview -> Tech Preview
