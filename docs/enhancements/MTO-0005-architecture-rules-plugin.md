@@ -38,7 +38,7 @@ This enhancement proposes a new plugin called `celArchitecturePlacement` for the
 
 The current Multiarch Tuning Operator automatically determines Pod image architecture compatibility by inspecting container images. While this works well for most scenarios, there are cases where administrators need more control at the namespace level:
 
-1. **Workload-specific architecture preferences** Some workloads may benefit from specific architectures based on their component affinnity (e.g., database pods on ppc64le, web servers on amd64)
+1. **Workload-specific architecture preferences** Some workloads may benefit from specific architectures based on their component affinity (e.g., database pods on ppc64le, web servers on amd64)
 2. **Operator namespace support** Operators running in a shared namespace, such as `openshift-operators` or other shared namespaces may need architecture-specific placement rules that influence the operands subsequent architecture.
 3. **Override image-based detection** In some cases, administrators may want to override the architecture determined by image inspection, especially when using multi-arch images or when the image architecture is not the desired runtime architecture.
 
@@ -290,7 +290,7 @@ type celArchitecturePlacement struct {
     // The first matching rule determines the target architecture.
     // When a rule matches, existing architecture constraints are removed and replaced.
     // +optional
-    // +kubebuilder:validation:MaxItems=50
+    // +kubebuilder:validation:MaxItems=1000
     Rules []ArchitectureRule `json:"rules,omitempty" protobuf:"bytes,3,rep,name=rules"`
 }
 
@@ -761,7 +761,7 @@ Only a single `PodPlacementConfig` resource in the same namespace is allowed.
 1. **CEL Compilation** Expressions are compiled once at configuration time
 2. **Expression Caching** Compiled expressions are cached to avoid repeated compilation
 3. **Evaluation Overhead** CEL evaluation is fast (microseconds per expression)
-4. **Rule Limit** Maximum of 500 rules per configuration to prevent excessive evaluation time. This limit will be reviewed after use.
+4. **Rule Limit** Maximum of 1000 rules per configuration to prevent excessive evaluation time. This limit will be reviewed after use.
 5. **Namespace Scope** Only configs in the pod's namespace are evaluated, limiting the search space
 6. **Constraint Removal** Removing existing constraints is a fast operation (map/slice manipulation)
 
@@ -771,7 +771,7 @@ Only a single `PodPlacementConfig` resource in the same namespace is allowed.
 |------|--------|------------|
 | Complex CEL expressions cause evaluation errors | Pods may not be scheduled correctly | Validate expressions at admission time; provide clear error messages; treat evaluation errors as non-matches |
 | Misconfigured rules assign pods to incompatible architectures | Pods fail to start with ENOEXEC errors | Document best practices; recommend testing rules in non-production environments; existing ENOEXEC monitoring will detect issues |
-| Too many rules impact performance | Increased pod scheduling latency | Limit maximum rules per configuration (500); compile and cache expressions; provide performance guidelines |
+| Too many rules impact performance | Increased pod scheduling latency | Limit maximum rules per configuration (1000); compile and cache expressions; provide performance guidelines |
 | Conflicting rules between multiple PodPlacementConfigs | Unpredictable behavior | Clear precedence rules based on priority field; document evaluation order |
 | CEL expressions access sensitive pod data | Potential information disclosure | CEL expressions only have access to pod metadata (labels, annotations, name, namespace); no access to secrets or container specs |
 | Namespace administrators misconfigure operator pods | Operators fail to start | Provide clear documentation and examples for operator namespaces; recommend testing in non-production environments first |
@@ -841,8 +841,8 @@ graph TB
 #### Rule Validation:
 
 - Test with empty rules list (should be valid - fallback is used)
-- Test with maximum rules (50)
-- Test with too many rules (>50, should fail)
+- Test with maximum rules (1000 rules allowed)
+- Test with too many rules (>1000, should fail)
 - Test rule name validation (min length 1, max length 253)
 - Test rule expression validation (min length 1, required)
 - Test rule architectures validation (min 1, max 4 items)
@@ -933,7 +933,7 @@ graph TB
 
 #### Configuration Validation:
 - Test webhook rejects PodPlacementConfig with invalid fallback architectures
-- Test webhook rejects PodPlacementConfig with too many rules (>50)
+- Test webhook rejects PodPlacementConfig with too many rules (>1000)
 - Test webhook rejects PodPlacementConfig with invalid rule names
 - Test webhook rejects PodPlacementConfig with empty rule expressions
 - Test webhook accepts valid PodPlacementConfig with celArchitecturePlacement
@@ -1055,7 +1055,7 @@ Test with actual pod objects matching the documented patterns:
 
 #### Expression Evaluation Performance:
 - Measure CEL expression evaluation time (should be microseconds)
-- Test with maximum rules (50)
+- Test with maximum rules (1000)
 - Test with complex expressions
 - Verify acceptable latency (<10ms per pod)
 
@@ -1092,7 +1092,7 @@ Test with actual pod objects matching the documented patterns:
 #### Performance Testing
 
 - Measure CEL expression evaluation time
-- Test with maximum number of rules (50)
+- Test with maximum number of rules (1000)
 - Test with complex CEL expressions
 - Measure impact on pod scheduling latency
 - Test with multiple `PodPlacementConfig` resources in the same namespace
