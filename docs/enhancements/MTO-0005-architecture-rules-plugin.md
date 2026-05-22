@@ -766,6 +766,94 @@ graph TB
 - Test removal of existing architecture constraints from nodeAffinity
 - Test application of new architecture constraints
 
+### 1. **CEL Architecture Placement Plugin Core (`api/common/plugins/celArchitecturePlacement_plugin.go`)**
+
+#### Architecture Validation (`ValidateArchitectures()` method):
+
+- Test with valid fallback architectures (amd64, arm64, ppc64le, s390x)
+- Test with invalid fallback architecture (should fail)
+- Test with empty fallback architectures list (should fail based on MinItems=1)
+- Test with too many fallback architectures (>4, should fail based on MaxItems=4)
+- Test with valid rule architectures
+- Test with invalid rule architectures in various rules
+- Test with mixed valid/invalid architectures
+- Test with duplicate architectures in fallback list (should be allowed)
+- Test with duplicate architectures across different rules (should be allowed)
+
+#### Rule Validation:
+
+- Test with empty rules list (should be valid - fallback is used)
+- Test with maximum rules (50)
+- Test with too many rules (>50, should fail)
+- Test rule name validation (min length 1, max length 253)
+- Test rule expression validation (min length 1, required)
+- Test rule architectures validation (min 1, max 4 items)
+
+### 2. **CEL Expression Compilation and Evaluation**
+
+#### Expression Compilation:
+
+- Test successful compilation of valid CEL expressions
+- Test compilation failure with invalid CEL syntax
+- Test compilation caching (verify expressions are compiled once)
+- Test compilation with various CEL operators (==, !=, &&, ||, exists, startsWith, etc.)
+
+#### Expression Evaluation:
+
+- Test evaluation with pod name matching (`self.metadata.name == 'nginx-example'`)
+- Test evaluation with pod name prefix (`self.metadata.name.startsWith('redis-')`)
+- Test evaluation with single label match
+- Test evaluation with multiple label matches (AND logic)
+- Test evaluation with multiple label matches (OR logic)
+- Test evaluation with well-known Kubernetes labels (app.kubernetes.io/*)
+- Test evaluation with complex nested expressions
+- Test evaluation returning true
+- Test evaluation returning false
+- Test evaluation error handling (expression fails, should treat as false)
+- Test evaluation with missing labels (should handle gracefully)
+- Test evaluation with nil/empty pod metadata
+
+### 3. **Architecture Constraint Removal Logic**
+
+#### NodeSelector Removal:
+
+- Test removal of `kubernetes.io/arch` from nodeSelector when present
+- Test handling when nodeSelector is nil
+- Test handling when nodeSelector exists but doesn't have arch key
+- Test preservation of other nodeSelector keys
+
+#### NodeAffinity Removal:
+
+- Test removal of `kubernetes.io/arch` matchExpressions from requiredDuringSchedulingIgnoredDuringExecution
+- Test removal from multiple nodeSelectorTerms
+- Test removal of empty nodeSelectorTerms after cleanup
+- Test handling when nodeAffinity is nil
+- Test handling when requiredDuringSchedulingIgnoredDuringExecution is nil
+- Test preservation of other matchExpressions (non-arch keys)
+- Test that preferredDuringSchedulingIgnoredDuringExecution is NOT modified
+
+#### New Constraint Application:
+
+- Test application of single architecture constraint
+- Test application of multiple architecture constraints (2, 3, 4 architectures)
+- Test proper use of "In" operator
+- Test proper structure of nodeSelectorTerms and matchExpressions
+
+### 4. **Fallback Architecture Logic**
+
+- Test fallback when no rules are defined
+- Test fallback when no rules match
+- Test fallback when all rules evaluate to false
+- Test fallback when CEL evaluation errors occur
+- Test that fallback also removes existing constraints before applying
+
+### 5. **Plugin Registration**
+
+- Test plugin is registered in `localPluginChecks` map
+- Test plugin check function returns true when enabled
+- Test plugin check function returns false when disabled
+- Test plugin check function returns false when plugin is nil
+
 #### Integration Testing
 
 - Test plugin activation in `PodPlacementConfig`
@@ -776,6 +864,144 @@ graph TB
 - Test that plugin is NOT available in `ClusterPodPlacementConfig`
 - Test that existing architecture constraints are properly removed
 - Test that new architecture constraints are properly applied
+
+### 1. **PodPlacementConfig Integration**
+
+#### Plugin Activation:
+- Test plugin can be enabled in PodPlacementConfig
+- Test plugin cannot be enabled in ClusterPodPlacementConfig (should fail validation)
+- Test plugin activation with valid configuration
+- Test plugin activation with invalid configuration (should fail)
+
+#### Configuration Validation:
+- Test webhook rejects PodPlacementConfig with invalid fallback architectures
+- Test webhook rejects PodPlacementConfig with too many rules (>50)
+- Test webhook rejects PodPlacementConfig with invalid rule names
+- Test webhook rejects PodPlacementConfig with empty rule expressions
+- Test webhook accepts valid PodPlacementConfig with celArchitecturePlacement
+
+### 2. **Rule Evaluation Order and Priority**
+
+#### Single PodPlacementConfig:
+- Test rules evaluated in order (first to last)
+- Test first matching rule wins
+- Test subsequent rules not evaluated after match
+- Test fallback used when no rules match
+
+#### Multiple PodPlacementConfigs:
+- Test priority-based selection (highest priority first)
+- Test evaluation with multiple configs having different priorities
+- Test that only one config's rules are evaluated (highest priority)
+- Test fallback from highest priority config when no rules match
+
+#### Label Selector Filtering:
+- Test only configs matching pod's labels are considered
+- Test configs with non-matching label selectors are ignored
+- Test multiple configs with overlapping label selectors
+
+### 3. **Pod Processing Flow**
+
+#### End-to-End Processing:
+- Test pod with no existing architecture constraints
+- Test pod with nodeSelector architecture constraint (verify removal)
+- Test pod with nodeAffinity architecture constraint (verify removal)
+- Test pod with both nodeSelector and nodeAffinity constraints (verify both removed)
+- Test pod matching a rule (verify new constraints applied)
+- Test pod not matching any rule (verify fallback applied)
+- Test scheduling gate is removed after processing
+
+#### Namespace Scoping:
+- Test plugin works in user namespaces
+- Test plugin works in openshift-operators namespace
+- Test plugin works in custom operator namespaces
+- Test plugin respects namespace exclusions (kube-*, hypershift-*, operator's own namespace)
+- Test pods in different namespaces use their respective PodPlacementConfigs
+
+### 4. **Interaction with Other Plugins**
+
+#### NodeAffinityScoring Coexistence:
+- Test celArchitecturePlacement and NodeAffinityScoring both enabled
+- Test celArchitecturePlacement sets eligible architectures
+- Test NodeAffinityScoring scores among eligible architectures
+- Test proper interaction when both plugins are configured
+
+#### Image-Based Detection Override:
+- Test celArchitecturePlacement takes precedence over image inspection
+- Test existing constraints from image inspection are removed
+- Test new constraints from rules are applied
+
+### 5. **CEL Expression Patterns (Real Pod Objects)**
+
+Test with actual pod objects matching the documented patterns:
+
+#### Pattern 1: Pod Name Matching
+- Create pod with specific name, verify rule matches
+- Create pod with different name, verify rule doesn't match
+
+#### Pattern 2: Well-Known Labels
+- Create pod with app.kubernetes.io/component and app.kubernetes.io/part-of labels
+- Verify rule matches when both labels present
+- Verify rule doesn't match when labels missing
+
+#### Pattern 3: Name Prefix
+- Create pod with name starting with 'redis-'
+- Verify rule matches
+- Create pod with different prefix, verify doesn't match
+
+#### Pattern 4: Multiple Labels (AND)
+- Create pod with tier=frontend AND environment=production
+- Verify rule matches
+- Create pod with only one label, verify doesn't match
+
+#### Pattern 5: Complex Expressions (OR)
+- Create pod with priority=critical OR (tier=backend AND sla=gold)
+- Test various combinations of labels
+- Verify correct matching behavior
+
+### 6. **Error Handling and Edge Cases**
+
+#### CEL Evaluation Errors:
+- Test with CEL expression that throws runtime error
+- Verify error is logged
+- Verify evaluation continues with next rule
+- Verify fallback is used if all rules error
+
+#### Invalid Pod States:
+- Test with pod missing metadata
+- Test with pod missing labels
+- Test with pod having nil spec
+- Verify graceful handling
+
+#### Configuration Updates:
+- Test updating PodPlacementConfig while pods are being processed
+- Test deleting PodPlacementConfig
+- Test creating new PodPlacementConfig
+- Verify pods use updated configuration
+
+### 7. **Performance Tests**
+
+#### Expression Evaluation Performance:
+- Measure CEL expression evaluation time (should be microseconds)
+- Test with maximum rules (50)
+- Test with complex expressions
+- Verify acceptable latency (<10ms per pod)
+
+#### Caching Effectiveness:
+- Verify expressions are compiled once
+- Verify compiled expressions are reused
+- Measure performance improvement from caching
+
+#### Constraint Removal Performance:
+- Measure time to remove constraints from nodeSelector
+- Measure time to remove constraints from nodeAffinity
+- Verify operations are fast (microseconds)
+
+### 8. **Annotation and Traceability**
+
+- Test that webhook adds annotation with rule name when rule matches
+- Test that webhook adds annotation with PodPlacementConfig name
+- Verify annotations are present on processed pods
+- Test annotation format and content
 
 #### Functional Testing
 
@@ -798,6 +1024,27 @@ graph TB
 - Measure impact on pod scheduling latency
 - Test with multiple `PodPlacementConfig` resources in the same namespace
 - Measure overhead of constraint removal operations
+
+### 1. **Complete Workflow Tests**
+
+- Test complete pod lifecycle from submission to scheduling
+- Test pod with matching rule gets scheduled on correct architecture
+- Test pod without matching rule gets scheduled on fallback architecture
+- Test multiple pods processed concurrently
+- Test pods in different namespaces processed independently
+
+### 2. **Operator Namespace Tests**
+
+- Test operator pods in openshift-operators namespace
+- Test rules affecting operator-managed workloads
+- Test operand pods inherit architecture from operator rules
+
+### 3. **Migration Scenarios**
+
+- Test gradual migration from amd64 to mixed architecture cluster
+- Test pods marked with migration-ready label
+- Test unmarked pods use fallback architecture
+- Test controlled rollout of architecture changes
 
 ### Graduation Criteria
 
