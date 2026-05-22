@@ -347,7 +347,49 @@ func (c *celArchitecturePlacement) ValidateArchitectures() error {
     
     return nil
 }
+
+// ValidateCELExpressions validates all CEL expressions in the plugin
+func (c *celArchitecturePlacement) ValidateCELExpressions() error {
+    env, err := cel.NewEnv(
+        cel.Types(&corev1.Pod{}),
+        cel.Variable("self", cel.ObjectType("k8s.io.api.core.v1.Pod")),
+    )
+    if err != nil {
+        return fmt.Errorf("failed to create CEL environment: %w", err)
+    }
+    
+    for _, rule := range c.Rules {
+        ast, issues := env.Compile(rule.Expression)
+        if issues != nil && issues.Err() != nil {
+            return fmt.Errorf("rule %q: CEL compilation error: %w", rule.Name, issues.Err())
+        }
+        
+        // Verify expression returns boolean
+        if ast.OutputType() != cel.BoolType {
+            return fmt.Errorf("rule %q: expression must return boolean, got %s",
+                rule.Name, ast.OutputType())
+        }
+    }
+    
+    return nil
+}
 ```
+
+#### CEL Expression Validation
+
+The PodPlacementConfig webhook performs the following validations at create/update time:
+
+1. **CEL Syntax Validation**: Each rule's CEL expression is compiled using the Kubernetes CEL library to ensure syntactic correctness
+2. **Type Checking**: Expressions are validated to ensure they return boolean values
+3. **Pod Schema Validation**: Expressions are checked against the Pod type schema to catch invalid field references
+4. **Compilation Errors**: Any CEL compilation errors result in webhook rejection with a descriptive error message
+
+**Example validation errors:**
+- `"expression 'self.metadata.invalidField' is invalid: no such field 'invalidField'"`
+- `"expression 'self.metadata.name' must return boolean, got string"`
+- `"expression syntax error at position 15: unexpected token ')'"`
+
+This validation ensures that only syntactically correct and type-safe CEL expressions are stored in the cluster.
 
 **Note** Separate Custom Resources for each rule were considered. The PodPlacementConfig with celArchitecturePlacement plugin supports 1000+ rules within etcd key-value storage limits.
 
@@ -521,10 +563,10 @@ spec:
           nodeSelectorTerms:
           - matchExpressions:
             - key: kubernetes.io/arch
-                operator: In
-                values:
-                - ppc64le
-                - amd64
+              operator: In
+              values:
+              - ppc64le
+              - amd64
 ```
 
 ### CEL Language Reference
@@ -607,7 +649,11 @@ This allows a gradual, controlled migration where:
 2. **Expression Compilation** CEL expressions compile once during configuration loading and are cached
 3. **Expression Evaluation** For each pod, expressions are evaluated in the order defined in the rules list
 4. **First Match Wins** The first rule whose expression evaluates to `true` determines the target architecture
-5. **Error Handling** If a CEL expression fails to evaluate, it is logged and treated as `false`, allowing evaluation to continue with the next rule
+5. **Error Handling**:
+   - **Validation-time**: Invalid CEL expressions are rejected by the webhook during PodPlacementConfig create/update
+   - **Runtime evaluation errors**: If a CEL expression fails to evaluate at runtime (e.g., due to unexpected pod state), it is logged and treated as `false`, allowing evaluation to continue with the next rule
+   - **Pod admission**: Pod admission never fails due to CEL evaluation errors. If all rules error or no rules match, the fallbackArchitectures are applied
+   - **Soft failure model**: The plugin always allows pod admission to proceed, either with matched rule architectures, fallback architectures, or by falling through to the global ClusterPodPlacementConfig/default MTO logic
 
 ```mermaid
 flowchart TD
@@ -687,6 +733,18 @@ When the plugin applies architecture rules, it performs these operations in orde
 4. **NodeAffinityScoring Plugin** Can coexist with `celArchitecturePlacement` in the same `PodPlacementConfig`:
    - `celArchitecturePlacement` determines which architectures are eligible (removes old constraints, sets new ones)
    - `NodeAffinityScoring` determines preferences among the eligible architectures
+
+#### Webhook Validation Implementation
+
+The PodPlacementConfig webhook (`internal/controller/podplacementconfig/podplacementconfig_webhook.go`) is extended to validate CEL expressions when the `celArchitecturePlacement` plugin is enabled. This validation is called from the webhook's Handle method during create/update operations.
+
+The validation ensures:
+1. **CEL compilation succeeds**: Each expression compiles without syntax errors
+2. **Type safety**: Expressions return boolean values
+3. **Schema correctness**: Field references are valid for Pod objects
+4. **Early failure**: Invalid configurations are rejected before being stored in etcd
+
+This prevents runtime evaluation errors caused by malformed CEL expressions, while runtime errors from unexpected pod states are still handled gracefully with the soft failure model.
 
 #### Priority and Conflict Resolution
 
@@ -880,6 +938,14 @@ graph TB
 - Test webhook rejects PodPlacementConfig with empty rule expressions
 - Test webhook accepts valid PodPlacementConfig with celArchitecturePlacement
 
+#### CEL Validation Tests:
+- Test webhook rejects PodPlacementConfig with syntactically invalid CEL expressions
+- Test webhook rejects PodPlacementConfig with CEL expressions that reference non-existent Pod fields
+- Test webhook rejects PodPlacementConfig with CEL expressions that return non-boolean types
+- Test webhook accepts PodPlacementConfig with valid CEL expressions
+- Test runtime CEL evaluation errors are logged and treated as false (pod admission succeeds)
+- Test pod admission never fails due to CEL evaluation errors (soft failure model)
+
 ### 2. **Rule Evaluation Order and Priority**
 
 #### Single PodPlacementConfig:
@@ -960,17 +1026,24 @@ Test with actual pod objects matching the documented patterns:
 
 ### 6. **Error Handling and Edge Cases**
 
-#### CEL Evaluation Errors:
-- Test with CEL expression that throws runtime error
-- Verify error is logged
+#### CEL Validation and Evaluation Errors:
+
+**Validation-time (webhook):**
+- Test with syntactically invalid CEL expression → webhook rejects with compilation error
+- Test with CEL expression referencing invalid Pod field → webhook rejects with schema error
+- Test with CEL expression returning non-boolean → webhook rejects with type error
+
+**Runtime evaluation:**
+- Test with CEL expression that throws runtime error → error is logged, treated as false
 - Verify evaluation continues with next rule
 - Verify fallback is used if all rules error
+- Verify pod admission always succeeds (never fails due to CEL errors)
 
 #### Invalid Pod States:
 - Test with pod missing metadata
 - Test with pod missing labels
 - Test with pod having nil spec
-- Verify graceful handling
+- Verify graceful handling with soft failure model
 
 #### Configuration Updates:
 - Test updating PodPlacementConfig while pods are being processed
