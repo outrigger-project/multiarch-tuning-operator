@@ -102,6 +102,52 @@ We propose introducing a new plugin called `celArchitecturePlacement` that can b
    - The scheduling gate is removed
 4. The updated `Pod` is sent to the scheduler
 
+```mermaid
+sequenceDiagram
+    participant User as UserController
+    participant API as API Server
+    participant Webhook as Mutating Webhook
+    participant Controller as Pod Placement Controller
+    participant PPC as PodPlacementConfig
+    participant CEL as CEL Engine
+    participant Scheduler as Scheduler
+
+    User->>API: Submit Pod
+    API->>Webhook: Admission Request
+    Webhook->>Webhook: Add Scheduling Gate
+    Webhook-->>API: Pod with Gate
+    API-->>Controller: Watch Event (Pod Created)
+    
+    Controller->>PPC: Retrieve PodPlacementConfigs in Pod's Namespace
+    PPC-->>Controller: Matching Configs
+    
+    Controller->>Controller: Filter by labelSelector
+    Controller->>Controller: Check celArchitecturePlacement.enabled
+    
+    alt celArchitecturePlacement enabled
+        Controller->>CEL: Evaluate Rules in Priority Order
+        CEL->>CEL: Evaluate CEL Expressions
+        
+        alt Rule Matches
+            CEL-->>Controller: Match Found (architectures)
+            Controller->>Controller: Remove kubernetes.io/arch from nodeSelector
+            Controller->>Controller: Remove kubernetes.io/arch from nodeAffinity
+            Controller->>Controller: Set New NodeAffinity with Target Architectures
+        else No Rule Matches
+            CEL-->>Controller: No Match
+            Controller->>Controller: Remove Existing Constraints
+            Controller->>Controller: Apply Fallback Architectures
+        end
+    else Plugin Not Enabled
+        Controller->>Controller: Use Default MTO Logic
+    end
+    
+    Controller->>Controller: Remove Scheduling Gate
+    Controller->>API: Update Pod
+    API-->>Scheduler: Pod Ready for Scheduling
+    Scheduler->>Scheduler: Schedule Pod to Node
+```
+
 #### Architecture Constraint Removal
 
 When the plugin applies architecture rules, it performs the following operations:
@@ -562,6 +608,50 @@ This allows a gradual, controlled migration where:
 3. **Expression Evaluation** For each pod, expressions are evaluated in the order defined in the rules list
 4. **First Match Wins** The first rule whose expression evaluates to `true` determines the target architecture
 5. **Error Handling** If a CEL expression fails to evaluate, it is logged and treated as `false`, allowing evaluation to continue with the next rule
+
+```mermaid
+flowchart TD
+    Start([Pod Created]) --> GetConfigs[Retrieve All PodPlacementConfigs<br/>in Pod's Namespace]
+    GetConfigs --> FilterLabel{Filter by<br/>labelSelector}
+    
+    FilterLabel -->|No Match| UseGlobal[Use Global ClusterPodPlacementConfig<br/>& Default MTO Logic]
+    FilterLabel -->|Match| CheckMultiple{Multiple<br/>Configs?}
+    
+    CheckMultiple -->|Single Config| CheckEnabled{celArchitecturePlacement<br/>enabled?}
+    CheckMultiple -->|Multiple Configs| SortPriority[Sort by Priority Field<br/>Highest First]
+    
+    SortPriority --> SelectHighest[Select Highest Priority Config]
+    SelectHighest --> CheckEnabled
+    
+    CheckEnabled -->|No| UseGlobal
+    CheckEnabled -->|Yes| EvalRules[Evaluate Rules in Order<br/>First to Last]
+    
+    EvalRules --> RuleLoop{For Each Rule}
+    RuleLoop --> EvalExpr[Evaluate CEL Expression]
+    
+    EvalExpr --> ExprResult{Expression<br/>Returns true?}
+    ExprResult -->|Yes| FirstMatch[First Match Wins!]
+    ExprResult -->|No| MoreRules{More<br/>Rules?}
+    
+    MoreRules -->|Yes| RuleLoop
+    MoreRules -->|No| NoMatch[No Rules Matched]
+    
+    FirstMatch --> RemoveConstraints[Remove Existing<br/>Architecture Constraints]
+    NoMatch --> RemoveConstraints
+    
+    RemoveConstraints --> ApplyNew{Which<br/>Architectures?}
+    ApplyNew -->|Rule Matched| UseRuleArch[Apply Rule's<br/>Target Architectures]
+    ApplyNew -->|No Match| UseFallback[Apply Fallback<br/>Architectures]
+    
+    UseRuleArch --> Complete([Pod Updated & Gate Removed])
+    UseFallback --> Complete
+    UseGlobal --> Complete
+    
+    style FirstMatch fill:#90EE90
+    style NoMatch fill:#FFE4B5
+    style RemoveConstraints fill:#FFB6C6
+    style Complete fill:#87CEEB
+```
 
 #### Architecture Constraint Removal Logic
 
