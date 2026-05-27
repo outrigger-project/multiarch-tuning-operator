@@ -90,7 +90,7 @@ func TestOperator(t *testing.T) {
 var _ = BeforeAll
 
 var _ = SynchronizedBeforeSuite(func() []byte {
-	suiteLog = zap.New(zap.WriteTo(GinkgoWriter), zap.UseDevMode(true), zap.Level(zapcore.Level(-5)))
+	suiteLog = zap.New(zap.WriteTo(GinkgoWriter), zap.UseDevMode(true), zap.Level(zapcore.Level(-4)))
 	ctx = context.TODO()
 	logf.SetLogger(suiteLog)
 	SetDefaultEventuallyPollingInterval(5 * time.Millisecond)
@@ -103,7 +103,7 @@ var _ = SynchronizedBeforeSuite(func() []byte {
 	Expect(err).NotTo(HaveOccurred(), "failed to marshal sharedData")
 	return data
 }, func(data []byte) {
-	suiteLog = zap.New(zap.WriteTo(GinkgoWriter), zap.UseDevMode(true), zap.Level(zapcore.Level(-5)))
+	suiteLog = zap.New(zap.WriteTo(GinkgoWriter), zap.UseDevMode(true), zap.Level(zapcore.Level(-4)))
 	ctx = context.TODO()
 	logf.SetLogger(suiteLog)
 	SetDefaultEventuallyPollingInterval(5 * time.Millisecond)
