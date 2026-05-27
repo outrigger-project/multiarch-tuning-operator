@@ -247,7 +247,7 @@ func RunClusterPodPlacementConfigOperandControllers(mgr ctrl.Manager) {
 		Client:    mgr.GetClient(),
 		Scheme:    mgr.GetScheme(),
 		ClientSet: clientset,
-		Recorder:  mgr.GetEventRecorderFor(utils.OperatorName),
+		Recorder:  mgr.GetEventRecorderFor(utils.OperatorName), //nolint:staticcheck // MULTIARCH-6087: will be fixed with events API migration
 	}).SetupWithManager(mgr),
 		unableToCreateController, controllerKey, "PodReconciler")
 
@@ -269,7 +269,7 @@ func RunClusterPodPlacementConfigOperandWebHook(mgr ctrl.Manager) {
 		ants.Release()
 	})
 	handler := podplacement.NewPodSchedulingGateMutatingWebHook(mgr.GetClient(), clientset, mgr.GetScheme(),
-		mgr.GetEventRecorderFor(utils.OperatorName), pool)
+		mgr.GetEventRecorderFor(utils.OperatorName), pool) //nolint:staticcheck // MULTIARCH-6087: will be fixed with events API migration
 	mgr.GetWebhookServer().Register("/add-pod-scheduling-gate", &webhook.Admission{Handler: handler})
 }
 
@@ -285,7 +285,7 @@ func RunENoExecEventControllers(mgr ctrl.Manager) {
 		mgr.GetClient(),
 		clientset,
 		mgr.GetScheme(),
-		mgr.GetEventRecorderFor(utils.EnoexecControllerName),
+		mgr.GetEventRecorderFor(utils.EnoexecControllerName), //nolint:staticcheck // MULTIARCH-6087: will be fixed with events API migration
 	).SetupWithManager(mgr), unableToCreateController, controllerKey, "ENoExecEventController")
 }
 

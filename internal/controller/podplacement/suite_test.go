@@ -335,14 +335,14 @@ func runManager() {
 		Client:    mgr.GetClient(),
 		Scheme:    mgr.GetScheme(),
 		ClientSet: clientset,
-		Recorder:  mgr.GetEventRecorderFor(utils.OperatorName),
+		Recorder:  mgr.GetEventRecorderFor(utils.OperatorName), //nolint:staticcheck // MULTIARCH-6087: will be fixed with events API migration
 	}).SetupWithManager(mgr)).NotTo(HaveOccurred())
 	pool, err := ants.NewMultiPool(10, 10, ants.LeastTasks, ants.WithPreAlloc(true),
 		ants.WithNonblocking(true))
 	Expect(err).NotTo(HaveOccurred())
 	mgr.GetWebhookServer().Register("/add-pod-scheduling-gate", &webhook.Admission{
 		Handler: NewPodSchedulingGateMutatingWebHook(
-			mgr.GetClient(), clientset, mgr.GetScheme(), mgr.GetEventRecorderFor(utils.OperatorName), pool),
+			mgr.GetClient(), clientset, mgr.GetScheme(), mgr.GetEventRecorderFor(utils.OperatorName), pool), //nolint:staticcheck // MULTIARCH-6087: will be fixed with events API migration
 	})
 
 	policyConfig := []byte(`{"default":[{"type":"insecureAcceptAnything"}],"transports":{"atomic":{},"docker":{},"docker-daemon":{"":[{"type":"insecureAcceptAnything"}]}}}`)

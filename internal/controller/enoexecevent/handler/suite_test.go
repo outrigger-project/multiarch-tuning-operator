@@ -228,7 +228,7 @@ func runManager() {
 	err = mgr.AddReadyzCheck("readyz", healthz.Ping)
 	Expect(err).NotTo(HaveOccurred())
 
-	reconciler := NewReconciler(mgr.GetClient(), k8sClientSet, mgr.GetScheme(), mgr.GetEventRecorderFor("enoexecevent-controller"))
+	reconciler := NewReconciler(mgr.GetClient(), k8sClientSet, mgr.GetScheme(), mgr.GetEventRecorderFor("enoexecevent-controller")) //nolint:staticcheck // MULTIARCH-6087: will be fixed with events API migration
 	if err = reconciler.SetupWithManager(mgr); err != nil {
 		suiteLog.Error(err, "unable to create controller", "controller", "ENoExecEvent")
 	}
