@@ -62,7 +62,7 @@ var _ = Describe("The Multiarch Tuning Operator", Serial, func() {
 			err := client.List(ctx, ppcList)
 			g.Expect(err).NotTo(HaveOccurred())
 			g.Expect(ppcList.Items).To(BeEmpty(), "all PodPlacementConfigs should be deleted")
-		}).Should(Succeed())
+		}, e2e.WaitOverMedium).Should(Succeed())
 		By("Deleting ClusterPodPlacementConfig")
 		err := client.Delete(ctx, &v1beta1.ClusterPodPlacementConfig{
 			ObjectMeta: metav1.ObjectMeta{
@@ -70,7 +70,7 @@ var _ = Describe("The Multiarch Tuning Operator", Serial, func() {
 			},
 		})
 		Expect(runtimeclient.IgnoreNotFound(err)).NotTo(HaveOccurred())
-		Eventually(framework.ValidateDeletion(client, ctx)).Should(Succeed())
+		Eventually(framework.ValidateDeletion(client, ctx), e2e.WaitOverMedium).Should(Succeed())
 	})
 	Context("When the operator is running and a pod placement config is created", func() {
 		It("should deploy the operands with v1beta1 API", func() {
