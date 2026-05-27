@@ -80,6 +80,7 @@ var (
 	registryAddress string
 	registryCert    []byte
 	stopMgr         context.CancelFunc
+	mgrStopped      chan struct{}
 	testEnv         *envtest.Environment
 
 	dir      string
@@ -219,10 +220,18 @@ var _ = SynchronizedAfterSuite(func() {}, func() {
 	Expect(clusterpodplacementconfig.GetClusterPodPlacementConfig()).To(BeNil())
 
 	By("tearing down the test environment")
-	stopMgr()
+	if stopMgr != nil {
+		stopMgr()
+	}
+	if mgrStopped != nil {
+		select {
+		case <-mgrStopped:
+			suiteLog.Info("Manager stopped successfully")
+		case <-time.After(10 * time.Second):
+			suiteLog.Error(nil, "Timeout waiting for manager to stop")
+		}
+	}
 	// TODO: we miss a way to gracefully shutdown the registry server in the AfterSuite fixture.
-	// wait for the manager to stop. FIXME: this is a hack, not sure what is the right way to do it.
-	time.Sleep(1 * time.Second)
 	err = testEnv.Stop()
 	Expect(err).NotTo(HaveOccurred())
 })
@@ -381,7 +390,9 @@ func runManager() {
 	Expect(clusterpodplacementconfig.GetClusterPodPlacementConfig()).To(BeNil())
 
 	By("Starting the manager")
+	mgrStopped = make(chan struct{})
 	go func() {
+		defer close(mgrStopped)
 		var mgrCtx context.Context
 		mgrCtx, stopMgr = context.WithCancel(ctx)
 		err = mgr.Start(mgrCtx)

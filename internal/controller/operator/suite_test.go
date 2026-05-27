@@ -69,12 +69,13 @@ import (
 // http://onsi.github.io/ginkgo/ to learn more about Ginkgo.
 
 var (
-	cfg       *rest.Config
-	k8sClient client.Client
-	stopMgr   context.CancelFunc
-	testEnv   *envtest.Environment
-	ctx       context.Context
-	suiteLog  = ctrl.Log.WithName("setup")
+	cfg        *rest.Config
+	k8sClient  client.Client
+	stopMgr    context.CancelFunc
+	mgrStopped chan struct{}
+	testEnv    *envtest.Environment
+	ctx        context.Context
+	suiteLog   = ctrl.Log.WithName("setup")
 )
 
 func init() {
@@ -124,9 +125,17 @@ var _ = SynchronizedBeforeSuite(func() []byte {
 
 var _ = SynchronizedAfterSuite(func() {}, func() {
 	By("tearing down the test environment")
-	stopMgr()
-	// wait for the manager to stop. FIXME: this is a hack, not sure what is the right way to do it.
-	time.Sleep(5 * time.Second)
+	if stopMgr != nil {
+		stopMgr()
+	}
+	if mgrStopped != nil {
+		select {
+		case <-mgrStopped:
+			suiteLog.Info("Manager stopped successfully")
+		case <-time.After(10 * time.Second):
+			suiteLog.Error(nil, "Timeout waiting for manager to stop")
+		}
+	}
 	err := testEnv.Stop()
 	Expect(err).NotTo(HaveOccurred())
 })
@@ -247,7 +256,9 @@ func runManager() {
 	Expect(err).NotTo(HaveOccurred())
 
 	By("Starting the manager")
+	mgrStopped = make(chan struct{})
 	go func() {
+		defer close(mgrStopped)
 		var mgrCtx context.Context
 		mgrCtx, stopMgr = context.WithCancel(ctx)
 		err = mgr.Start(mgrCtx)
