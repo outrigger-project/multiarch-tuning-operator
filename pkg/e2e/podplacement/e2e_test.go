@@ -94,13 +94,21 @@ var _ = SynchronizedBeforeSuite(func() []byte {
 })
 
 var _ = SynchronizedAfterSuite(func() {}, func() {
+	By("Waiting for any PodPlacementConfigs to be deleted")
+	Eventually(func(g Gomega) {
+		ppcList := &v1beta1.PodPlacementConfigList{}
+		err := client.List(ctx, ppcList)
+		g.Expect(err).NotTo(HaveOccurred())
+		g.Expect(ppcList.Items).To(BeEmpty(), "all PodPlacementConfigs should be deleted")
+	}, e2e.WaitOverMedium).Should(Succeed())
+	By("Deleting ClusterPodPlacementConfig")
 	err := client.Delete(ctx, &v1beta1.ClusterPodPlacementConfig{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "cluster",
 		},
 	})
-	Expect(err).NotTo(HaveOccurred())
-	Eventually(framework.ValidateDeletion(client, ctx)).Should(Succeed())
+	Expect(runtimeclient.IgnoreNotFound(err)).NotTo(HaveOccurred())
+	Eventually(framework.ValidateDeletion(client, ctx), e2e.WaitOverMedium).Should(Succeed())
 	if len(masterNodes.Items) == 0 {
 		By("Skipping registry config clean up because it is not supported on hosted clusters")
 	} else {

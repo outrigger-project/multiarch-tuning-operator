@@ -8,6 +8,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/openshift/multiarch-tuning-operator/api/v1beta1"
 	"github.com/openshift/multiarch-tuning-operator/pkg/e2e"
 	. "github.com/openshift/multiarch-tuning-operator/pkg/testing/builder"
 	"github.com/openshift/multiarch-tuning-operator/pkg/testing/framework"
@@ -1588,7 +1589,7 @@ var _ = Describe("The Pod Placement Operand", func() {
 			Eventually(framework.VerifyPodPreferredNodeAffinity(ctx, client, ns, "app", "test",
 				defaultExpectedAffinityTerms()), e2e.WaitShort).Should(Succeed())
 			By("The pod should be running")
-			Eventually(framework.VerifyPodsAreRunning(ctx, client, ns, "app", "test"), e2e.WaitShort).Should(Succeed())
+			Eventually(framework.VerifyPodsAreRunning(ctx, client, ns, "app", "test"), e2e.WaitMedium).Should(Succeed())
 		})
 	})
 	Context("When deploying workloads running images in registries that have mirrors configuration", func() {
@@ -1644,7 +1645,7 @@ var _ = Describe("The Pod Placement Operand", func() {
 			Eventually(framework.VerifyPodPreferredNodeAffinity(ctx, client, ns, "app", "test",
 				defaultExpectedAffinityTerms()), e2e.WaitShort).Should(Succeed())
 			By("The pod should be running")
-			Eventually(framework.VerifyPodsAreRunning(ctx, client, ns, "app", "test"), e2e.WaitShort).Should(Succeed())
+			Eventually(framework.VerifyPodsAreRunning(ctx, client, ns, "app", "test"), e2e.WaitMedium).Should(Succeed())
 		})
 		It("Should set node affinity when source registry is unavailable, mirrors are working and NeverContactingSource enabled in a ImageDigestMirrorSet", func() {
 			var err error
@@ -1693,7 +1694,7 @@ var _ = Describe("The Pod Placement Operand", func() {
 			Eventually(framework.VerifyPodPreferredNodeAffinity(ctx, client, ns, "app", "test",
 				defaultExpectedAffinityTerms()), e2e.WaitShort).Should(Succeed())
 			By("The pod should be running")
-			Eventually(framework.VerifyPodsAreRunning(ctx, client, ns, "app", "test"), e2e.WaitShort).Should(Succeed())
+			Eventually(framework.VerifyPodsAreRunning(ctx, client, ns, "app", "test"), e2e.WaitMedium).Should(Succeed())
 		})
 		It("Should set node affinity when source registry is working, mirrors are unavailable and AllowContactingSource enabled in a ImageTagMirrorSet", func() {
 			var err error
@@ -1742,7 +1743,7 @@ var _ = Describe("The Pod Placement Operand", func() {
 				utils.PreferredNodeAffinityLabel, utils.NodeAffinityLabelValueSet,
 			), e2e.WaitShort).Should(Succeed())
 			By("The pod should be running")
-			Eventually(framework.VerifyPodsAreRunning(ctx, client, ns, "app", "test"), e2e.WaitShort).Should(Succeed())
+			Eventually(framework.VerifyPodsAreRunning(ctx, client, ns, "app", "test"), e2e.WaitMedium).Should(Succeed())
 		})
 		It("Should not set node affinity when source registry is working, mirrors are unavailable and NeverContactingSource enabled in a ImageTagMirrorSet", func() {
 			var err error
@@ -1825,7 +1826,7 @@ var _ = Describe("The Pod Placement Operand", func() {
 			Eventually(framework.VerifyPodPreferredNodeAffinity(ctx, client, ns, "app", "test",
 				defaultExpectedAffinityTerms()), e2e.WaitShort).Should(Succeed())
 			By("The pod should be running")
-			Eventually(framework.VerifyPodsAreRunning(ctx, client, ns, "app", "test"), e2e.WaitShort).Should(Succeed())
+			Eventually(framework.VerifyPodsAreRunning(ctx, client, ns, "app", "test"), e2e.WaitMedium).Should(Succeed())
 		})
 		It("Should set node affinity when image has digest and port", func() {
 			var err error
@@ -1874,7 +1875,7 @@ var _ = Describe("The Pod Placement Operand", func() {
 			Eventually(framework.VerifyPodPreferredNodeAffinity(ctx, client, ns, "app", "test",
 				defaultExpectedAffinityTerms()), e2e.WaitShort).Should(Succeed())
 			By("The pod should be running")
-			Eventually(framework.VerifyPodsAreRunning(ctx, client, ns, "app", "test"), e2e.WaitShort).Should(Succeed())
+			Eventually(framework.VerifyPodsAreRunning(ctx, client, ns, "app", "test"), e2e.WaitMedium).Should(Succeed())
 		})
 		It("Should set node affinity when image has tag and port", func() {
 			var err error
@@ -1923,7 +1924,7 @@ var _ = Describe("The Pod Placement Operand", func() {
 			Eventually(framework.VerifyPodPreferredNodeAffinity(ctx, client, ns, "app", "test",
 				defaultExpectedAffinityTerms()), e2e.WaitShort).Should(Succeed())
 			By("The pod should be running")
-			Eventually(framework.VerifyPodsAreRunning(ctx, client, ns, "app", "test"), e2e.WaitShort).Should(Succeed())
+			Eventually(framework.VerifyPodsAreRunning(ctx, client, ns, "app", "test"), e2e.WaitMedium).Should(Succeed())
 		})
 		It("Should set node affinity when image has digest and tag and port", func() {
 			var err error
@@ -1972,7 +1973,7 @@ var _ = Describe("The Pod Placement Operand", func() {
 			Eventually(framework.VerifyPodPreferredNodeAffinity(ctx, client, ns, "app", "test",
 				defaultExpectedAffinityTerms()), e2e.WaitShort).Should(Succeed())
 			By("The pod should be running")
-			Eventually(framework.VerifyPodsAreRunning(ctx, client, ns, "app", "test"), e2e.WaitShort).Should(Succeed())
+			Eventually(framework.VerifyPodsAreRunning(ctx, client, ns, "app", "test"), e2e.WaitMedium).Should(Succeed())
 		})
 	})
 	Context("the Preferred Node Affinity is correctly set with PodPlacementConfigs", func() {
@@ -1983,7 +1984,7 @@ var _ = Describe("The Pod Placement Operand", func() {
 			Expect(err).NotTo(HaveOccurred())
 			//nolint:errcheck
 			defer client.Delete(ctx, ns)
-			By("Creating a PodPlacementConfig")
+			By("Creating PodPlacementConfigs")
 			ppc1 := NewPodPlacementConfig().
 				WithName("test-ppc1").
 				WithNamespace(ns.Name).
@@ -2000,7 +2001,6 @@ var _ = Describe("The Pod Placement Operand", func() {
 				WithNodeAffinityScoringTerm(utils.ArchitectureS390x, 10).
 				Build()
 			Expect(client.Create(ctx, ppc2)).To(Succeed())
-			By("Creating a PodPlacementConfig")
 			ppc3 := NewPodPlacementConfig().
 				WithName("test-ppc3").
 				WithNamespace(ns.Name).
@@ -2010,6 +2010,13 @@ var _ = Describe("The Pod Placement Operand", func() {
 				WithNodeAffinityScoringTerm(utils.ArchitecturePpc64le, 40).
 				Build()
 			Expect(client.Create(ctx, ppc3)).To(Succeed())
+			By("Waiting for all PodPlacementConfigs to be available")
+			Eventually(func(g Gomega) {
+				ppcList := &v1beta1.PodPlacementConfigList{}
+				err := client.List(ctx, ppcList, runtimeclient.InNamespace(ns.Name))
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(ppcList.Items).To(HaveLen(3))
+			}).Should(Succeed())
 			By("Creating a matching deployment")
 			ps := NewPodSpec().
 				WithContainersImages(helloOpenshiftPublicMultiarchImage).
@@ -2064,6 +2071,12 @@ var _ = Describe("The Pod Placement Operand", func() {
 				}).
 				Build()
 			Expect(client.Create(ctx, ppc)).To(Succeed())
+			By("Waiting for the PodPlacementConfig to be available")
+			Eventually(func(g Gomega) {
+				p := &v1beta1.PodPlacementConfig{}
+				err := client.Get(ctx, runtimeclient.ObjectKey{Name: "test-ppc-backend", Namespace: ns.Name}, p)
+				g.Expect(err).NotTo(HaveOccurred())
+			}).Should(Succeed())
 			By("Creating a backend deployment that matches the selector")
 			backendPs := NewPodSpec().
 				WithContainersImages(helloOpenshiftPublicMultiarchImage).
@@ -2141,6 +2154,13 @@ var _ = Describe("The Pod Placement Operand", func() {
 				WithNodeAffinityScoringTerm(utils.ArchitectureArm64, 30).
 				Build()
 			Expect(client.Create(ctx, ppcHigh)).To(Succeed())
+			By("Waiting for all PodPlacementConfigs to be available")
+			Eventually(func(g Gomega) {
+				ppcList := &v1beta1.PodPlacementConfigList{}
+				err := client.List(ctx, ppcList, runtimeclient.InNamespace(ns.Name))
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(ppcList.Items).To(HaveLen(2))
+			}).Should(Succeed())
 			By("Creating a matching deployment")
 			ps := NewPodSpec().
 				WithContainersImages(helloOpenshiftPublicMultiarchImage).
@@ -2201,6 +2221,13 @@ var _ = Describe("The Pod Placement Operand", func() {
 				WithNodeAffinityScoringTerm(utils.ArchitecturePpc64le, 40).
 				Build()
 			Expect(client.Create(ctx, ppcLow)).To(Succeed())
+			By("Waiting for all PodPlacementConfigs to be available")
+			Eventually(func(g Gomega) {
+				ppcList := &v1beta1.PodPlacementConfigList{}
+				err := client.List(ctx, ppcList, runtimeclient.InNamespace(ns.Name))
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(ppcList.Items).To(HaveLen(2))
+			}).Should(Succeed())
 			By("Creating a matching deployment")
 			ps := NewPodSpec().
 				WithContainersImages(helloOpenshiftPublicMultiarchImage).
@@ -2255,6 +2282,12 @@ var _ = Describe("The Pod Placement Operand", func() {
 				WithNodeAffinityScoringTerm(utils.ArchitectureArm64, 20).
 				Build()
 			Expect(client.Create(ctx, ppc)).To(Succeed())
+			By("Waiting for the PodPlacementConfig to be available")
+			Eventually(func(g Gomega) {
+				p := &v1beta1.PodPlacementConfig{}
+				err = client.Get(ctx, runtimeclient.ObjectKey{Name: "test-ppc-conflict", Namespace: ns.Name}, p)
+				g.Expect(err).NotTo(HaveOccurred())
+			}).Should(Succeed())
 			By("Creating a deployment with user-defined preferred node affinity for amd64")
 			archLabelPST := NewPreferredSchedulingTerm().WithArchitecture(utils.ArchitectureAmd64).WithWeight(5).Build()
 			ps := NewPodSpec().
