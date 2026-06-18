@@ -10,6 +10,7 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/client-go/kubernetes/scheme"
@@ -112,9 +113,8 @@ func (s *K8sENOExecEventStorage) Run() error {
 // TODO: this should be testable in integration tests.
 func (s *K8sENOExecEventStorage) processEvent(event *types.ENOEXECInternalEvent) error {
 	var (
-		enoexecEvent    *multiarchv1beta1.ENoExecEvent
-		enoexecEventObj multiarchv1beta1.ENoExecEvent
-		err             error
+		enoexecEvent *multiarchv1beta1.ENoExecEvent
+		err          error
 	)
 
 	log, err := logr.FromContext(s.ctx)
@@ -140,13 +140,14 @@ func (s *K8sENOExecEventStorage) processEvent(event *types.ENOEXECInternalEvent)
 		return fmt.Errorf("rate limiter wait failed: %w", err)
 	}
 
-	err = s.k8sClient.Create(s.ctx, enoexecEvent.DeepCopy())
+	// Save the status before Create, since Create will clear it (status is a subresource).
+	savedStatus := enoexecEvent.Status.DeepCopy()
+	err = s.k8sClient.Create(s.ctx, enoexecEvent)
 	if err != nil {
 		return fmt.Errorf("failed to create ENOExecEvent in Kubernetes: %w", err)
 	}
-	// If any further operations fail, we need to ensure that the created ENOExecEvent is deleted to avoid leaving
-	// orphaned resources in the cluster. This is done by defining a rollback function that will be called
-	// if any subsequent operations fail.
+	// If the status update fails, delete the CR to avoid leaving an orphan that the handler
+	// controller will immediately mark as errored (no PodName in status yet).
 	rollbackFn := func() {
 		if rErr := s.k8sClient.Delete(s.ctx, enoexecEvent); rErr != nil {
 			log.Error(rErr, "Failed to rollback ENOExecEvent creation", "event", enoexecEvent.Name)
@@ -155,20 +156,36 @@ func (s *K8sENOExecEventStorage) processEvent(event *types.ENOEXECInternalEvent)
 		}
 	}
 
-	log.Info("Successfully created ENOExecEvent in Kubernetes", "event", enoexecEvent.Name, "pod_name", enoexecEvent.Status.PodName, "pod_namespace", enoexecEvent.Status.PodNamespace, "container_id", enoexecEvent.Status.ContainerID)
-	if err = s.k8sClient.Get(s.ctx, client.ObjectKey{
-		Name:      enoexecEvent.Name,
-		Namespace: s.namespace,
-	}, &enoexecEventObj); err != nil {
-		rollbackFn()
-		return fmt.Errorf("failed to get ENOExecEvent from Kubernetes after creation: %w", err)
+	log.Info("Successfully created ENOExecEvent in Kubernetes", "event", enoexecEvent.Name, "pod_name", savedStatus.PodName, "pod_namespace", savedStatus.PodNamespace, "container_id", savedStatus.ContainerID)
+
+	// Retry the status update on conflict. The handler controller may modify the CR
+	// (e.g., adding error labels via markAsError) between Create and Status().Update(),
+	// which changes the resourceVersion and causes a conflict. On conflict we re-fetch
+	// the latest version and retry.
+	const maxRetries = 3
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		if attempt == 0 {
+			// First attempt: use the object returned by Create (has correct resourceVersion).
+			enoexecEvent.Status = *savedStatus
+		} else {
+			// Retry: re-fetch to get the latest resourceVersion after a conflict.
+			if err = s.k8sClient.Get(s.ctx, client.ObjectKeyFromObject(enoexecEvent), enoexecEvent); err != nil {
+				rollbackFn()
+				return fmt.Errorf("failed to re-fetch ENOExecEvent for status update retry: %w", err)
+			}
+			enoexecEvent.Status = *savedStatus
+			log.Info("Retrying ENOExecEvent status update after conflict", "event", enoexecEvent.Name, "attempt", attempt)
+		}
+		err = s.k8sClient.Status().Update(s.ctx, enoexecEvent)
+		if err == nil {
+			return nil
+		}
+		if !apierrors.IsConflict(err) {
+			break
+		}
 	}
-	enoexecEventObj.Status = enoexecEvent.Status
-	if err = s.k8sClient.Status().Update(s.ctx, &enoexecEventObj); err != nil {
-		rollbackFn()
-		return fmt.Errorf("failed to update ENOExecEvent status in Kubernetes: %w", err)
-	}
-	return nil
+	rollbackFn()
+	return fmt.Errorf("failed to update ENOExecEvent status in Kubernetes: %w", err)
 }
 
 func registerScheme(s *runtime.Scheme) error {
