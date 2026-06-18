@@ -342,7 +342,7 @@ func buildServiceMonitor(name string) *monitoringv1.ServiceMonitor {
 					HonorLabels:     true,
 					Path:            "/metrics",
 					Port:            "metrics",
-					Scheme:          utils.NewPtr(monitoringv1.SchemeHTTPS),
+					Scheme:          utils.NewPtr(monitoringv1.Scheme("https")),
 					BearerTokenFile: "/var/run/secrets/kubernetes.io/serviceaccount/token",
 					HTTPConfigWithProxyAndTLSFiles: monitoringv1.HTTPConfigWithProxyAndTLSFiles{
 						HTTPConfigWithTLSFiles: monitoringv1.HTTPConfigWithTLSFiles{
