@@ -10,10 +10,10 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/client-go/util/retry"
 
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -158,34 +158,23 @@ func (s *K8sENOExecEventStorage) processEvent(event *types.ENOEXECInternalEvent)
 
 	log.Info("Successfully created ENOExecEvent in Kubernetes", "event", enoexecEvent.Name, "pod_name", savedStatus.PodName, "pod_namespace", savedStatus.PodNamespace, "container_id", savedStatus.ContainerID)
 
-	// Retry the status update on conflict. The handler controller may modify the CR
-	// (e.g., adding error labels via markAsError) between Create and Status().Update(),
-	// which changes the resourceVersion and causes a conflict. On conflict we re-fetch
-	// the latest version and retry.
-	const maxRetries = 3
-	for attempt := 0; attempt <= maxRetries; attempt++ {
-		if attempt == 0 {
-			// First attempt: use the object returned by Create (has correct resourceVersion).
-			enoexecEvent.Status = *savedStatus
-		} else {
-			// Retry: re-fetch to get the latest resourceVersion after a conflict.
-			if err = s.k8sClient.Get(s.ctx, client.ObjectKeyFromObject(enoexecEvent), enoexecEvent); err != nil {
-				rollbackFn()
-				return fmt.Errorf("failed to re-fetch ENOExecEvent for status update retry: %w", err)
+	firstAttempt := true
+	err = retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		if !firstAttempt {
+			if getErr := s.k8sClient.Get(s.ctx, client.ObjectKeyFromObject(enoexecEvent), enoexecEvent); getErr != nil {
+				return getErr
 			}
-			enoexecEvent.Status = *savedStatus
-			log.Info("Retrying ENOExecEvent status update after conflict", "event", enoexecEvent.Name, "attempt", attempt)
+			log.Info("Retrying ENOExecEvent status update after conflict", "event", enoexecEvent.Name)
 		}
-		err = s.k8sClient.Status().Update(s.ctx, enoexecEvent)
-		if err == nil {
-			return nil
-		}
-		if !apierrors.IsConflict(err) {
-			break
-		}
+		firstAttempt = false
+		enoexecEvent.Status = *savedStatus
+		return s.k8sClient.Status().Update(s.ctx, enoexecEvent)
+	})
+	if err != nil {
+		rollbackFn()
+		return fmt.Errorf("failed to update ENOExecEvent status in Kubernetes: %w", err)
 	}
-	rollbackFn()
-	return fmt.Errorf("failed to update ENOExecEvent status in Kubernetes: %w", err)
+	return nil
 }
 
 func registerScheme(s *runtime.Scheme) error {

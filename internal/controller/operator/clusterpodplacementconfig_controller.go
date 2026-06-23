@@ -549,12 +549,8 @@ func (r *ClusterPodPlacementConfigReconciler) handleEnoexecDelete(ctx context.Co
 			NamespacedTypedClient: r.ClientSet.AppsV1().DaemonSets(utils.Namespace()),
 			ObjName:               utils.EnoexecDaemonSet,
 		},
-		{
-			NamespacedTypedClient: r.ClientSet.AppsV1().Deployments(utils.Namespace()),
-			ObjName:               utils.EnoexecControllerName,
-		},
 	}
-	log.Info("Deleting the DaemonSet ENoExecEvent resources and Deployment")
+	log.Info("Deleting the DaemonSet ENoExecEvent resources")
 	if err := utils.DeleteResources(ctx, daemonSetRelatedObjsToDelete); err != nil {
 		log.Error(err, "Unable to delete DaemonSet resources")
 		return err
@@ -584,7 +580,9 @@ func (r *ClusterPodPlacementConfigReconciler) handleEnoexecDelete(ctx context.Co
 	// Delete errored ENoExecEvent resources and count remaining non-errored ones
 	nonErroredCount, _ := r.deleteErroredENoExecEvents(ctx, enoexecEventList)
 
-	// Only block cleanup if there are non-errored ENoExecEvent resources
+	// Only block cleanup if there are non-errored ENoExecEvent resources.
+	// The enoexec-controller deployment is still running at this point so it can
+	// process the remaining events before we proceed.
 	if nonErroredCount > 0 {
 		log.Info("Found existing non-errored ENoExecEvent resources, waiting for reconciliation", "nonErroredCount", nonErroredCount)
 		return errors.New("found existing ENoExecEvent resources that need reconciliation")
@@ -609,6 +607,10 @@ func (r *ClusterPodPlacementConfigReconciler) handleEnoexecDelete(ctx context.Co
 	}
 
 	deploymentRelatedObjsToDelete := []utils.ToDeleteRef{
+		{
+			NamespacedTypedClient: r.ClientSet.AppsV1().Deployments(utils.Namespace()),
+			ObjName:               utils.EnoexecControllerName,
+		},
 		{
 			NamespacedTypedClient: r.ClientSet.RbacV1().Roles(utils.Namespace()),
 			ObjName:               utils.EnoexecControllerName,
@@ -957,10 +959,13 @@ func (r *ClusterPodPlacementConfigReconciler) deleteErroredENoExecEvents(ctx con
 		}
 		// Delete errored ENoExecEvents to prevent accumulation of stale resources
 		erroredCount++
-		if deleteErr := r.Delete(ctx, enoexecEvent); deleteErr != nil {
-			log.Error(deleteErr, "Failed to delete errored ENoExecEvent", "name", enoexecEvent.Name)
-		} else {
+		deleteErr := r.Delete(ctx, enoexecEvent)
+		if deleteErr == nil {
 			log.V(1).Info("Deleted errored ENoExecEvent", "name", enoexecEvent.Name)
+		} else if client.IgnoreNotFound(deleteErr) == nil {
+			log.V(1).Info("Errored ENoExecEvent already deleted", "name", enoexecEvent.Name)
+		} else {
+			log.Error(deleteErr, "Failed to delete errored ENoExecEvent", "name", enoexecEvent.Name)
 		}
 	}
 
