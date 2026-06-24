@@ -18,8 +18,8 @@ package image
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/hex"
-	"hash/fnv"
 	"time"
 
 	"github.com/openshift/multiarch-tuning-operator/pkg/image/metrics"
@@ -47,7 +47,7 @@ func (c *cacheProxy) GetCompatibleArchitecturesSet(ctx context.Context, imageRef
 	}
 
 	log := ctrllog.FromContext(ctx).WithValues("imageReference", imageReference)
-	hash := computeFNV128Hash(imageReference, authJSON)
+	hash := computeHash(imageReference, authJSON)
 	if architectures, ok := c.imageRefsCache.Get(hash); ok && !skipCache {
 		log.V(3).Info("Cache hit", "architectures", architectures, "hash", hash)
 		defer utils.HistogramObserve(now, metrics.TimeToInspectImageGivenHit)
@@ -82,10 +82,10 @@ func newCacheProxy() *cacheProxy {
 	}
 }
 
-func computeFNV128Hash(imageReference string, secrets []byte) string {
-	hash := fnv.New128()
-	hash.Write([]byte(imageReference)) // Add the image reference
-	hash.Write(secrets)                // Add the secrets
-
-	return hex.EncodeToString(hash.Sum(nil))
+func computeHash(imageReference string, secrets []byte) string {
+	h := sha256.New()
+	h.Write([]byte(imageReference))
+	h.Write([]byte{0})
+	h.Write(secrets)
+	return hex.EncodeToString(h.Sum(nil))
 }
