@@ -925,6 +925,25 @@ func TestEnsureArchitectureLabels(t *testing.T) {
 				utils.ArchLabelValue(utils.ArchitectureArm64): "",
 			},
 		},
+		{
+			name: "Invalid architecture filtered out",
+			requirement: v1.NodeSelectorRequirement{
+				Values: []string{utils.ArchitectureAmd64, "riscv64"},
+			},
+			expectedLabels: map[string]string{
+				utils.MultiArchLabel:                          "",
+				utils.ArchLabelValue(utils.ArchitectureAmd64): "",
+			},
+		},
+		{
+			name: "All invalid architectures filtered out",
+			requirement: v1.NodeSelectorRequirement{
+				Values: []string{"riscv64", "mips64"},
+			},
+			expectedLabels: map[string]string{
+				utils.MultiArchLabel: "",
+			},
+		},
 	}
 
 	for _, tt := range tests {
