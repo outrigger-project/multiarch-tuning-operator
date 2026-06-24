@@ -145,12 +145,12 @@ Only one mode can be active at a time. Each mode has its own leader election ID.
 - Handles ordered deletion to ensure pods are ungated before operand removal
 - Creates ServiceMonitor for metrics scraping
 
-**Pod Placement Operand** (intrenal/controller/podplacement/):
+**Pod Placement Operand** (internal/controller/podplacement/):
 - **PodReconciler**: Watches pods with scheduling gate, inspects container images, adds architecture-based nodeAffinity
 - **PodSchedulingGateMutatingWebHook**: Adds `multiarch.openshift.io/scheduling-gate` to new pods
 - **GlobalPullSecretSyncer**: Syncs pull secrets for image inspection
 
-**ENoExecEvent System** (/internal/controller/enoexecevent/):
+**ENoExecEvent System** (internal/controller/enoexecevent/):
 - **Daemon** (cmd/enoexec-daemon/): eBPF-based monitoring of exec format errors on nodes
 - **Handler Controller**: Processes ENoExecEvent CRs created by the daemon
 
@@ -212,7 +212,8 @@ The operator binary runs in four mutually exclusive modes (controlled by flags i
 **Mutating Webhook** (`internal/controller/podplacement/scheduling_gate_mutating_webhook.go`):
 - Adds `multiarch.openshift.io/scheduling-gate` to new pods
 - Respects namespace selector from ClusterPodPlacementConfig
-- Always excludes: `openshift-*`, `kube-*`, `hypershift-*` namespaces
+- In-code exclusions (via `shouldIgnorePod`): operator namespace, `kube-*` prefixed namespaces, DaemonSet pods, pods with control-plane nodeSelector
+- `openshift-*` and `hypershift-*` namespaces are NOT hardcoded exclusions — they are only excluded if the user configures an appropriate `namespaceSelector` on the ClusterPodPlacementConfig CR
 - Uses worker pool for event publishing (ants library, 16 workers)
 
 **Image Inspector** (`pkg/image/inspector.go`):
@@ -230,7 +231,7 @@ The operator binary runs in four mutually exclusive modes (controlled by flags i
 
 - **v1alpha1**: Original API version with conversion webhook
 - **v1beta1**: Current stable API (hub version for conversions)
-- Conversion webhooks in api/v1beta1/clusterpodplacementconfig_webhook.go
+- Validation webhook in api/v1beta1/clusterpodplacementconfig_webhook.go (validates create/update/delete, no defaulting webhook)
 
 **ClusterPodPlacementConfig** (`api/v1beta1/clusterpodplacementconfig_types.go`):
 - Singleton resource (only name "cluster" allowed)
@@ -244,12 +245,16 @@ The operator binary runs in four mutually exclusive modes (controlled by flags i
 
 ### Namespace Exclusions
 
-System namespaces are excluded from pod placement by default (cannot be overridden):
-- `openshift-*`
-- `kube-*`
-- `hypershift-*`
+Hardcoded exclusions in `shouldIgnorePod` (cannot be overridden):
+- The operator's own namespace (`utils.Namespace()`)
+- `kube-*` prefixed namespaces
 
-Additional namespaces can be excluded via namespaceSelector with label `multiarch.openshift.io/exclude-pod-placement`.
+Additionally, pods are always skipped if they:
+- Already have a `spec.nodeName` set
+- Have a control-plane nodeSelector
+- Are owned by a DaemonSet
+
+**Note:** `openshift-*` and `hypershift-*` namespaces are NOT hardcoded exclusions. They must be excluded via the `namespaceSelector` field on ClusterPodPlacementConfig. The recommended selector uses `matchExpressions` with `key: multiarch.openshift.io/exclude-pod-placement, operator: DoesNotExist`. Without a properly configured `namespaceSelector`, the webhook will gate pods in `openshift-*` namespaces, which can block critical workloads if the pod-placement-controller is unavailable (see security audit FIND-004).
 
 ### Plugins System
 
@@ -340,7 +345,7 @@ RUNTIME_IMAGE=<custom-image>   # Override runtime base image
 ## Important Constraints
 
 - ClusterPodPlacementConfig must be named "cluster" (singleton enforced by webhook)
-- Namespaces `openshift-*`, `kube-*`, and `hypershift-*` are always excluded from pod placement
+- Only `kube-*` and the operator namespace are hardcoded exclusions from pod placement; `openshift-*` and `hypershift-*` require proper `namespaceSelector` configuration
 - CGO is required for building (uses gpgme for registry authentication)
 - Only one execution mode flag can be set at a time in main.go
 - The operator uses vendored dependencies (`GOFLAGS=-mod=vendor`)
