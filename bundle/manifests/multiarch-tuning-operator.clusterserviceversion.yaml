@@ -112,15 +112,6 @@ spec:
         - apiGroups:
           - ""
           resources:
-          - configmaps
-          - secrets
-          verbs:
-          - get
-          - list
-          - watch
-        - apiGroups:
-          - ""
-          resources:
           - events
           verbs:
           - create
@@ -146,17 +137,16 @@ spec:
           verbs:
           - get
           - list
-          - patch
           - update
           - watch
         - apiGroups:
           - ""
           resources:
           - pods/status
+          - serviceaccounts/status
+          - services/status
           verbs:
           - get
-          - patch
-          - update
         - apiGroups:
           - ""
           resources:
@@ -177,24 +167,24 @@ spec:
           verbs:
           - update
         - apiGroups:
-          - ""
-          resources:
-          - serviceaccounts/status
-          - services/status
-          verbs:
-          - get
-        - apiGroups:
           - admissionregistration.k8s.io
           resources:
           - mutatingwebhookconfigurations
           verbs:
           - create
+          - list
+          - watch
+        - apiGroups:
+          - admissionregistration.k8s.io
+          resourceNames:
+          - pod-placement-mutating-webhook-configuration
+          resources:
+          - mutatingwebhookconfigurations
+          verbs:
           - delete
           - get
-          - list
           - patch
           - update
-          - watch
         - apiGroups:
           - admissionregistration.k8s.io
           resources:
@@ -276,16 +266,25 @@ spec:
           resources:
           - clusterrolebindings
           - clusterroles
-          - rolebindings
-          - roles
           verbs:
           - create
+          - list
+          - watch
+        - apiGroups:
+          - rbac.authorization.k8s.io
+          resourceNames:
+          - enoexec-event-daemon
+          - enoexec-event-handler-controller
+          - pod-placement-controller
+          - pod-placement-web-hook
+          resources:
+          - clusterrolebindings
+          - clusterroles
+          verbs:
           - delete
           - get
-          - list
           - patch
           - update
-          - watch
         - apiGroups:
           - rbac.authorization.k8s.io
           resources:
@@ -305,11 +304,18 @@ spec:
           verbs:
           - get
         - apiGroups:
-          - security.openshift.io
+          - rbac.authorization.k8s.io
           resources:
-          - securitycontextconstraints
+          - rolebindings
+          - roles
           verbs:
-          - use
+          - create
+          - delete
+          - get
+          - list
+          - patch
+          - update
+          - watch
         - apiGroups:
           - authentication.k8s.io
           resources:

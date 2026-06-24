@@ -254,7 +254,12 @@ func buildClusterRoleController() *rbacv1.ClusterRole {
 		},
 		{
 			APIGroups: []string{""},
-			Resources: []string{"configmaps", "secrets"},
+			Resources: []string{"configmaps"},
+			Verbs:     []string{LIST, WATCH, GET},
+		},
+		{
+			APIGroups: []string{""},
+			Resources: []string{"secrets"},
 			Verbs:     []string{LIST, WATCH, GET},
 		},
 		{
