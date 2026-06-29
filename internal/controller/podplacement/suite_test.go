@@ -80,6 +80,7 @@ var (
 	registryAddress string
 	registryCert    []byte
 	stopMgr         context.CancelFunc
+	mgrStopped      chan struct{}
 	testEnv         *envtest.Environment
 
 	dir      string
@@ -219,10 +220,18 @@ var _ = SynchronizedAfterSuite(func() {}, func() {
 	Expect(clusterpodplacementconfig.GetClusterPodPlacementConfig()).To(BeNil())
 
 	By("tearing down the test environment")
-	stopMgr()
+	if stopMgr != nil {
+		stopMgr()
+	}
+	if mgrStopped != nil {
+		select {
+		case <-mgrStopped:
+			suiteLog.Info("Manager stopped successfully")
+		case <-time.After(10 * time.Second):
+			suiteLog.Error(nil, "Timeout waiting for manager to stop")
+		}
+	}
 	// TODO: we miss a way to gracefully shutdown the registry server in the AfterSuite fixture.
-	// wait for the manager to stop. FIXME: this is a hack, not sure what is the right way to do it.
-	time.Sleep(1 * time.Second)
 	err = testEnv.Stop()
 	Expect(err).NotTo(HaveOccurred())
 })
@@ -335,14 +344,14 @@ func runManager() {
 		Client:    mgr.GetClient(),
 		Scheme:    mgr.GetScheme(),
 		ClientSet: clientset,
-		Recorder:  mgr.GetEventRecorderFor(utils.OperatorName),
+		Recorder:  mgr.GetEventRecorderFor(utils.OperatorName), //nolint:staticcheck // MULTIARCH-6087: will be fixed with events API migration
 	}).SetupWithManager(mgr)).NotTo(HaveOccurred())
 	pool, err := ants.NewMultiPool(10, 10, ants.LeastTasks, ants.WithPreAlloc(true),
 		ants.WithNonblocking(true))
 	Expect(err).NotTo(HaveOccurred())
 	mgr.GetWebhookServer().Register("/add-pod-scheduling-gate", &webhook.Admission{
 		Handler: NewPodSchedulingGateMutatingWebHook(
-			mgr.GetClient(), clientset, mgr.GetScheme(), mgr.GetEventRecorderFor(utils.OperatorName), pool),
+			mgr.GetClient(), clientset, mgr.GetScheme(), mgr.GetEventRecorderFor(utils.OperatorName), pool), //nolint:staticcheck // MULTIARCH-6087: will be fixed with events API migration
 	})
 
 	policyConfig := []byte(`{"default":[{"type":"insecureAcceptAnything"}],"transports":{"atomic":{},"docker":{},"docker-daemon":{"":[{"type":"insecureAcceptAnything"}]}}}`)
@@ -381,7 +390,9 @@ func runManager() {
 	Expect(clusterpodplacementconfig.GetClusterPodPlacementConfig()).To(BeNil())
 
 	By("Starting the manager")
+	mgrStopped = make(chan struct{})
 	go func() {
+		defer close(mgrStopped)
 		var mgrCtx context.Context
 		mgrCtx, stopMgr = context.WithCancel(ctx)
 		err = mgr.Start(mgrCtx)

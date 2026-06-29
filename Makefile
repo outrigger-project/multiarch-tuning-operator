@@ -9,7 +9,7 @@ ARTIFACT_DIR ?= ./_output
 # To re-generate a bundle for another specific version without changing the standard setup, you can:
 # - use the VERSION as arg of the bundle target (e.g make bundle VERSION=0.0.2)
 # - use environment variables to overwrite this value (e.g export VERSION=0.0.2)
-VERSION ?= 1.3.0
+VERSION ?= 1.3.1
 
 # CHANNELS define the bundle channels used in the bundle.
 # Add a new line here if you would like to change its default config. (E.g CHANNELS = "candidate,fast,stable")
@@ -73,13 +73,13 @@ IMG ?= registry.ci.openshift.org/origin/multiarch-tuning-operator:main
 # https://github.com/kubernetes-sigs/kustomize/releases
 KUSTOMIZE_VERSION ?= v5.8.1
 # https://github.com/kubernetes-sigs/controller-tools/releases
-CONTROLLER_TOOLS_VERSION ?= v0.19.0
+CONTROLLER_TOOLS_VERSION ?= v0.20.1
 # https://github.com/kubernetes-sigs/controller-runtime/branches
-SETUP_ENVTEST_VERSION ?= release-0.22
+SETUP_ENVTEST_VERSION ?= release-0.23
 # ENVTEST_K8S_VERSION refers to the version of kubebuilder assets to be downloaded by envtest binary.
-ENVTEST_K8S_VERSION = 1.34.1
+ENVTEST_K8S_VERSION = 1.35.0
 # https://github.com/golangci/golangci-lint/releases
-GOLINT_VERSION = v2.10.1
+GOLINT_VERSION = v2.12.2
 
 # TODO: We'd need an upstream builder image that includes gpgme-devel (libgpgme-dev)
 BUILD_IMAGE ?= registry.ci.openshift.org/ocp/builder:rhel-9-golang-1.25-openshift-4.21
