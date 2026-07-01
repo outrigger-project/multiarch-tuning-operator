@@ -90,7 +90,7 @@ func Test_GetClusterMinorVersion(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			g := NewGomegaWithT(t)
-			client := fake.NewSimpleClientset() //nolint:staticcheck // MULTIARCH-6087: will be migrated to NewClientset with apply configs
+			client := fake.NewSimpleClientset() // MULTIARCH-6087: will be migrated to NewClientset with apply configs
 			client.Discovery().(*fakediscovery.FakeDiscovery).FakedServerVersion = tt.serverInfo
 
 			version, err := GetClusterMinorVersion(client)
