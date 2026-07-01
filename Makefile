@@ -73,11 +73,11 @@ IMG ?= registry.ci.openshift.org/origin/multiarch-tuning-operator:main
 # https://github.com/kubernetes-sigs/kustomize/releases
 KUSTOMIZE_VERSION ?= v5.8.1
 # https://github.com/kubernetes-sigs/controller-tools/releases
-CONTROLLER_TOOLS_VERSION ?= v0.20.1
+CONTROLLER_TOOLS_VERSION ?= v0.21.0
 # https://github.com/kubernetes-sigs/controller-runtime/branches
-SETUP_ENVTEST_VERSION ?= release-0.23
+SETUP_ENVTEST_VERSION ?= release-0.24
 # ENVTEST_K8S_VERSION refers to the version of kubebuilder assets to be downloaded by envtest binary.
-ENVTEST_K8S_VERSION = 1.35.0
+ENVTEST_K8S_VERSION = 1.36.0
 # https://github.com/golangci/golangci-lint/releases
 GOLINT_VERSION = v2.12.2
 
