@@ -12,7 +12,7 @@ reviewers:
 approvers:
   - "@Prashanth684"
 creation-date: 2026-03-25
-last-updated: 2026-03-25
+last-updated: 2026-07-02
 tracking-link:
   - TBD
 see-also:
@@ -32,7 +32,7 @@ see-also:
 
 ## Summary
 
-This enhancement proposes a new plugin called `celArchitecturePlacement` for the Multiarch Tuning Operator (MTO) that enables fine-grained control over pod architecture placement using Common Expression Language (CEL) expressions. The plugin is available exclusively in namespace-scoped [`PodPlacementConfig`](../../api/v1beta1/podplacementconfig_types.go) resources, allowing administrators to define rules that evaluate a Pod's specification and automatically adjust the target architecture based on matching criteria. When a rule matches, the plugin removes any existing architecture constraints from the pod's nodeSelector and nodeAffinity, then sets a list of allowed architectures. This approach provides a declarative and image independent architecture that goes beyond the current image-based architecture detection.
+This enhancement proposes a new plugin called `celArchitecturePlacement` for the Multiarch Tuning Operator (MTO) that enables fine-grained control over pod architecture placement using Common Expression Language (CEL) expressions. The plugin is available exclusively in namespace-scoped [`PodPlacementConfig`](../../api/v1beta1/podplacementconfig_types.go) resources, allowing administrators to define rules that evaluate a Pod's metadata and automatically adjust the target architecture based on matching criteria. When a rule matches, the plugin removes any existing architecture constraints from the pod's nodeSelector and nodeAffinity, then sets a list of allowed architectures. This approach provides a declarative and image independent architecture that goes beyond the current image-based architecture detection.
 
 ## Motivation
 
@@ -49,12 +49,12 @@ The current Multiarch Tuning Operator automatically determines Pod image archite
 
 ### Goals
 
-- Enable fine-grained control over Pod placement based on a Pod's spec
+- Enable fine-grained control over Pod placement based on a Pod's metadata
 - Provide a flexible, CEL-based rule engine for Pod identification and when identified place Pods specifically in a multi-arch compute environment
 - Support namespace-scoped architecture rules using a new plugin in `PodPlacementConfig`
 - Remove existing architecture constraints and set new ones when rules match
 - Maintain compatibility with existing MTO functionality
-- Limit the explosion of rules by requiring a default architecture list
+- Limit the explosion of rules by requiring a fallback architecture list
 - Support operator namespaces including `openshift-operators`
 
 ### Non-Goals
@@ -63,6 +63,7 @@ The current Multiarch Tuning Operator automatically determines Pod image archite
 - Replace the existing image-based architecture detection mechanism entirely
 - Provide runtime architecture switching for already-scheduled pods
 - Support CEL expressions on resources other than Pods
+- Expose Pod `spec`/`status` (container images, env, volumes, secrets) to CEL expressions
 - Automatically detect optimal architecture for workloads
 - Preserve existing architecture constraints when rules match (they are explicitly removed)
 
@@ -79,7 +80,7 @@ We propose introducing a new plugin called `celArchitecturePlacement` that can b
    - A list of fallback architectures (required, e.g., `[ppc64le, amd64]`)
    - One or more `ArchitectureRule` objects, each containing:
      - A name for the rule
-     - A CEL expression that evaluates against Pod resources
+     - A CEL expression that evaluates against a Pod's metadata
      - A target architecture list to apply when the expression matches
 
 #### Pod Admission and Processing
@@ -89,16 +90,14 @@ We propose introducing a new plugin called `celArchitecturePlacement` that can b
 3. The Pod Placement Controller processes the pod:
    - Retrieves all `PodPlacementConfig` resources in the pod's namespace
    - Filters configs whose `labelSelector` matches the pod
-   - For matching configs with `celArchitecturePlacement.enabled` is true, evaluates CEL expressions in priority order based on weight. The priority is determined based on the highest weighted PodPlacementConfig in the namespace.
-     - If multiple configs match, the one with the highest weight is used.
-     - If `celArchitecturePlacement.enabled` is true and the rule does not match it goes to the next `PodPlacementConfig`.
-     - If no `PodPlacementConfig` match the global `ClusterPodPlacementConfig` and the default logic for the Multi-Arch Tuning Operator are used.
-   - If a rule matches (CEL expression returns `true`):
-     - **Removes any existing architecture constraints** from the `Pod` `spec.nodeSelector` (removes `kubernetes.io/arch` key if present)
-     - **Removes any existing architecture-based node affinity** from the pod's `spec.affinity.nodeAffinity` (removes node selector terms with `kubernetes.io/arch` match expressions)
-     - **Sets new node affinity** with the rule's target architecture list
-   - If no configs match or no rules match, uses the default architecture list from the plugin configuration
-   - If no rules match, uses the default architecture list specified in the plugin configuration (also removing existing constraints)
+   - Selects a single **winning** config deterministically by the `priority` field (highest first), with documented tie-breakers (see [Priority and Conflict Resolution](#priority-and-conflict-resolution)). The controller does not merge rules across configs.
+   - If the winning config has `celArchitecturePlacement.enabled` set to `true`, its rules are evaluated in order:
+     - If a rule matches (CEL expression returns `true`):
+       - **Removes any existing architecture constraints** from the `Pod` `spec.nodeSelector` (removes `kubernetes.io/arch` key if present)
+       - **Removes any existing architecture-based node affinity** from the pod's `spec.affinity.nodeAffinity` (removes node selector terms with `kubernetes.io/arch` match expressions)
+       - **Sets new node affinity** with the rule's target architecture list
+     - If no rules match, the winning config's `fallbackArchitectures` is applied (also removing existing constraints)
+   - If no config matches, the global `ClusterPodPlacementConfig` and the default MTO logic are used
    - The scheduling gate is removed
 4. The updated `Pod` is sent to the scheduler
 
@@ -117,17 +116,18 @@ sequenceDiagram
     Webhook->>Webhook: Add Scheduling Gate
     Webhook-->>API: Pod with Gate
     API-->>Controller: Watch Event (Pod Created)
-    
+
     Controller->>PPC: Retrieve PodPlacementConfigs in Pod's Namespace
     PPC-->>Controller: Matching Configs
-    
+
     Controller->>Controller: Filter by labelSelector
+    Controller->>Controller: Select winning config (priority + tie-breakers)
     Controller->>Controller: Check celArchitecturePlacement.enabled
-    
+
     alt celArchitecturePlacement enabled
-        Controller->>CEL: Evaluate Rules in Priority Order
+        Controller->>CEL: Evaluate Rules in Order (first to last)
         CEL->>CEL: Evaluate CEL Expressions
-        
+
         alt Rule Matches
             CEL-->>Controller: Match Found (architectures)
             Controller->>Controller: Remove kubernetes.io/arch from nodeSelector
@@ -141,12 +141,28 @@ sequenceDiagram
     else Plugin Not Enabled
         Controller->>Controller: Use Default MTO Logic
     end
-    
+
     Controller->>Controller: Remove Scheduling Gate
     Controller->>API: Update Pod
     API-->>Scheduler: Pod Ready for Scheduling
     Scheduler->>Scheduler: Schedule Pod to Node
 ```
+
+#### Reconcile Ordering (Single Pass)
+
+Within a single reconcile of a gated Pod, the Pod Placement Controller executes stages in a fixed, deterministic order. This makes behavior predictable and tests specifiable, and it removes ambiguity about whether image-based logic runs before or after CEL and what NodeAffinityScoring observes:
+
+1. **Stage 0 — Config selection** Select the winning `PodPlacementConfig` (label selector match, then `priority`, then tie-breakers).
+2. **Stage 1 — celArchitecturePlacement (selection)** If enabled, evaluate rules. On a rule match (or via `fallbackArchitectures` when no rule matches), remove existing `kubernetes.io/arch` constraints and set the required node affinity. This produces the **authoritative required architecture set**.
+   - When `celArchitecturePlacement` is enabled and selects an architecture set, **image-based architecture detection is skipped** for this Pod. Image-based logic does not run before or after CEL in this pass; `celArchitecturePlacement` fully owns the required arch set.
+   - When `celArchitecturePlacement` is not enabled (or the plugin is absent), image-based detection runs exactly as it does today.
+3. **Stage 2 — NodeAffinityScoring (preference)** Runs after Stage 1 and reads the **final** required architecture set produced by Stage 1. It only adds `preferredDuringSchedulingIgnoredDuringExecution` weights among the already-eligible architectures; it never changes the required set.
+4. **Stage 3 — Gate removal** Remove the scheduling gate and persist the Pod.
+
+Invariants:
+
+- Image-based detection and `celArchitecturePlacement` are mutually exclusive per Pod; they never both mutate the required arch set in the same pass.
+- `NodeAffinityScoring` always observes the final required set from Stage 1, never an intermediate state.
 
 #### Architecture Constraint Removal
 
@@ -165,7 +181,7 @@ This ensures that the plugin's architecture selection takes precedence over any 
 
 #### Example: PodPlacementConfig
 
-The example sets a default architecture for amd64, and a selection of a matching Pods to place on ppc64le and another rule to place on amd64 or arm64.
+The example sets a fallback architecture of amd64, a rule matching database Pods to place them on ppc64le, and another rule to place `redis-` Pods on amd64 or arm64. The `priority` field selects this config over any lower-priority config in the same namespace; it defaults to `0` when unset.
 
 ```yaml
 apiVersion: multiarch.openshift.io/v1beta1
@@ -174,6 +190,7 @@ metadata:
   name: database-rules
   namespace: production
 spec:
+  priority: 10
   labelSelector:
     matchLabels:
       tier: database
@@ -185,8 +202,10 @@ spec:
       rules:
         - name: postgres-on-ppc64le
           expression: |
-            self.metadata.labels.exists(l, l.key == 'app.kubernetes.io/component' && l.value == 'database') &&
-            self.metadata.labels.exists(l, l.key == 'app.kubernetes.io/part-of' && l.value == 'postgresql')
+            'app.kubernetes.io/component' in self.metadata.labels &&
+            self.metadata.labels['app.kubernetes.io/component'] == 'database' &&
+            'app.kubernetes.io/part-of' in self.metadata.labels &&
+            self.metadata.labels['app.kubernetes.io/part-of'] == 'postgresql'
           architectures:
             - ppc64le
         - name: redis-on-amd64-and-arm64
@@ -197,7 +216,7 @@ spec:
             - arm64
 ```
 
-**Before plugin processing** 
+**Before plugin processing**
 
 A Pod with existing architecture constraint is shown:
 
@@ -217,9 +236,9 @@ spec:
     image: postgres:latest
 ```
 
-**After plugin processing** 
+**After plugin processing**
 
-The existing constraint is removed, and the new constraint applied)
+The existing constraint is removed, and the new constraint applied:
 
 ```yaml
 apiVersion: v1
@@ -249,43 +268,43 @@ spec:
 
 #### Changes to PodPlacementConfig
 
-The [`PodPlacementConfig`](../../api/v1beta1/podplacementconfig_types.go) CRD will be extended to support the new `celArchitecturePlacement` plugin in the `LocalPlugins` struct:
+The [`PodPlacementConfig`](../../api/v1beta1/podplacementconfig_types.go) CRD will be extended to support the new `celArchitecturePlacement` plugin in the `LocalPlugins` struct. Following the existing `NodeAffinityScoring` plugin, the struct type and its fields are **exported** so that Go's JSON serializer includes them and kubebuilder can generate the CRD schema:
 
 ```go
 // LocalPlugins represents the plugins configuration for podplacementconfigs resource.
 type LocalPlugins struct {
-    NodeAffinityScoring *NodeAffinityScoring `json:"nodeAffinityScoring,omitempty"`
-    celArchitecturePlacement *celArchitecturePlacement `json:"celArchitecturePlacement,omitempty"`
+    NodeAffinityScoring      *NodeAffinityScoring      `json:"nodeAffinityScoring,omitempty"`
+    CELArchitecturePlacement *CELArchitecturePlacement `json:"celArchitecturePlacement,omitempty"`
 }
 ```
 
 **Note** The `celArchitecturePlacement` plugin is exclusively namespace-scoped and is **not** added to the `Plugins` struct in [`ClusterPodPlacementConfig`](../../api/v1beta1/clusterpodplacementconfig_types.go).
 
-#### celArchitecturePlacement Plugin Definition
+#### CELArchitecturePlacement Plugin Definition
 
-A plugin definition will be added to [`api/common/plugins/`](../../api/common/plugins/):
+A plugin definition will be added to [`api/common/plugins/`](../../api/common/plugins/). The exported type name (`CELArchitecturePlacement`) uses the Go initialism convention (all-caps `CEL`), while the plugin's registered name and JSON tag remain `celArchitecturePlacement`:
 
 ```go
 const (
-    // celArchitecturePlacementPluginName stores the name for the celArchitecturePlacement plugin.
-    celArchitecturePlacementPluginName = "celArchitecturePlacement"
+    // CELArchitecturePlacementPluginName stores the name for the celArchitecturePlacement plugin.
+    CELArchitecturePlacementPluginName = "celArchitecturePlacement"
 )
 
-// celArchitecturePlacement is a plugin that provides CEL-based architecture selection rules.
+// CELArchitecturePlacement is a plugin that provides CEL-based architecture selection rules.
 // This plugin is only available in namespace-scoped PodPlacementConfig resources.
 // When a rule matches, the plugin removes any existing architecture constraints from the pod's
 // nodeSelector and nodeAffinity, then sets new architecture constraints based on the rule.
-type celArchitecturePlacement struct {
+type CELArchitecturePlacement struct {
     BasePlugin `json:",inline"`
-    
-    // fallbackArchitectures is a required list of architectures to use when no rules match.
+
+    // FallbackArchitectures is a required list of architectures to use when no rules match.
     // This limits the explosion of possible rules by providing a sensible default.
     // When applied, existing architecture constraints are removed and replaced with these architectures.
     // +kubebuilder:validation:Required
     // +kubebuilder:validation:MinItems=1
     // +kubebuilder:validation:MaxItems=4
-    fallbackArchitectures []string `json:"fallbackArchitectures" protobuf:"bytes,2,rep,name=fallbackArchitectures"`
-    
+    FallbackArchitectures []string `json:"fallbackArchitectures" protobuf:"bytes,2,rep,name=fallbackArchitectures"`
+
     // Rules is a list of architecture selection rules evaluated in order.
     // The first matching rule determines the target architecture.
     // When a rule matches, existing architecture constraints are removed and replaced.
@@ -301,14 +320,17 @@ type ArchitectureRule struct {
     // +kubebuilder:validation:MinLength=1
     // +kubebuilder:validation:MaxLength=253
     Name string `json:"name" protobuf:"bytes,1,opt,name=name"`
-    
-    // Expression is a CEL expression that evaluates against a Pod resource.
+
+    // Expression is a CEL expression that evaluates against a Pod's metadata.
     // The expression must return a boolean value.
-    // The expression has access to the pod via the 'self' variable.
+    // The expression has access to the pod via the 'self' variable, but only
+    // metadata fields (self.metadata.name, self.metadata.namespace,
+    // self.metadata.labels, self.metadata.annotations) may be referenced.
+    // References to spec/status fields are rejected at admission time.
     // +kubebuilder:validation:Required
     // +kubebuilder:validation:MinLength=1
     Expression string `json:"expression" protobuf:"bytes,2,opt,name=expression"`
-    
+
     // Architectures is the list of target architectures to use when this rule matches.
     // When applied, any existing architecture constraints in the pod's nodeSelector
     // and nodeAffinity are removed and replaced with these architectures.
@@ -318,24 +340,24 @@ type ArchitectureRule struct {
     Architectures []string `json:"architectures" protobuf:"bytes,3,rep,name=architectures"`
 }
 
-// Name returns the name of the celArchitecturePlacementPluginName.
-func (c *celArchitecturePlacement) Name() string {
-    return celArchitecturePlacementPluginName
+// Name returns the name of the CELArchitecturePlacement plugin.
+func (c *CELArchitecturePlacement) Name() string {
+    return CELArchitecturePlacementPluginName
 }
 
 // ValidateArchitectures checks whether the architectures are valid
-func (c *celArchitecturePlacement) ValidateArchitectures() error {
+func (c *CELArchitecturePlacement) ValidateArchitectures() error {
     validArchs := map[string]bool{
         "amd64": true, "arm64": true, "ppc64le": true, "s390x": true,
     }
-    
+
     // Validate fallback architectures
-    for _, arch := range c.fallbackArchitectures {
+    for _, arch := range c.FallbackArchitectures {
         if !validArchs[arch] {
-            return fmt.Errorf("invalid default architecture: %s", arch)
+            return fmt.Errorf("invalid fallback architecture: %s", arch)
         }
     }
-    
+
     // Validate rule architectures
     for _, rule := range c.Rules {
         for _, arch := range rule.Architectures {
@@ -344,12 +366,16 @@ func (c *celArchitecturePlacement) ValidateArchitectures() error {
             }
         }
     }
-    
+
     return nil
 }
 
-// ValidateCELExpressions validates all CEL expressions in the plugin
-func (c *celArchitecturePlacement) ValidateCELExpressions() error {
+// ValidateCELExpressions validates all CEL expressions in the plugin.
+// The CEL environment binds `self` to a Pod, but only metadata fields
+// (name, namespace, labels, annotations) may be referenced. Expressions
+// that reference spec/status fields (containers, images, env, volumes, etc.)
+// are rejected so rules cannot read sensitive workload data.
+func (c *CELArchitecturePlacement) ValidateCELExpressions() error {
     env, err := cel.NewEnv(
         cel.Types(&corev1.Pod{}),
         cel.Variable("self", cel.ObjectType("k8s.io.api.core.v1.Pod")),
@@ -357,23 +383,56 @@ func (c *celArchitecturePlacement) ValidateCELExpressions() error {
     if err != nil {
         return fmt.Errorf("failed to create CEL environment: %w", err)
     }
-    
+
     for _, rule := range c.Rules {
         ast, issues := env.Compile(rule.Expression)
         if issues != nil && issues.Err() != nil {
             return fmt.Errorf("rule %q: CEL compilation error: %w", rule.Name, issues.Err())
         }
-        
+
         // Verify expression returns boolean
         if ast.OutputType() != cel.BoolType {
             return fmt.Errorf("rule %q: expression must return boolean, got %s",
                 rule.Name, ast.OutputType())
         }
+
+        // Enforce the metadata-only field allow-list: reject any reference to
+        // Pod spec/status so expressions cannot read container images, env
+        // vars, volumes, or other sensitive fields.
+        if err := assertMetadataOnly(ast, rule.Name); err != nil {
+            return err
+        }
     }
-    
+
     return nil
 }
 ```
+
+#### CEL Data Scope and Field Allow-list
+
+`self` is bound to the Pod type so that field references can be schema-checked, but the webhook enforces a **metadata-only field allow-list**. Only the following are permitted:
+
+- `self.metadata.name`
+- `self.metadata.namespace`
+- `self.metadata.labels`
+- `self.metadata.annotations`
+
+Any reference to `self.spec` or `self.status` (for example `self.spec.containers`, image names, environment variables, volumes) is rejected at `PodPlacementConfig` create/update time (`assertMetadataOnly`). This guarantees the plugin cannot read sensitive workload data and keeps the risk statement about data exposure accurate.
+
+#### CEL Label and Annotation Access
+
+Pod labels and annotations are Kubernetes `map<string, string>` values, not lists. Under cel-go with the Kubernetes Pod binding they must be accessed with **map indexing and the `in` operator (or the `has()` macro)** — not the list `.exists(l, l.key == ...)` macro, which operates on lists and does not apply to maps.
+
+```cel
+// Correct (map access):
+'app.kubernetes.io/component' in self.metadata.labels &&
+self.metadata.labels['app.kubernetes.io/component'] == 'database'
+
+// Incorrect (list macro on a map — does not compile/behave as intended):
+self.metadata.labels.exists(l, l.key == 'app.kubernetes.io/component' && l.value == 'database')
+```
+
+All examples below use the map-access form.
 
 #### CEL Expression Validation
 
@@ -382,16 +441,18 @@ The PodPlacementConfig webhook performs the following validations at create/upda
 1. **CEL Syntax Validation**: Each rule's CEL expression is compiled using the Kubernetes CEL library to ensure syntactic correctness
 2. **Type Checking**: Expressions are validated to ensure they return boolean values
 3. **Pod Schema Validation**: Expressions are checked against the Pod type schema to catch invalid field references
-4. **Compilation Errors**: Any CEL compilation errors result in webhook rejection with a descriptive error message
+4. **Metadata-only Enforcement**: Expressions referencing `self.spec`/`self.status` are rejected (see field allow-list above)
+5. **Compilation Errors**: Any CEL compilation errors result in webhook rejection with a descriptive error message
 
 **Example validation errors:**
 - `"expression 'self.metadata.invalidField' is invalid: no such field 'invalidField'"`
 - `"expression 'self.metadata.name' must return boolean, got string"`
+- `"expression 'self.spec.containers' references a disallowed field: only self.metadata.* is permitted"`
 - `"expression syntax error at position 15: unexpected token ')'"`
 
-This validation ensures that only syntactically correct and type-safe CEL expressions are stored in the cluster.
+This validation ensures that only syntactically correct, type-safe, and metadata-scoped CEL expressions are stored in the cluster.
 
-**Note** Separate Custom Resources for each rule were considered. The PodPlacementConfig with celArchitecturePlacement plugin supports 1000+ rules within etcd key-value storage limits.
+**Note** Separate Custom Resources for each rule were considered. The PodPlacementConfig with celArchitecturePlacement plugin supports up to 1000 rules within etcd key-value storage limits. PodPlacementConfig has a limit of 1000 rules in a custom resource.
 
 #### Plugin Registration
 
@@ -404,15 +465,15 @@ var localPluginChecks = map[common.Plugin]func(lp *LocalPlugins) bool{
     common.NodeAffinityScoringPluginName: func(lp *LocalPlugins) bool {
         return lp.NodeAffinityScoring != nil && lp.NodeAffinityScoring.IsEnabled()
     },
-    common.celArchitecturePlacementPluginName: func(lp *LocalPlugins) bool {
-        return lp.celArchitecturePlacement != nil && lp.celArchitecturePlacement.IsEnabled()
+    common.CELArchitecturePlacementPluginName: func(lp *LocalPlugins) bool {
+        return lp.CELArchitecturePlacement != nil && lp.CELArchitecturePlacement.IsEnabled()
     },
 }
 ```
 
 ### CEL Expression Examples
 
-The plugin supports CEL expressions that operate on Pod resources. Here are common patterns:
+The plugin supports CEL expressions that operate on a Pod's metadata. Here are common patterns:
 
 1. *Matching by Pod Name*
 
@@ -442,8 +503,10 @@ spec:
 ```yaml
 - name: database-components
   expression: |
-    self.metadata.labels.exists(l, l.key == 'app.kubernetes.io/component' && l.value == 'database') &&
-    self.metadata.labels.exists(l, l.key == 'app.kubernetes.io/part-of' && l.value == 'wordpress')
+    'app.kubernetes.io/component' in self.metadata.labels &&
+    self.metadata.labels['app.kubernetes.io/component'] == 'database' &&
+    'app.kubernetes.io/part-of' in self.metadata.labels &&
+    self.metadata.labels['app.kubernetes.io/part-of'] == 'wordpress'
   architectures:
     - ppc64le
 ```
@@ -490,8 +553,10 @@ spec:
 ```yaml
 - name: frontend-production
   expression: |
-    self.metadata.labels.exists(l, l.key == 'tier' && l.value == 'frontend') &&
-    self.metadata.labels.exists(l, l.key == 'environment' && l.value == 'production')
+    'tier' in self.metadata.labels &&
+    self.metadata.labels['tier'] == 'frontend' &&
+    'environment' in self.metadata.labels &&
+    self.metadata.labels['environment'] == 'production'
   architectures:
     - arm64
 ```
@@ -517,9 +582,9 @@ spec:
 ```yaml
 - name: critical-services
   expression: |
-    self.metadata.labels.exists(l, l.key == 'priority' && l.value == 'critical') ||
-    (self.metadata.labels.exists(l, l.key == 'tier' && l.value == 'backend') &&
-     self.metadata.labels.exists(l, l.key == 'sla' && l.value == 'gold'))
+    (('priority' in self.metadata.labels) && self.metadata.labels['priority'] == 'critical') ||
+    (('tier' in self.metadata.labels) && self.metadata.labels['tier'] == 'backend' &&
+     ('sla' in self.metadata.labels) && self.metadata.labels['sla'] == 'gold')
   architectures:
     - ppc64le
     - amd64
@@ -557,16 +622,16 @@ spec:
   containers:
   - name: db-container
     image: db:latest
-    affinity:
-      nodeAffinity:
-        requiredDuringSchedulingIgnoredDuringExecution:
-          nodeSelectorTerms:
-          - matchExpressions:
-            - key: kubernetes.io/arch
-              operator: In
-              values:
-              - ppc64le
-              - amd64
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+        - matchExpressions:
+          - key: kubernetes.io/arch
+            operator: In
+            values:
+            - ppc64le
+            - amd64
 ```
 
 ### CEL Language Reference
@@ -575,7 +640,7 @@ The CEL expressions used in this plugin follow the Kubernetes CEL implementation
 - [Kubernetes CEL Documentation](https://kubernetes.io/docs/reference/using-api/cel/)
 - [CEL Language Specification](https://cel.dev/)
 
-The implementation will use the [`github.com/google/cel-go`](https://github.com/google/cel-go) library for CEL evaluation.
+The implementation will use the [`github.com/google/cel-go`](https://github.com/google/cel-go) library for CEL evaluation. Because Kubernetes protobuf types expose `labels`/`annotations` as `map<string, string>`, expressions use map indexing and the `in`/`has()` operators rather than list macros (see [CEL Label and Annotation Access](#cel-label-and-annotation-access)).
 
 ### Plugin Activation
 
@@ -588,6 +653,7 @@ metadata:
   name: my-rules
   namespace: production
 spec:
+  priority: 0  # optional; defaults to 0 when unset
   plugins:
     celArchitecturePlacement:
       enabled: true
@@ -617,13 +683,22 @@ The `fallbackArchitectures` field is required for several important reasons:
 
 1. **Limits Rule Explosion and Configuration Burden** Without a default, administrators would need to create rules for every possible pod pattern, leading to complex and hard-to-maintain configurations. The plugin supports _exceptional_ cases in the same namespace.
 
-2. **Provides Fallback Behavior** When no rules match, the system needs a sensible default rather than failing or using arbitrary behavior
+2. **Provides Fallback Behavior** When no rules match, the system needs a sensible default rather than failing or using arbitrary behavior.
 
 3. **Simplifies Migration** During multi-architecture migrations, administrators can set a default (e.g., `[amd64]`) and gradually add rules for workloads ready to move to other architectures
 
 4. **Consistent Behavior** Whether a rule matches or not, the plugin always removes existing architecture constraints and sets new ones, ensuring predictable behavior
 
-Further, `fallbackArchitectures` follows the `ClusterPodPlacementConfig` field `fallbackArchitecture`. If no `fallbackArchitectures` are configured, the logic falls back to the `fallbackArchitecture` field in the `ClusterPodPlacementConfig` resource.
+#### Precedence: namespace `fallbackArchitectures` vs. cluster `fallbackArchitecture`
+
+The [`ClusterPodPlacementConfig`](../../api/v1beta1/clusterpodplacementconfig_types.go) exposes a cluster-scoped [`fallbackArchitecture`](https://github.com/outrigger-project/multiarch-tuning-operator/blob/main/api/v1beta1/clusterpodplacementconfig_types.go#L58) field. When both it and the namespace-scoped `celArchitecturePlacement.fallbackArchitectures` are set, **the namespace value takes precedence**. The resolution order is:
+
+1. If a matching rule fires, its `architectures` are used.
+2. Else, if the winning `PodPlacementConfig` sets `fallbackArchitectures`, that list is used.
+3. Else, the cluster `ClusterPodPlacementConfig.fallbackArchitecture` is used.
+4. Else, the default MTO image-based logic applies.
+
+In short: when both are configured, the namespace `fallbackArchitectures` wins; the cluster `fallbackArchitecture` is consulted only when the namespace value is absent.
 
 **Example** An administrator migrating a namespace from x86_64 to a mixed x86_64/ppc64le cluster might configure:
 
@@ -632,20 +707,22 @@ fallbackArchitectures:
   - amd64  # Safe default for existing workloads
 rules:
   - name: new-services-on-ppc64le
-    expression: self.metadata.labels.exists(l, l.key == 'migration-ready' && l.value == 'true')
+    expression: |
+      'migration-ready' in self.metadata.labels &&
+      self.metadata.labels['migration-ready'] == 'true'
     architectures:
       - ppc64le
 ```
 
 This allows a gradual, controlled migration where:
 - Pods marked with `migration-ready=true` have their existing architecture constraints removed and are set to run on ppc64le
-- All other pods have their existing architecture constraints removed and are set to run on amd64 (the default)
+- All other pods have their existing architecture constraints removed and are set to run on amd64 (the fallback)
 
 ### Implementation Details/Notes/Constraints
 
 #### CEL Expression Evaluation
 
-1. **CEL Environment Setup** The Pod Placement Controller creates a CEL environment with the Pod type registered
+1. **CEL Environment Setup** The Pod Placement Controller creates a CEL environment with the Pod type registered and the metadata-only field allow-list enforced (only `self.metadata.*` is accessible)
 2. **Expression Compilation** CEL expressions compile once during configuration loading and are cached
 3. **Expression Evaluation** For each pod, expressions are evaluated in the order defined in the rules list
 4. **First Match Wins** The first rule whose expression evaluates to `true` determines the target architecture
@@ -659,40 +736,40 @@ This allows a gradual, controlled migration where:
 flowchart TD
     Start([Pod Created]) --> GetConfigs[Retrieve All PodPlacementConfigs<br/>in Pod's Namespace]
     GetConfigs --> FilterLabel{Filter by<br/>labelSelector}
-    
+
     FilterLabel -->|No Match| UseGlobal[Use Global ClusterPodPlacementConfig<br/>& Default MTO Logic]
     FilterLabel -->|Match| CheckMultiple{Multiple<br/>Configs?}
-    
+
     CheckMultiple -->|Single Config| CheckEnabled{celArchitecturePlacement<br/>enabled?}
-    CheckMultiple -->|Multiple Configs| SortPriority[Sort by Priority Field<br/>Highest First]
-    
-    SortPriority --> SelectHighest[Select Highest Priority Config]
+    CheckMultiple -->|Multiple Configs| SortPriority[Sort by Priority Field<br/>Highest First + Tie-breakers]
+
+    SortPriority --> SelectHighest[Select Winning Config]
     SelectHighest --> CheckEnabled
-    
+
     CheckEnabled -->|No| UseGlobal
     CheckEnabled -->|Yes| EvalRules[Evaluate Rules in Order<br/>First to Last]
-    
+
     EvalRules --> RuleLoop{For Each Rule}
     RuleLoop --> EvalExpr[Evaluate CEL Expression]
-    
+
     EvalExpr --> ExprResult{Expression<br/>Returns true?}
     ExprResult -->|Yes| FirstMatch[First Match Wins!]
     ExprResult -->|No| MoreRules{More<br/>Rules?}
-    
+
     MoreRules -->|Yes| RuleLoop
     MoreRules -->|No| NoMatch[No Rules Matched]
-    
+
     FirstMatch --> RemoveConstraints[Remove Existing<br/>Architecture Constraints]
     NoMatch --> RemoveConstraints
-    
+
     RemoveConstraints --> ApplyNew{Which<br/>Architectures?}
     ApplyNew -->|Rule Matched| UseRuleArch[Apply Rule's<br/>Target Architectures]
     ApplyNew -->|No Match| UseFallback[Apply Fallback<br/>Architectures]
-    
+
     UseRuleArch --> Complete([Pod Updated & Gate Removed])
     UseFallback --> Complete
     UseGlobal --> Complete
-    
+
     style FirstMatch fill:#90EE90
     style NoMatch fill:#FFE4B5
     style RemoveConstraints fill:#FFB6C6
@@ -721,18 +798,20 @@ When the plugin applies architecture rules, it performs these operations in orde
 
 #### Integration with Existing MTO Components
 
+The stage ordering for a single reconcile pass is defined in [Reconcile Ordering (Single Pass)](#reconcile-ordering-single-pass). The components involved are:
+
 1. **Pod Placement Controller** is extended to:
    - Evaluate CEL expressions from `PodPlacementConfig` resources
    - Remove existing architecture constraints from pods
    - Apply new architecture rules based on CEL evaluation results
 
-2. **Mutating Webhook** Continue to add scheduling gates, and add annotations with the rulename and `PodPlacementConfig` responsible for the placement.
+2. **Mutating Webhook** Continue to add scheduling gates, and add annotations with the rule name and `PodPlacementConfig` responsible for the placement.
 
-3. **Image Inspection** The `celArchitecturePlacement` plugin takes precedence over image-based detection when enabled. Existing architecture constraints (including those set by image inspection) are removed.
+3. **Image Inspection** The `celArchitecturePlacement` plugin takes precedence over image-based detection when enabled. When the plugin selects an architecture set (Stage 1), image-based detection is skipped for that Pod; existing architecture constraints (including any previously set by image inspection) are removed.
 
 4. **NodeAffinityScoring Plugin** Can coexist with `celArchitecturePlacement` in the same `PodPlacementConfig`:
-   - `celArchitecturePlacement` determines which architectures are eligible (removes old constraints, sets new ones)
-   - `NodeAffinityScoring` determines preferences among the eligible architectures
+   - `celArchitecturePlacement` (Stage 1) determines which architectures are eligible (removes old constraints, sets the required set)
+   - `NodeAffinityScoring` (Stage 2) reads the final required set and determines preferences among the eligible architectures via `preferredDuringSchedulingIgnoredDuringExecution`; it never modifies the required set
 
 #### Webhook Validation Implementation
 
@@ -742,19 +821,25 @@ The validation ensures:
 1. **CEL compilation succeeds**: Each expression compiles without syntax errors
 2. **Type safety**: Expressions return boolean values
 3. **Schema correctness**: Field references are valid for Pod objects
-4. **Early failure**: Invalid configurations are rejected before being stored in etcd
+4. **Metadata-only scope**: Only `self.metadata.*` is referenced; spec/status references are rejected
+5. **Early failure**: Invalid configurations are rejected before being stored in etcd
 
 This prevents runtime evaluation errors caused by malformed CEL expressions, while runtime errors from unexpected pod states are still handled gracefully with the soft failure model.
 
 #### Priority and Conflict Resolution
 
-Only a single `PodPlacementConfig` resource in the same namespace is allowed.
+Multiple `PodPlacementConfig` resources may exist in the same namespace, and more than one may match a Pod through its `labelSelector`. A single winning config is selected deterministically:
 
-1. Configs are evaluated in order of their `priority` field (higher priority first)
-2. Within each configuration, rules are evaluated in the order they appear
-3. The first matching rule from the highest priority config determines the architecture
-4. If no rules match in any config, the `fallbackArchitectures` from the highest priority config with `celArchitecturePlacement` enabled is used
-5. In all cases, existing architecture constraints are removed before new ones are applied
+1. **Label selector filtering** Only configs whose `labelSelector` matches the Pod are considered.
+2. **Priority (primary)** Candidate configs are ordered by the `priority` field, highest first. `priority` defaults to `0` when unset.
+3. **Tie-breakers (deterministic)** If two or more configs share the same highest priority:
+   1. The oldest `metadata.creationTimestamp` wins.
+   2. If timestamps are equal, the lexicographically smallest `metadata.name` wins.
+4. **Rule evaluation** Only the winning config's rules are evaluated, in the order they appear; the first matching rule determines the architecture.
+5. **Fallback** If no rule in the winning config matches, that config's `fallbackArchitectures` is applied.
+6. In all cases, existing architecture constraints are removed before new ones are applied.
+
+The controller selects a single winning config and does not merge rules across configs, highest priority config and rule win. This keeps precedence unambiguous while still allowing several configs — with distinct priorities — to coexist in a namespace, which is the intended purpose of the `priority` field.
 
 #### Performance Considerations
 
@@ -772,8 +857,8 @@ Only a single `PodPlacementConfig` resource in the same namespace is allowed.
 | Complex CEL expressions cause evaluation errors | Pods may not be scheduled correctly | Validate expressions at admission time; provide clear error messages; treat evaluation errors as non-matches |
 | Misconfigured rules assign pods to incompatible architectures | Pods fail to start with ENOEXEC errors | Document best practices; recommend testing rules in non-production environments; existing ENOEXEC monitoring will detect issues |
 | Too many rules impact performance | Increased pod scheduling latency | Limit maximum rules per configuration (1000); compile and cache expressions; provide performance guidelines |
-| Conflicting rules between multiple PodPlacementConfigs | Unpredictable behavior | Clear precedence rules based on priority field; document evaluation order |
-| CEL expressions access sensitive pod data | Potential information disclosure | CEL expressions only have access to pod metadata (labels, annotations, name, namespace); no access to secrets or container specs |
+| Conflicting rules between multiple PodPlacementConfigs | Unpredictable behavior | Deterministic winner selection: `priority` (highest first), then oldest `creationTimestamp`, then smallest `name`; only the winning config's rules are evaluated; document evaluation order |
+| CEL expressions access sensitive pod data | Potential information disclosure | `self` is bound to a Pod, but admission validation enforces a metadata-only field allow-list: expressions may reference only `self.metadata` (name, namespace, labels, annotations). Any reference to `self.spec`/`self.status` (container images, env, volumes, secrets) is rejected at PodPlacementConfig create/update time |
 | Namespace administrators misconfigure operator pods | Operators fail to start | Provide clear documentation and examples for operator namespaces; recommend testing in non-production environments first |
 | Removing user-defined architecture constraints causes unexpected behavior | Pods scheduled on unintended architectures | Document that plugin removes existing constraints; provide clear examples; recommend testing before production use |
 | Plugin overrides critical architecture requirements | System instability | Document that plugin takes precedence; recommend careful rule design; suggest using label selectors to limit scope |
@@ -816,9 +901,10 @@ graph TB
 - Test CEL expression compilation and caching
 - Test expression evaluation with various pod configurations
 - Test rule matching logic and priority handling
-- Test default architecture fallback behavior
+- Test fallback architecture behavior
 - Test validation of architecture values
 - Test error handling for invalid CEL expressions
+- Test the metadata-only field allow-list (spec/status references rejected)
 - Test plugin registration in `localPluginChecks`
 - Test removal of existing architecture constraints from nodeSelector
 - Test removal of existing architecture constraints from nodeAffinity
@@ -854,13 +940,14 @@ graph TB
 - Test successful compilation of valid CEL expressions
 - Test compilation failure with invalid CEL syntax
 - Test compilation caching (verify expressions are compiled once)
-- Test compilation with various CEL operators (==, !=, &&, ||, exists, startsWith, etc.)
+- Test compilation with various CEL operators (==, !=, &&, ||, `in`, `has`, startsWith, etc.)
+- Test rejection of expressions referencing `self.spec`/`self.status` (metadata-only allow-list)
 
 #### Expression Evaluation:
 
 - Test evaluation with pod name matching (`self.metadata.name == 'nginx-example'`)
 - Test evaluation with pod name prefix (`self.metadata.name.startsWith('redis-')`)
-- Test evaluation with single label match
+- Test evaluation with single label match (map access, `'k' in self.metadata.labels`)
 - Test evaluation with multiple label matches (AND logic)
 - Test evaluation with multiple label matches (OR logic)
 - Test evaluation with well-known Kubernetes labels (app.kubernetes.io/*)
@@ -868,7 +955,7 @@ graph TB
 - Test evaluation returning true
 - Test evaluation returning false
 - Test evaluation error handling (expression fails, should treat as false)
-- Test evaluation with missing labels (should handle gracefully)
+- Test evaluation with missing labels (should handle gracefully via `in`/`has`)
 - Test evaluation with nil/empty pod metadata
 
 ### 3. **Architecture Constraint Removal Logic**
@@ -904,6 +991,8 @@ graph TB
 - Test fallback when all rules evaluate to false
 - Test fallback when CEL evaluation errors occur
 - Test that fallback also removes existing constraints before applying
+- Test precedence: namespace `fallbackArchitectures` overrides cluster `fallbackArchitecture`
+- Test that cluster `fallbackArchitecture` is used only when namespace value is absent
 
 ### 5. **Plugin Registration**
 
@@ -941,6 +1030,7 @@ graph TB
 #### CEL Validation Tests:
 - Test webhook rejects PodPlacementConfig with syntactically invalid CEL expressions
 - Test webhook rejects PodPlacementConfig with CEL expressions that reference non-existent Pod fields
+- Test webhook rejects PodPlacementConfig with CEL expressions that reference `self.spec`/`self.status` (metadata-only allow-list)
 - Test webhook rejects PodPlacementConfig with CEL expressions that return non-boolean types
 - Test webhook accepts PodPlacementConfig with valid CEL expressions
 - Test runtime CEL evaluation errors are logged and treated as false (pod admission succeeds)
@@ -957,8 +1047,10 @@ graph TB
 #### Multiple PodPlacementConfigs:
 - Test priority-based selection (highest priority first)
 - Test evaluation with multiple configs having different priorities
-- Test that only one config's rules are evaluated (highest priority)
-- Test fallback from highest priority config when no rules match
+- Test tie-breaker by oldest creationTimestamp when priorities are equal
+- Test tie-breaker by lexicographically smallest name when priority and timestamp are equal
+- Test that only one config's rules are evaluated (winning config)
+- Test fallback from winning config when no rules match
 
 #### Label Selector Filtering:
 - Test only configs matching pod's labels are considered
@@ -975,6 +1067,12 @@ graph TB
 - Test pod matching a rule (verify new constraints applied)
 - Test pod not matching any rule (verify fallback applied)
 - Test scheduling gate is removed after processing
+
+#### Reconcile Ordering:
+- Test image-based detection is skipped when celArchitecturePlacement selects an arch set
+- Test image-based detection runs when celArchitecturePlacement is disabled/absent
+- Test NodeAffinityScoring observes the final required set from Stage 1 (not an intermediate state)
+- Test NodeAffinityScoring only writes preferred (never required) affinity
 
 #### Namespace Scoping:
 - Test plugin works in user namespaces
@@ -1031,6 +1129,7 @@ Test with actual pod objects matching the documented patterns:
 **Validation-time (webhook):**
 - Test with syntactically invalid CEL expression → webhook rejects with compilation error
 - Test with CEL expression referencing invalid Pod field → webhook rejects with schema error
+- Test with CEL expression referencing `self.spec`/`self.status` → webhook rejects (metadata-only allow-list)
 - Test with CEL expression returning non-boolean → webhook rejects with type error
 
 **Runtime evaluation:**
@@ -1081,7 +1180,7 @@ Test with actual pod objects matching the documented patterns:
 - Test pods matching various CEL expressions
 - Test pods with well-known Kubernetes labels
 - Test pods in different namespaces
-- Test pods with no matching rules (default architecture)
+- Test pods with no matching rules (fallback architecture)
 - Test pods with multiple matching rules (first match wins)
 - Test operator namespace handling (openshift-operators)
 - Test multiple `PodPlacementConfig` resources with overlapping label selectors
@@ -1145,6 +1244,7 @@ The plugin is implemented in the Pod Placement Controller and does not depend on
 - 2026-03-31: Initial proposal
 - 2026-04-15: Refined the language, add fallback architecture, refine the traceability of the rule's application
 - 2026-05-19: Elaborated on PodPlacementConfig ordering and processing
+- 2026-07-02: Addressed review feedback — corrected CEL label/annotation access to the map idiom (`in`/`has()` + map indexing); exported the Go plugin type and fields (`CELArchitecturePlacement`, `FallbackArchitectures`); clarified multi-config selection via `priority` with deterministic tie-breakers; documented namespace-vs-cluster fallback precedence; added an explicit single-pass reconcile ordering for CEL, image-based detection, and NodeAffinityScoring; and restricted CEL to a metadata-only field allow-list.
 
 ## Alternatives
 
@@ -1169,7 +1269,6 @@ metadata:
 
 **Pros** Simpler to understand and implement
 **Cons** Requires modifying pod specs; less flexible; doesn't support complex matching logic. Limits third-party changes to applications.
-
 
 ### Alternative 3: Extend NodeAffinityScoring with Conditions
 
