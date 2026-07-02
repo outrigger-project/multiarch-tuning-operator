@@ -106,7 +106,12 @@ func (i *registryInspector) GetCompatibleArchitecturesSet(ctx context.Context, i
 		SystemRegistriesConfPath:    RegistriesConfPath(),
 		SystemRegistriesConfDirPath: RegistriesConfDir(),
 		SignaturePolicyPath:         PolicyConfPath(),
-		DockerPerHostCertDirPath:    DockerCertsDir(),
+	}
+	// Only override DockerPerHostCertDirPath when explicitly configured via env var.
+	// When unset, the containers/image library fallback checks both
+	// /etc/containers/certs.d and /etc/docker/certs.d per-host.
+	if dockerCerts := DockerCertsDir(); dockerCerts != "" {
+		sys.DockerPerHostCertDirPath = dockerCerts
 	}
 
 	// Check if the image is a manifest list

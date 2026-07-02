@@ -7,6 +7,15 @@ rules:
 - apiGroups:
   - ""
   resources:
+  - configmaps
+  - secrets
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - ""
+  resources:
   - events
   verbs:
   - create
@@ -15,6 +24,7 @@ rules:
   - ""
   resources:
   - namespaces
+  - pods/status
   verbs:
   - get
   - update
@@ -32,16 +42,9 @@ rules:
   verbs:
   - get
   - list
+  - patch
   - update
   - watch
-- apiGroups:
-  - ""
-  resources:
-  - pods/status
-  - serviceaccounts/status
-  - services/status
-  verbs:
-  - get
 - apiGroups:
   - ""
   resources:
@@ -61,6 +64,13 @@ rules:
   - serviceaccounts/finalizers
   verbs:
   - update
+- apiGroups:
+  - ""
+  resources:
+  - serviceaccounts/status
+  - services/status
+  verbs:
+  - get
 - apiGroups:
   - admissionregistration.k8s.io
   resources:
@@ -214,3 +224,9 @@ rules:
   - get
   - patch
   - update
+- apiGroups:
+  - security.openshift.io
+  resources:
+  - securitycontextconstraints
+  verbs:
+  - use

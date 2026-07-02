@@ -22,7 +22,8 @@ import (
 )
 
 var (
-	dockerCertsDir,
+	dockerCertsDir     string
+	dockerCertsDirOnce sync.Once
 	registriesCertsDir,
 	registriesConfPath,
 	registriesConfDir,
@@ -31,18 +32,9 @@ var (
 )
 
 func DockerCertsDir() string {
-	rwMutex.RLock()
-	if dockerCertsDir != "" {
-		defer rwMutex.RUnlock()
-		return dockerCertsDir
-	}
-	rwMutex.RUnlock()
-	rwMutex.Lock()
-	defer rwMutex.Unlock()
-	if dockerCertsDir == "" {
-		// avoid race condition in-between rwMutex.RUnlock and rwMutex.Lock
-		dockerCertsDir = lookupEnvOr("DOCKER_CERTS_DIR", "/etc/docker/certs.d")
-	}
+	dockerCertsDirOnce.Do(func() {
+		dockerCertsDir = lookupEnvOr("DOCKER_CERTS_DIR", "")
+	})
 	return dockerCertsDir
 }
 

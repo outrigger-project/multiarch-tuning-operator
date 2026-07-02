@@ -116,8 +116,8 @@ func buildControllerDeployment(clusterPodPlacementConfig *v1beta1.ClusterPodPlac
 			Name: "docker-conf",
 			VolumeSource: corev1.VolumeSource{
 				HostPath: &corev1.HostPathVolumeSource{
-					Path: "/etc/docker/",
-					Type: utils.NewPtr(corev1.HostPathDirectory),
+					Path: "/etc/docker/certs.d/",
+					Type: utils.NewPtr(corev1.HostPathDirectoryOrCreate),
 				},
 			},
 		},
@@ -148,7 +148,7 @@ func buildControllerDeployment(clusterPodPlacementConfig *v1beta1.ClusterPodPlac
 		},
 		{
 			Name:      "docker-conf",
-			MountPath: "/etc/docker/",
+			MountPath: "/etc/docker/certs.d/",
 			ReadOnly:  true,
 		},
 		{
