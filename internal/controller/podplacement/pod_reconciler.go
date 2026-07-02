@@ -26,12 +26,15 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	ctrl2 "sigs.k8s.io/controller-runtime/pkg/controller"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	ctrllog "sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/openshift/multiarch-tuning-operator/api/common"
 	multiarchv1beta1 "github.com/openshift/multiarch-tuning-operator/api/v1beta1"
@@ -266,8 +269,53 @@ func (r *PodReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		" concurrent reconciles", "maxConcurrentReconciles", maxConcurrentReconciles)
 
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&corev1.Pod{}).WithOptions(ctrl2.Options{
-		MaxConcurrentReconciles: maxConcurrentReconciles,
-	}).
+		For(&corev1.Pod{}).
+		// Watch PodPlacementConfig to re-queue gated pods when a PPC is created, updated, or deleted.
+		// Without this, there is a race between a PPC appearing in the API server and the informer
+		// cache syncing it. If a pod is reconciled before the cache has the PPC, the pod is processed
+		// without the PPC's preferred affinity and the scheduling gate is removed — permanently missing
+		// the PPC configuration. By watching PPCs, we re-queue any still-gated pods in the namespace
+		// so they are reprocessed with the PPC now in the cache.
+		//
+		// Limitation: this only helps pods that are still gated (gate=gated) when the PPC watch event
+		// arrives. If a pod's image inspection completes instantly (e.g., cache hit) and the gate is
+		// removed before the PPC watch fires, the pod won't be re-queued. In practice this is rare
+		// because image inspection involves network I/O (hundreds of ms) while informer watches
+		// deliver events in ~10ms. Fully closing this gap would require re-processing ungated pods,
+		// which conflicts with the one-shot scheduling gate design.
+		Watches(
+			&multiarchv1beta1.PodPlacementConfig{},
+			handler.EnqueueRequestsFromMapFunc(r.mapPPCToPods),
+		).
+		WithOptions(ctrl2.Options{
+			MaxConcurrentReconciles: maxConcurrentReconciles,
+		}).
 		Complete(r)
+}
+
+// mapPPCToPods returns reconcile requests for all gated pods in the PPC's namespace.
+func (r *PodReconciler) mapPPCToPods(ctx context.Context, obj client.Object) []reconcile.Request {
+	log := ctrllog.FromContext(ctx)
+	podList := &corev1.PodList{}
+	if err := r.List(ctx, podList,
+		client.InNamespace(obj.GetNamespace()),
+		client.MatchingLabels{utils.SchedulingGateLabel: utils.SchedulingGateLabelValueGated},
+	); err != nil {
+		log.Error(err, "Failed to list gated pods for PodPlacementConfig change", "namespace", obj.GetNamespace())
+		return nil
+	}
+	requests := make([]reconcile.Request, 0, len(podList.Items))
+	for i := range podList.Items {
+		requests = append(requests, reconcile.Request{
+			NamespacedName: types.NamespacedName{
+				Name:      podList.Items[i].Name,
+				Namespace: podList.Items[i].Namespace,
+			},
+		})
+	}
+	if len(requests) > 0 {
+		log.V(1).Info("Re-queuing gated pods due to PodPlacementConfig change",
+			"ppc", obj.GetName(), "namespace", obj.GetNamespace(), "podCount", len(requests))
+	}
+	return requests
 }

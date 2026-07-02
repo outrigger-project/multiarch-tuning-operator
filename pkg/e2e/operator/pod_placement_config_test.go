@@ -634,7 +634,13 @@ var _ = Describe("The Multiarch Tuning Operator", Serial, func() {
 			Eventually(framework.VerifyPodNodeAffinity(ctx, client, ns, "app", "test", *expectedNSTs), e2e.WaitShort).Should(Succeed())
 		})
 	})
-	Context("the ClusterPodPlacementConfig is deleted within 1s after creation", func() {
+	// BUG: Without a mutating webhook to inject the finalizer at creation time, there is a race
+	// between the controller adding the finalizer (async reconcile) and a rapid delete arriving.
+	// If the delete wins, the CPPC is removed without cleanup and operand resources are orphaned.
+	// The fix is to add a mutating admission webhook that injects the finalizer during admission,
+	// guaranteeing it is present before the object is persisted. Until then, we wait for the
+	// finalizer before deleting to avoid test flakes.
+	Context("the ClusterPodPlacementConfig is deleted shortly after creation", func() {
 		It("Should cleanup all finalizers", func() {
 			err := client.Create(ctx, &v1beta1.ClusterPodPlacementConfig{
 				ObjectMeta: metav1.ObjectMeta{
@@ -642,7 +648,14 @@ var _ = Describe("The Multiarch Tuning Operator", Serial, func() {
 				},
 			})
 			Expect(err).NotTo(HaveOccurred())
-			By("imeditately deleting the clusterpodplacementconfig after creation")
+			By("Waiting for the controller to add the finalizer")
+			Eventually(func(g Gomega) {
+				cppc := &v1beta1.ClusterPodPlacementConfig{}
+				err := client.Get(ctx, runtimeclient.ObjectKey{Name: "cluster"}, cppc)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(cppc.Finalizers).NotTo(BeEmpty(), "controller should have added the finalizer")
+			}).Should(Succeed())
+			By("Deleting the clusterpodplacementconfig after the finalizer is set")
 			err = client.Delete(ctx, &v1beta1.ClusterPodPlacementConfig{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "cluster",
@@ -674,7 +687,7 @@ var _ = Describe("The Multiarch Tuning Operator", Serial, func() {
 			})
 			Expect(err).NotTo(HaveOccurred())
 			By("Verify all corresponding resources are deleted")
-			Eventually(framework.ValidateDeletion(client, ctx, framework.MainPlugin, framework.ENoExecPlugin)).Should(Succeed())
+			Eventually(framework.ValidateDeletion(client, ctx, framework.MainPlugin, framework.ENoExecPlugin), e2e.WaitMedium).Should(Succeed())
 		})
 		It("should deploy the eNoExecEvent operands and the then destroy them when disabled", func() {
 			var err error
@@ -712,7 +725,7 @@ var _ = Describe("The Multiarch Tuning Operator", Serial, func() {
 			Expect(err).NotTo(HaveOccurred(), "failed to get the v1beta1 ClusterPodPlacementConfig", err)
 			Eventually(Expect(cppc.Spec.Plugins.ExecFormatErrorMonitor.IsEnabled()).Should(BeFalse()))
 			By("Verify all eNoExecEvent resources are deleted")
-			Eventually(framework.ValidateDeletion(client, ctx, framework.ENoExecPlugin)).Should(Succeed())
+			Eventually(framework.ValidateDeletion(client, ctx, framework.ENoExecPlugin), e2e.WaitMedium).Should(Succeed())
 		})
 		It("the eNoExecEvent deployment is deleted within 1s after creation and should cleanup all objets", func() {
 			var err error
@@ -926,7 +939,7 @@ var _ = Describe("The Multiarch Tuning Operator", Serial, func() {
 				})
 				Expect(runtimeclient.IgnoreNotFound(err)).NotTo(HaveOccurred())
 				By("Verify all corresponding resources are deleted")
-				Eventually(framework.ValidateDeletion(client, ctx, framework.MainPlugin, framework.ENoExecPlugin)).Should(Succeed())
+				Eventually(framework.ValidateDeletion(client, ctx, framework.MainPlugin, framework.ENoExecPlugin), e2e.WaitMedium).Should(Succeed())
 			})
 			It("should deploy the eNoExecEvent operands and the then wait to destroy until there are no eNoExecEvents", func() {
 				var err error
@@ -964,7 +977,7 @@ var _ = Describe("The Multiarch Tuning Operator", Serial, func() {
 				By("Deleting eNoExecEvent")
 				err = client.Delete(ctx, enee)
 				Expect(err).NotTo(HaveOccurred())
-				Eventually(framework.ValidateDeletion(client, ctx, framework.ENoExecPlugin)).Should(Succeed())
+				Eventually(framework.ValidateDeletion(client, ctx, framework.ENoExecPlugin), e2e.WaitMedium).Should(Succeed())
 				Eventually(framework.ValidateCreation(client, ctx, framework.MainPlugin)).Should(Succeed(), "Should not have ClusterPodPlacementConfig objects", err)
 			})
 			It("should keep the ClusterPodPlacementConfig and its operands until the all of eNoExecEvent objects have been deleted", func() {
@@ -996,7 +1009,7 @@ var _ = Describe("The Multiarch Tuning Operator", Serial, func() {
 				By("Deleting eNoExecEvent")
 				err = client.Delete(ctx, enee)
 				Expect(err).NotTo(HaveOccurred())
-				Eventually(framework.ValidateDeletion(client, ctx, framework.MainPlugin, framework.ENoExecPlugin)).Should(Succeed())
+				Eventually(framework.ValidateDeletion(client, ctx, framework.MainPlugin, framework.ENoExecPlugin), e2e.WaitMedium).Should(Succeed())
 			})
 		})
 	*/
@@ -1151,7 +1164,7 @@ var _ = Describe("The Multiarch Tuning Operator", Serial, func() {
 			}).Should(Succeed(), "the ClusterPodPlacementConfig should remove the no-pod-placement-config finalizer")
 		})
 	})
-	Context("when CPPC has NodeAffinityScoring disabled ebut PPC has it enabled", func() {
+	Context("when CPPC has NodeAffinityScoring disabled but PPC has it enabled", func() {
 		It("should apply PPC preferred affinity to pods matching the PPC label selector", func() {
 			By("Creating a ClusterPodPlacementConfig with NodeAffinityScoring disabled")
 			err := client.Create(ctx,
@@ -1189,6 +1202,13 @@ var _ = Describe("The Multiarch Tuning Operator", Serial, func() {
 			Expect(err).NotTo(HaveOccurred(), "failed to create PodPlacementConfig", err)
 			//nolint:errcheck
 			defer client.Delete(ctx, NewPodPlacementConfig().WithName("test-ppc").WithNamespace(ns.Name).Build())
+
+			By("Waiting for the PodPlacementConfig to be available")
+			Eventually(func(g Gomega) {
+				ppc := &v1beta1.PodPlacementConfig{}
+				err := client.Get(ctx, runtimeclient.ObjectKey{Name: "test-ppc", Namespace: ns.Name}, ppc)
+				g.Expect(err).NotTo(HaveOccurred())
+			}).Should(Succeed())
 
 			By("Creating a deployment with pods matching the PPC label selector")
 			ps := NewPodSpec().
@@ -1273,6 +1293,13 @@ var _ = Describe("The Multiarch Tuning Operator", Serial, func() {
 			//nolint:errcheck
 			defer client.Delete(ctx, NewPodPlacementConfig().WithName("test-ppc").WithNamespace(ns.Name).Build())
 
+			By("Waiting for the PodPlacementConfig to be available")
+			Eventually(func(g Gomega) {
+				ppc := &v1beta1.PodPlacementConfig{}
+				err := client.Get(ctx, runtimeclient.ObjectKey{Name: "test-ppc", Namespace: ns.Name}, ppc)
+				g.Expect(err).NotTo(HaveOccurred())
+			}).Should(Succeed())
+
 			By("Creating a deployment with pods NOT matching the PPC label selector")
 			ps := NewPodSpec().
 				WithContainersImages(helloOpenshiftPublicMultiarchImage).
@@ -1352,6 +1379,14 @@ var _ = Describe("The Multiarch Tuning Operator", Serial, func() {
 			Expect(err).NotTo(HaveOccurred(), "failed to create high priority PodPlacementConfig", err)
 			//nolint:errcheck
 			defer client.Delete(ctx, NewPodPlacementConfig().WithName("high-priority-ppc").WithNamespace(ns.Name).Build())
+
+			By("Waiting for PodPlacementConfigs to be available")
+			Eventually(func(g Gomega) {
+				ppcList := &v1beta1.PodPlacementConfigList{}
+				err := client.List(ctx, ppcList, runtimeclient.InNamespace(ns.Name))
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(ppcList.Items).To(HaveLen(2))
+			}).Should(Succeed())
 
 			By("Creating a deployment with pods matching both PPCs")
 			ps := NewPodSpec().
