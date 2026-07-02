@@ -671,5 +671,3 @@ func TestMixedArchitectureAndNonArchitectureExpressions(t *testing.T) {
 		t.Errorf("Expected 3 non-architecture expressions, found %d", nonArchCount)
 	}
 }
-
-// Made with Bob

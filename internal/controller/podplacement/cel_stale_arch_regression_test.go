@@ -227,5 +227,3 @@ func TestApplyArchitectureConstraintsReplacesBroadFallbackWithMatchedRule(t *tes
 		t.Fatal("expected existing os constraint to be preserved in merged required term")
 	}
 }
-
-// Made with Bob

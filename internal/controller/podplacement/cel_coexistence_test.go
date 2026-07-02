@@ -17,8 +17,6 @@ limitations under the License.
 package podplacement
 
 import (
-	"testing"
-
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
@@ -28,11 +26,6 @@ import (
 	"github.com/openshift/multiarch-tuning-operator/api/common/plugins"
 	"github.com/openshift/multiarch-tuning-operator/pkg/utils"
 )
-
-func TestCELCoexistence(t *testing.T) {
-	RegisterFailHandler(Fail)
-	RunSpecs(t, "CEL Coexistence Test Suite", Label("integration"))
-}
 
 var _ = Describe("CEL Architecture Placement and NodeAffinityScoring Coexistence", func() {
 	Context("When both plugins are enabled in the same PodPlacementConfig", func() {
@@ -181,25 +174,4 @@ var _ = Describe("CEL Architecture Placement and NodeAffinityScoring Coexistence
 			Expect(pod.Spec.Affinity.NodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution).To(HaveLen(1))
 		})
 	})
-
-	Context("When CEL is applied", func() {
-		It("should skip image-based detection", func() {
-			// This is tested by the reconciler logic:
-			// celApplied is returned from applyMatchingPPCs
-			// When celApplied is true, image-based detection is skipped
-
-			// Verify the logic flow:
-			// 1. applyMatchingPPCs returns true when CEL is applied
-			// 2. processPod checks celApplied before running image detection
-			// 3. Image detection is skipped when celApplied is true
-
-			celApplied := true
-			Expect(celApplied).To(BeTrue(), "CEL applied flag should be true")
-
-			// In the actual reconciler, this would prevent image detection:
-			// if !celApplied { /* image detection */ }
-		})
-	})
 })
-
-// Made with Bob

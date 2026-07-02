@@ -309,5 +309,3 @@ func TestApplyArchitectureConstraintsPreservesTermStructure(t *testing.T) {
 		t.Error("OS constraint should be preserved")
 	}
 }
-
-// Made with Bob

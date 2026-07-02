@@ -23,7 +23,6 @@ import (
 	"sort"
 	"time"
 
-	"github.com/google/uuid"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -74,48 +73,37 @@ func (r *PodReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 	now := time.Now()
 	defer utils.HistogramObserve(now, metrics.TimeToProcessPod)
 
-	// Generate TraceID for this reconcile
-	traceID := uuid.NewString()
-
-	log := ctrllog.FromContext(ctx).WithValues("traceID", traceID)
+	log := ctrllog.FromContext(ctx)
 
 	pod := newPod(&corev1.Pod{}, ctx, r.Recorder)
 
 	if err := r.Get(ctx, req.NamespacedName, pod.PodObject()); err != nil {
-		log.Info("[RECONCILE] RETURN - unable to fetch pod", "traceID", traceID, "error", err)
+		log.V(2).Info("Unable to fetch pod", "error", err)
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
 	log.V(1).Info("Reconciling pod",
-		"traceID", traceID,
 		"pod", pod.Name,
 		"namespace", pod.Namespace,
 		"hasSchedulingGate", pod.HasSchedulingGate())
 
 	// Pods without the scheduling gate should be ignored.
 	if !pod.HasSchedulingGate() {
-		log.Info("[RECONCILE] RETURN - no scheduling gate",
-			"traceID", traceID,
-			"pod", pod.Name,
-			"namespace", pod.Namespace)
+		log.V(2).Info("Pod does not have the scheduling gate. Ignoring...")
 		return ctrl.Result{}, nil
 	}
 	metrics.ProcessedPodsCtrl.Inc()
 	defer utils.HistogramObserve(now, metrics.TimeToProcessGatedPod)
 
-	log.Info("[PROCESS] START", "traceID", traceID, "pod", pod.Name, "namespace", pod.Namespace)
-	r.processPod(ctx, pod, traceID)
-	log.Info("[PROCESS] END", "traceID", traceID, "pod", pod.Name, "namespace", pod.Namespace)
+	r.processPod(ctx, pod)
 
 	log.V(1).Info("Updating pod",
-		"traceID", traceID,
 		"pod", pod.Name,
 		"namespace", pod.Namespace)
 
 	err := r.Update(ctx, pod.PodObject())
 	if err != nil {
-		log.Error(err, "Failed to update pod",
-			"traceID", traceID,
+		log.Error(err, "Unable to update the pod",
 			"pod", pod.Name,
 			"namespace", pod.Namespace)
 		pod.PublishEvent(corev1.EventTypeWarning, ArchitectureAwareSchedulingGateRemovalFailure, SchedulingGateRemovalFailureMsg)
@@ -123,7 +111,6 @@ func (r *PodReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 	}
 
 	log.V(1).Info("Pod updated successfully",
-		"traceID", traceID,
 		"pod", pod.Name,
 		"namespace", pod.Namespace)
 	if !pod.HasSchedulingGate() {
@@ -134,35 +121,17 @@ func (r *PodReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 	return ctrl.Result{}, nil
 }
 
-func (r *PodReconciler) processPod(ctx context.Context, pod *Pod, traceID string) {
-	log := ctrllog.FromContext(ctx).WithValues("traceID", traceID)
-	log.Info("[PROCESS] ENTER",
-		"traceID", traceID,
-		"pod", pod.Name,
-		"namespace", pod.Namespace)
-	defer log.Info("[PROCESS] EXIT", "traceID", traceID, "pod", pod.Name, "namespace", pod.Namespace)
+func (r *PodReconciler) processPod(ctx context.Context, pod *Pod) {
+	log := ctrllog.FromContext(ctx)
+	log.V(1).Info("Processing pod")
 
 	cppc := clusterpodplacementconfig.GetClusterPodPlacementConfig()
-	cppcCount := 0
-	if cppc != nil {
-		cppcCount = 1
-		log.Info("[PROCESS] CPPC found",
-			"traceID", traceID,
-			"cppcName", cppc.Name,
-			"pod", pod.Name)
-	} else {
-		log.Info("[PROCESS] No CPPC found",
-			"traceID", traceID,
-			"pod", pod.Name)
-	}
 
 	// List existing PodPlacementConfigs in the same namespace
 	ppcList := &multiarchv1beta1.PodPlacementConfigList{}
 	if err := r.List(ctx, ppcList, client.InNamespace(pod.Namespace)); err != nil {
-		log.Error(err, "[PROCESS] RETURN - failed to list PPCs",
-			"traceID", traceID,
-			"namespace", pod.Namespace,
-			"pod", pod.Name)
+		log.Error(err, "failed to list existing PodPlacementConfigs in namespace",
+			"namespace", pod.Namespace)
 		pod.handleError(err, "failed to list existing PodPlacementConfigs in namespace")
 		return
 	}
@@ -178,12 +147,6 @@ func (r *PodReconciler) processPod(ctx context.Context, pod *Pod, traceID string
 
 	// Filter to only PPCs that match this pod's labels - do this once for efficiency
 	matchingPPCs := pod.filterMatchingPPCs(ppcList)
-	log.Info("[PROCESS] PPC matching complete",
-		"traceID", traceID,
-		"pod", pod.Name,
-		"totalPPCs", len(ppcList.Items),
-		"matchingPPCs", len(matchingPPCs),
-		"cppcCount", cppcCount)
 
 	if pod.shouldIgnorePod(cppc, matchingPPCs) {
 		log.V(3).Info("A pod with the scheduling gate should be ignored. Ignoring...")
@@ -202,55 +165,44 @@ func (r *PodReconciler) processPod(ctx context.Context, pod *Pod, traceID string
 	// or if the reconcile loop has already applied the PPCs/CPPC (e.g., due to a retry or re-reconciliation)
 	celApplied := false
 	if !pod.isPreferredAffinityConfiguredForArchitecture() {
-		log.Info("processPod: Applying matching PPCs", "pod", pod.Name, "ppcCount", len(matchingPPCs))
 		celApplied = r.applyMatchingPPCs(ctx, matchingPPCs, pod)
-		log.Info("processPod: CEL applied status", "celApplied", celApplied, "pod", pod.Name)
 
 		if cppc != nil && cppc.PluginsEnabled(common.NodeAffinityScoringPluginName) {
-			log.Info("processPod: Applying CPPC NodeAffinityScoring", "pod", pod.Name)
 			pod.SetPreferredArchNodeAffinity(cppc.Spec.Plugins.NodeAffinityScoring, multiarchv1beta1.ClusterPodPlacementConfigKind)
 		}
 	} else {
-		log.Info("processPod: Pod already has architecture-related preferred affinity - skipping PPC/CPPC processing", "pod", pod.Name)
+		log.V(2).Info("Pod already has architecture-related preferred affinity. This could be user-defined or from a previous reconcile loop. Skipping PPC/CPPC preferred affinity processing.")
 		// Track that configs were skipped due to user-defined preferences
 		r.trackSkippedMatchingConfigs(ctx, pod, cppc, matchingPPCs)
 	}
 
-	// "celArchitecturePlacement takes precedence over image-based detection"
-	// When CEL plugin successfully applies, return immediately without executing:
-	// - image-based architecture detection
-	// - fallback architecture logic
-	// - default architecture append logic
-	// This ensures ONLY the matched rule architectures are applied as per enhancement doc:
-	// "existing architecture constraints are removed and replaced"
+	// celArchitecturePlacement takes precedence over image-based detection.
+	// When the CEL plugin applies, return immediately without running image-based
+	// architecture detection, fallback logic, or the default architecture append.
 	if celApplied {
-		log.Info("processPod: CEL architecture placement applied - skipping image-based detection", "pod", pod.Name)
 		// If no preferred node affinity was set by any config, log and publish an event
 		if pod.Labels[utils.PreferredNodeAffinityLabel] == utils.LabelValueNotSet {
 			pod.PublishEvent(corev1.EventTypeNormal, ArchitectureAwareNodeAffinitySet,
 				ArchitecturePreferredPredicateSkippedMsg)
-			log.Info("processPod: No preferred node affinity was set", "pod", pod.Name)
+			log.V(2).Info("No preferred node affinity was set")
 		}
-		log.Info("processPod: Removing scheduling gate after CEL application", "pod", pod.Name)
+		log.V(1).Info("Removing the scheduling gate from pod.")
 		pod.RemoveSchedulingGate()
 		return
 	}
 
 	// Image-based architecture detection (only executed when CEL plugin was NOT applied)
-	log.Info("processPod: Starting image-based architecture detection", "pod", pod.Name)
 	var err error
 	// Prepare the requirement for the node affinity.
 	psdl, err := r.pullSecretDataList(ctx, pod)
 	pod.handleError(err, "Unable to retrieve the image pull secret data for the pod.")
 	// If no error occurred when retrieving the image pull secret data, set the node affinity.
 	if err == nil {
-		log.Info("processPod: Setting node affinity from image inspection", "pod", pod.Name)
 		_, err = pod.SetNodeAffinityArchRequirement(psdl)
 		pod.handleError(err, "Unable to set the node affinity for the pod.")
 	}
 
 	if pod.maxRetries() && err != nil {
-		log.Info("processPod: Max retries reached", "pod", pod.Name, "error", err)
 		// the number of retries is incremented in the handleError function when the error is not nil.
 		// If we enter this branch, the retries counter has been incremented and reached the max retries.
 		// The counter starts at 1 when the first error occurs. Therefore, when the reconciler tries maxRetries times,
@@ -260,26 +212,20 @@ func (r *PodReconciler) processPod(ctx context.Context, pod *Pod, traceID string
 		pod.PublishEvent(corev1.EventTypeWarning, ImageArchitectureInspectionError, fmt.Sprintf("%s: %s", ImageInspectionErrorMaxRetriesMsg, err.Error()))
 
 		if cppc != nil && cppc.Spec.FallbackArchitecture != "" {
-			log.Info("processPod: Setting fallback architecture", "fallbackArchitecture", cppc.Spec.FallbackArchitecture, "pod", pod.Name)
+			log.Info("Setting the nodeAffinity to the fallback architecture", "fallbackArchitecture", cppc.Spec.FallbackArchitecture)
 			pod.setRequiredNodeAffinityToFallbackArchitecture(cppc.Spec.FallbackArchitecture)
-		} else {
-			log.Info("processPod: No fallback architecture configured", "pod", pod.Name)
 		}
 	}
 	// If the pod has been processed successfully or the max retries have been reached, remove the scheduling gate.
 	if err == nil || pod.maxRetries() {
-		log.Info("processPod: Processing complete", "pod", pod.Name, "success", err == nil)
 		// If no preferred node affinity was set by any config, log and publish an event
 		if pod.Labels[utils.PreferredNodeAffinityLabel] == utils.LabelValueNotSet {
 			pod.PublishEvent(corev1.EventTypeNormal, ArchitectureAwareNodeAffinitySet,
 				ArchitecturePreferredPredicateSkippedMsg)
 			log.V(2).Info("No preferred node affinity was set")
 		}
-
-		log.Info("processPod: Removing scheduling gate", "pod", pod.Name)
+		log.V(1).Info("Removing the scheduling gate from pod.")
 		pod.RemoveSchedulingGate()
-	} else {
-		log.Info("processPod: Not removing scheduling gate - will retry", "pod", pod.Name, "error", err)
 	}
 }
 

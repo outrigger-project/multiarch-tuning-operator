@@ -95,11 +95,9 @@ var _ = Describe("CEL Architecture Placement Controller Integration", func() {
 				FallbackArchitectures: []string{utils.ArchitectureAmd64},
 				Rules: []plugins.ArchitectureRule{
 					{
-						Name:       "match-database",
-						Expression: `self.metadata.labels.exists(l, l.key == "component" && l.value == "database")`,
-						Architectures: []string{
-							utils.ArchitecturePpc64le,
-						},
+						Name:          "match-database",
+						Expression:    `has(self.metadata.labels.component) && self.metadata.labels.component == "database"`,
+						Architectures: []string{utils.ArchitecturePpc64le},
 					},
 				},
 			}
@@ -211,32 +209,26 @@ var _ = Describe("CEL Architecture Placement Controller Integration", func() {
 					Name: utils.SchedulingGateName,
 				}))
 
+				// applyArchitectureConstraints updates in-place: arch is replaced within the
+				// original single term, so zone and the new arch coexist in the same term.
 				terms := pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms
-				g.Expect(terms).To(HaveLen(2)) // Original term with zone + new arch term
+				g.Expect(terms).To(HaveLen(1))
 
-				// Find the term with zone constraint (should be preserved)
-				var foundZoneTerm bool
-				for _, term := range terms {
-					for _, expr := range term.MatchExpressions {
-						if expr.Key == "topology.kubernetes.io/zone" {
-							foundZoneTerm = true
-							g.Expect(expr.Values).To(ContainElement("us-east-1a"))
-						}
+				// Verify zone constraint is preserved in the (only) term
+				var foundZone bool
+				var foundArch bool
+				for _, expr := range terms[0].MatchExpressions {
+					switch expr.Key {
+					case "topology.kubernetes.io/zone":
+						foundZone = true
+						g.Expect(expr.Values).To(ContainElement("us-east-1a"))
+					case utils.ArchLabel:
+						foundArch = true
+						g.Expect(expr.Values).To(Equal([]string{utils.ArchitectureAmd64}))
 					}
 				}
-				g.Expect(foundZoneTerm).To(BeTrue(), "zone constraint should be preserved")
-
-				// Verify new architecture constraint applied
-				var foundArchTerm bool
-				for _, term := range terms {
-					for _, expr := range term.MatchExpressions {
-						if expr.Key == utils.ArchLabel && len(term.MatchExpressions) == 1 {
-							foundArchTerm = true
-							g.Expect(expr.Values).To(Equal([]string{utils.ArchitectureAmd64}))
-						}
-					}
-				}
-				g.Expect(foundArchTerm).To(BeTrue(), "new architecture constraint should be applied")
+				g.Expect(foundZone).To(BeTrue(), "zone constraint should be preserved in the merged term")
+				g.Expect(foundArch).To(BeTrue(), "new architecture constraint should be applied in the merged term")
 			}).WithTimeout(timeout).WithPolling(interval).Should(Succeed())
 		})
 	})
@@ -263,7 +255,7 @@ var _ = Describe("CEL Architecture Placement Controller Integration", func() {
 				Rules: []plugins.ArchitectureRule{
 					{
 						Name:          "match-nothing",
-						Expression:    `self.metadata.labels.exists(l, l.key == "never-matches" && l.value == "true")`,
+						Expression:    `has(self.metadata.labels["never-matches"]) && self.metadata.labels["never-matches"] == "true"`,
 						Architectures: []string{utils.ArchitectureArm64},
 					},
 				},
@@ -622,5 +614,3 @@ var _ = Describe("CEL Architecture Placement Controller Integration", func() {
 		})
 	})
 })
-
-// Made with Bob

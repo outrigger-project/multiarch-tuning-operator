@@ -431,8 +431,9 @@ var _ = Describe("CEL Plugin - PPC64LE Default and WKC Prefix Tests", func() {
 				Rules: []plugins.ArchitectureRule{
 					{
 						Name: "wkc-component-label-rule",
-						// Match pods with label "wkc-component=true"
-						Expression:    `self.metadata.labels.exists(l, l.key == "wkc-component" && l.value == "true")`,
+						// Match pods with label "wkc-component=true".
+						// Bracket notation required: the key contains a hyphen.
+						Expression:    `has(self.metadata.labels["wkc-component"]) && self.metadata.labels["wkc-component"] == "true"`,
 						Architectures: []string{utils.ArchitectureAmd64},
 					},
 				},
@@ -493,5 +494,3 @@ var _ = Describe("CEL Plugin - PPC64LE Default and WKC Prefix Tests", func() {
 		})
 	})
 })
-
-// Made with Bob

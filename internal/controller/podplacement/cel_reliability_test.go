@@ -345,67 +345,57 @@ func TestIdempotentRepeatedReconcile(t *testing.T) {
 	}
 }
 
-// TestArchitectureConstraintsAccumulateButFunctionallyEquivalent verifies that architecture
-// terms accumulate across multiple applications, but this is acceptable because:
-// 1. NodeSelectorTerms are OR conditions
-// 2. Multiple terms with same/different architectures are functionally equivalent to a single term
-// 3. In production, pods are scheduled after first reconciliation
-func TestArchitectureConstraintsAccumulateButFunctionallyEquivalent(t *testing.T) {
+// TestArchitectureConstraintsReplacedInPlaceOnRepeatedApply verifies that applying
+// architecture constraints multiple times to the same pod replaces the architecture
+// in-place within existing terms rather than accumulating new terms.
+// applyArchitectureNodeAffinity iterates over existing terms and replaces
+// the kubernetes.io/arch expression within each term.
+func TestArchitectureConstraintsReplacedInPlaceOnRepeatedApply(t *testing.T) {
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "test-pod",
 		},
 	}
 
-	// Apply first set of architectures
+	// Apply first set of architectures — creates 1 term.
 	applyArchitectureConstraints(pod, []string{"amd64"})
 
-	// Verify first application
 	if pod.Spec.Affinity == nil || pod.Spec.Affinity.NodeAffinity == nil ||
 		pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution == nil {
 		t.Fatal("Expected node affinity after first application")
 	}
 	terms := pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms
 	if len(terms) != 1 {
-		t.Errorf("After first application: expected 1 term, got %d", len(terms))
+		t.Fatalf("After first application: expected 1 term, got %d", len(terms))
+	}
+	if terms[0].MatchExpressions[0].Values[0] != "amd64" {
+		t.Errorf("Expected amd64 after first application, got %v", terms[0].MatchExpressions[0].Values)
 	}
 
-	// Apply second set of architectures (different)
+	// Apply second set of architectures — replaces arch in-place, still 1 term.
 	applyArchitectureConstraints(pod, []string{"ppc64le"})
 
-	// Terms accumulate (2 terms now)
 	terms = pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms
-	if len(terms) != 2 {
-		t.Errorf("After second application: expected 2 terms (accumulated), got %d", len(terms))
+	if len(terms) != 1 {
+		t.Errorf("After second application: expected 1 term (in-place replacement), got %d", len(terms))
 	}
-	// Verify second term has ppc64le
-	if len(terms[1].MatchExpressions) != 1 || terms[1].MatchExpressions[0].Values[0] != "ppc64le" {
-		t.Error("Second term should have ppc64le")
+	if len(terms[0].MatchExpressions) != 1 || terms[0].MatchExpressions[0].Values[0] != "ppc64le" {
+		t.Errorf("Expected ppc64le after second application, got %v", terms[0].MatchExpressions[0].Values)
 	}
 
-	// Apply third set of architectures (different)
+	// Apply third set of architectures — still 1 term, arch replaced again.
 	applyArchitectureConstraints(pod, []string{"arm64", "s390x"})
 
-	// Terms accumulate (3 terms now)
 	terms = pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms
-	if len(terms) != 3 {
-		t.Errorf("After third application: expected 3 terms (accumulated), got %d", len(terms))
+	if len(terms) != 1 {
+		t.Errorf("After third application: expected 1 term (in-place replacement), got %d", len(terms))
 	}
-
-	// Verify third term has arm64 and s390x
-	if len(terms[2].MatchExpressions) != 1 {
-		t.Errorf("Expected 1 match expression in third term, got %d", len(terms[2].MatchExpressions))
+	if len(terms[0].MatchExpressions) != 1 {
+		t.Errorf("Expected 1 match expression after third application, got %d", len(terms[0].MatchExpressions))
 	}
-	if len(terms[2].MatchExpressions[0].Values) != 2 {
-		t.Errorf("Expected 2 architecture values in third term, got %d", len(terms[2].MatchExpressions[0].Values))
+	if len(terms[0].MatchExpressions[0].Values) != 2 {
+		t.Errorf("Expected 2 architecture values after third application, got %d", len(terms[0].MatchExpressions[0].Values))
 	}
-
-	// This accumulation is acceptable because:
-	// - NodeSelectorTerms are OR conditions
-	// - Pod can be scheduled on nodes matching ANY term
-	// - (amd64) OR (ppc64le) OR (arm64 OR s390x) = any of these architectures
-	// - In production, pod is scheduled after first reconciliation, so accumulation doesn't occur
-	t.Logf("Architecture terms accumulated as expected (OR semantics make this functionally equivalent)")
 }
 
 // TestNodeSelectorCleanupStableAcrossMultipleReconciles verifies that nodeSelector cleanup
@@ -650,5 +640,3 @@ func TestEmptyArchitecturesList(t *testing.T) {
 		}
 	}
 }
-
-// Made with Bob

@@ -104,11 +104,9 @@ var _ = Describe("CEL Plugin - No Fallback/Image-Detection Merge After Match", f
 				Rules: []plugins.ArchitectureRule{
 					{
 						Name:       "match-database-ppc64le-only",
-						Expression: `self.metadata.labels.exists(l, l.key == "component" && l.value == "database")`,
+						Expression: `has(self.metadata.labels.component) && self.metadata.labels.component == "database"`,
 						// Rule specifies ONLY ppc64le
-						Architectures: []string{
-							utils.ArchitecturePpc64le,
-						},
+						Architectures: []string{utils.ArchitecturePpc64le},
 					},
 				},
 			}
@@ -323,5 +321,3 @@ var _ = Describe("CEL Plugin - No Fallback/Image-Detection Merge After Match", f
 		})
 	})
 })
-
-// Made with Bob

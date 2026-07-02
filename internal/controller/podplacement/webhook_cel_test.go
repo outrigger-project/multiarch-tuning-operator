@@ -392,4 +392,203 @@ func TestApplyCELInWebhook_RespectsPPCPriority(t *testing.T) {
 	}
 }
 
-// Made with Bob
+// TestApplyCELInWebhook_RemovesNodeSelectorArchBeforeAdmission verifies that
+// applyCELInWebhook removes an existing kubernetes.io/arch nodeSelector entry
+// and replaces it with a NodeAffinity requirement, before the pod is persisted.
+// This is the exact mutation that prevents the KEP-3838 immutability rejection
+// for the OPENSHIFTP-636 fix: when the webhook applies constraints to an
+// already-gated pod, the nodeSelector arch key must be removed and the
+// NodeAffinity must be set — all in a single admission patch.
+func TestApplyCELInWebhook_RemovesNodeSelectorArchBeforeAdmission(t *testing.T) {
+	ctx := context.Background()
+	recorder := record.NewFakeRecorder(10)
+
+	// Pod arrives with an existing kubernetes.io/arch nodeSelector.
+	// This simulates a re-created StatefulSet pod or a pod submitted with a
+	// pre-set arch nodeSelector.
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-pod-with-nodeselector",
+			Namespace: "default",
+		},
+		Spec: corev1.PodSpec{
+			NodeSelector: map[string]string{
+				utils.ArchLabel: "amd64",
+				"other-key":     "other-value",
+			},
+		},
+	}
+
+	matchingPPCs := []v1beta1.PodPlacementConfig{
+		{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "ppc-cel",
+				Namespace: "default",
+			},
+			Spec: v1beta1.PodPlacementConfigSpec{
+				Priority: 100,
+				Plugins: &plugins.LocalPlugins{
+					CelArchitecturePlacement: &plugins.CelArchitecturePlacement{
+						BasePlugin:            plugins.BasePlugin{Enabled: true},
+						FallbackArchitectures: []string{"ppc64le"},
+					},
+				},
+			},
+		},
+	}
+
+	webhook := &PodSchedulingGateMutatingWebHook{}
+	podWrapper := newPod(pod, ctx, recorder)
+
+	webhook.applyCELInWebhook(ctx, podWrapper, matchingPPCs)
+
+	// The kubernetes.io/arch nodeSelector key must have been removed.
+	if _, exists := podWrapper.Spec.NodeSelector[utils.ArchLabel]; exists {
+		t.Error("kubernetes.io/arch should have been removed from nodeSelector by the webhook")
+	}
+
+	// Non-arch nodeSelector keys must be preserved.
+	if podWrapper.Spec.NodeSelector["other-key"] != "other-value" {
+		t.Error("non-arch nodeSelector key must be preserved")
+	}
+
+	// A NodeAffinity requirement for the selected architecture must now exist.
+	if podWrapper.Spec.Affinity == nil ||
+		podWrapper.Spec.Affinity.NodeAffinity == nil ||
+		podWrapper.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution == nil {
+		t.Fatal("Expected NodeAffinity to be set by applyCELInWebhook")
+	}
+	terms := podWrapper.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms
+	if len(terms) == 0 {
+		t.Fatal("Expected at least one NodeSelectorTerm after applyCELInWebhook")
+	}
+	found := false
+	for _, term := range terms {
+		for _, expr := range term.MatchExpressions {
+			if expr.Key == utils.ArchLabel && expr.Operator == corev1.NodeSelectorOpIn {
+				found = true
+				if len(expr.Values) != 1 || expr.Values[0] != "ppc64le" {
+					t.Errorf("Expected architecture [ppc64le], got %v", expr.Values)
+				}
+			}
+		}
+	}
+	if !found {
+		t.Error("Architecture requirement not found in NodeAffinity after applyCELInWebhook")
+	}
+}
+
+// TestApplyCELInWebhook_ControllerIdempotencyAfterWebhookMutation verifies that
+// re-applying the same CEL constraints via the controller path (cel_integration.go)
+// on a pod that was already mutated by the webhook does not change the
+// NodeSelectorTerms array length.
+//
+// This is the key idempotency guarantee required by OPENSHIFTP-636: the controller
+// must not attempt to add or remove NodeSelectorTerms from a pod that was already
+// correctly mutated by the webhook, because Kubernetes would reject such updates
+// with "no additions/deletions to non-empty NodeSelectorTerms list are allowed".
+func TestApplyCELInWebhook_ControllerIdempotencyAfterWebhookMutation(t *testing.T) {
+	ctx := context.Background()
+	recorder := record.NewFakeRecorder(10)
+
+	// Construct a pod that represents the state after the webhook has run:
+	// - no kubernetes.io/arch nodeSelector (removed by webhook)
+	// - NodeAffinity with arch constraint and a non-arch constraint already set
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "post-webhook-pod",
+			Namespace: "default",
+		},
+		Spec: corev1.PodSpec{
+			Affinity: &corev1.Affinity{
+				NodeAffinity: &corev1.NodeAffinity{
+					RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
+						NodeSelectorTerms: []corev1.NodeSelectorTerm{
+							{
+								MatchExpressions: []corev1.NodeSelectorRequirement{
+									{
+										Key:      "topology.kubernetes.io/zone",
+										Operator: corev1.NodeSelectorOpIn,
+										Values:   []string{"us-east-1a"},
+									},
+									{
+										Key:      utils.ArchLabel,
+										Operator: corev1.NodeSelectorOpIn,
+										Values:   []string{"ppc64le"},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	matchingPPCs := []v1beta1.PodPlacementConfig{
+		{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "ppc-cel",
+				Namespace: "default",
+			},
+			Spec: v1beta1.PodPlacementConfigSpec{
+				Priority: 100,
+				Plugins: &plugins.LocalPlugins{
+					CelArchitecturePlacement: &plugins.CelArchitecturePlacement{
+						BasePlugin:            plugins.BasePlugin{Enabled: true},
+						FallbackArchitectures: []string{"ppc64le"},
+					},
+				},
+			},
+		},
+	}
+
+	// Capture the term count before the controller re-applies CEL.
+	originalTermCount := len(pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms)
+
+	// Simulate the controller path: re-apply the same CEL constraints.
+	// This calls applyArchitectureConstraints via the same code path used by
+	// cel_integration.go's applyCELArchitecturePlacement.
+	webhook := &PodSchedulingGateMutatingWebHook{}
+	podWrapper := newPod(pod, ctx, recorder)
+	webhook.applyCELInWebhook(ctx, podWrapper, matchingPPCs)
+
+	// The NodeSelectorTerms length must not change.
+	// A length change on a gated pod would cause Kubernetes to reject the update:
+	// "no additions/deletions to non-empty NodeSelectorTerms list are allowed"
+	finalTermCount := len(podWrapper.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms)
+	if finalTermCount != originalTermCount {
+		t.Errorf("NodeSelectorTerms count changed from %d to %d — "+
+			"this would cause Kubernetes to reject the controller update with HTTP 422 "+
+			"(KEP-3838 immutability constraint)", originalTermCount, finalTermCount)
+	}
+
+	// The non-arch constraint must still be present.
+	zoneFound := false
+	for _, term := range podWrapper.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms {
+		for _, expr := range term.MatchExpressions {
+			if expr.Key == "topology.kubernetes.io/zone" {
+				zoneFound = true
+			}
+		}
+	}
+	if !zoneFound {
+		t.Error("non-architecture zone constraint was removed — must be preserved")
+	}
+
+	// The architecture constraint must still point to ppc64le.
+	archFound := false
+	for _, term := range podWrapper.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms {
+		for _, expr := range term.MatchExpressions {
+			if expr.Key == utils.ArchLabel {
+				archFound = true
+				if len(expr.Values) != 1 || expr.Values[0] != "ppc64le" {
+					t.Errorf("Expected architecture [ppc64le], got %v", expr.Values)
+				}
+			}
+		}
+	}
+	if !archFound {
+		t.Error("Architecture constraint not found after controller re-application")
+	}
+}
