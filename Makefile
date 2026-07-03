@@ -73,16 +73,15 @@ IMG ?= registry.ci.openshift.org/origin/multiarch-tuning-operator:main
 # https://github.com/kubernetes-sigs/kustomize/releases
 KUSTOMIZE_VERSION ?= v5.8.1
 # https://github.com/kubernetes-sigs/controller-tools/releases
-CONTROLLER_TOOLS_VERSION ?= v0.20.1
+CONTROLLER_TOOLS_VERSION ?= v0.21.0
 # https://github.com/kubernetes-sigs/controller-runtime/branches
-SETUP_ENVTEST_VERSION ?= release-0.23
+SETUP_ENVTEST_VERSION ?= release-0.24
 # ENVTEST_K8S_VERSION refers to the version of kubebuilder assets to be downloaded by envtest binary.
-ENVTEST_K8S_VERSION = 1.35.0
+ENVTEST_K8S_VERSION = 1.36.0
 # https://github.com/golangci/golangci-lint/releases
 GOLINT_VERSION = v2.12.2
 
-# TODO: We'd need an upstream builder image that includes gpgme-devel (libgpgme-dev)
-BUILD_IMAGE ?= registry.ci.openshift.org/ocp/builder:rhel-9-golang-1.25-openshift-4.21
+BUILD_IMAGE ?= registry.access.redhat.com/ubi9/go-toolset:1.26.4
 RUNTIME_IMAGE ?= registry.access.redhat.com/ubi9/ubi-minimal:latest
 
 NO_DOCKER ?= 0
@@ -125,7 +124,7 @@ ifeq ($(NO_DOCKER), 1)
   DOCKER_CMD =
   IMAGE_BUILD_CMD = imagebuilder
 else
-  DOCKER_CMD := $(ENGINE) run --env GO111MODULE=$(GO111MODULE) --env GOFLAGS=$(GOFLAGS) --env GOLINT_VERSION=$(GOLINT_VERSION) --rm  -v "$(PWD)":/go/src/github.com/outrigger-project/multiarch-tuning-operator:Z -v "$(PWD)":/go/src/github.com/openshift/multiarch-tuning-operator:Z -w /go/src/github.com/openshift/multiarch-tuning-operator $(BUILD_IMAGE)
+  DOCKER_CMD := $(ENGINE) run --user root --env GO111MODULE=$(GO111MODULE) --env GOFLAGS=$(GOFLAGS) --env GOLINT_VERSION=$(GOLINT_VERSION) --rm  -v "$(PWD)":/go/src/github.com/outrigger-project/multiarch-tuning-operator:Z -v "$(PWD)":/go/src/github.com/openshift/multiarch-tuning-operator:Z -w /go/src/github.com/openshift/multiarch-tuning-operator --entrypoint bash $(BUILD_IMAGE) -c 'if ! pkg-config --exists gpgme 2>/dev/null; then dnf install -y gpgme-devel > /dev/null 2>&1; fi && eval "$$@"' --
   IMAGE_BUILD_CMD = $(ENGINE) build
 endif
 
