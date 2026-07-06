@@ -245,6 +245,7 @@ func RunClusterPodPlacementConfigOperandControllers(mgr ctrl.Manager) {
 
 	must((&podplacement.PodReconciler{
 		Client:    mgr.GetClient(),
+		APIReader: mgr.GetAPIReader(),
 		Scheme:    mgr.GetScheme(),
 		ClientSet: clientset,
 		Recorder:  mgr.GetEventRecorderFor(utils.OperatorName), //nolint:staticcheck // MULTIARCH-6087: will be fixed with events API migration
