@@ -709,11 +709,11 @@ var _ = Describe("The Multiarch Tuning Operator", Serial, func() {
 						Name: common.SingletonResourceObjectName,
 					},
 				}), cppc)
-				Expect(err).NotTo(HaveOccurred())
+				g.Expect(err).NotTo(HaveOccurred())
 				By("Disabling the execFormatErrorMonitor plugin")
 				cppc.Spec.Plugins.ExecFormatErrorMonitor.Enabled = false
 				err = client.Update(ctx, cppc)
-				Expect(err).NotTo(HaveOccurred())
+				g.Expect(err).NotTo(HaveOccurred())
 			}).Should(Succeed(), "failed to update the ClusterPodPlacementConfig", err)
 			By("Get the v1beta1 version of the CPPC")
 			cppc := &v1beta1.ClusterPodPlacementConfig{}
@@ -783,6 +783,10 @@ var _ = Describe("The Multiarch Tuning Operator", Serial, func() {
 				Expect(err).NotTo(HaveOccurred(), "failed to create the ClusterPodPlacementConfig")
 				By("Validate the clusterPodPlacementConfig and eNoExecEvent objects exist")
 				Eventually(framework.ValidateCreation(client, ctx, framework.MainPlugin, framework.ENoExecPlugin)).Should(Succeed())
+				By("Wait for the ENoExecEvent CRD to be serving")
+				Eventually(func(g Gomega) {
+					g.Expect(client.List(ctx, &v1beta1.ENoExecEventList{}, runtimeclient.InNamespace(utils.Namespace()))).To(Succeed())
+				}, e2e.WaitShort).Should(Succeed())
 				By("Create an ephemeral namespace for the test pod")
 				ns := framework.NewEphemeralNamespace()
 				err = client.Create(ctx, ns)
@@ -846,6 +850,10 @@ var _ = Describe("The Multiarch Tuning Operator", Serial, func() {
 				Expect(err).NotTo(HaveOccurred(), "failed to create the ClusterPodPlacementConfig")
 				By("Validate the clusterPodPlacementConfig and eNoExecEvent objects exist")
 				Eventually(framework.ValidateCreation(client, ctx, framework.MainPlugin, framework.ENoExecPlugin)).Should(Succeed())
+				By("Wait for the ENoExecEvent CRD to be serving")
+				Eventually(func(g Gomega) {
+					g.Expect(client.List(ctx, &v1beta1.ENoExecEventList{}, runtimeclient.InNamespace(utils.Namespace()))).To(Succeed())
+				}, e2e.WaitShort).Should(Succeed())
 				By("Create an ephemeral namespace for the test pod")
 				ns := framework.NewEphemeralNamespace()
 				err = client.Create(ctx, ns)
