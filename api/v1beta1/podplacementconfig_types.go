@@ -121,7 +121,3 @@ type PodPlacementConfigList struct {
 type PodPlacementConfigStatus struct {
 	//TODO: Define the status fields for PodPlacementConfig
 }
-
-func init() {
-	SchemeBuilder.Register(&PodPlacementConfig{}, &PodPlacementConfigList{})
-}

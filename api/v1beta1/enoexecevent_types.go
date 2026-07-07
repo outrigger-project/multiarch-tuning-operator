@@ -92,7 +92,3 @@ type ENoExecEventList struct {
 	metav1.ListMeta `json:"metadata,omitempty"`
 	Items           []ENoExecEvent `json:"items"`
 }
-
-func init() {
-	SchemeBuilder.Register(&ENoExecEvent{}, &ENoExecEventList{})
-}

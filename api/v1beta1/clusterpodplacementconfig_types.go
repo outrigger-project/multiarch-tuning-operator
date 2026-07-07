@@ -239,10 +239,6 @@ type ClusterPodPlacementConfigList struct {
 	Items           []ClusterPodPlacementConfig `json:"items"`
 }
 
-func init() {
-	SchemeBuilder.Register(&ClusterPodPlacementConfig{}, &ClusterPodPlacementConfigList{})
-}
-
 func conditionFromBool(b bool) metav1.ConditionStatus {
 	if b {
 		return metav1.ConditionTrue

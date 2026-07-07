@@ -67,7 +67,3 @@ type ClusterPodPlacementConfigList struct {
 	metav1.ListMeta `json:"metadata,omitempty"`
 	Items           []ClusterPodPlacementConfig `json:"items"`
 }
-
-func init() {
-	SchemeBuilder.Register(&ClusterPodPlacementConfig{}, &ClusterPodPlacementConfigList{})
-}
