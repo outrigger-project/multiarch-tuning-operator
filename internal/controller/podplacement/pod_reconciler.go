@@ -46,6 +46,7 @@ import (
 // PodReconciler reconciles a Pod object
 type PodReconciler struct {
 	client.Client
+	APIReader client.Reader
 	Scheme    *runtime.Scheme
 	ClientSet *kubernetes.Clientset
 	Recorder  record.EventRecorder
@@ -114,6 +115,15 @@ func (r *PodReconciler) processPod(ctx context.Context, pod *Pod) {
 	if err := r.List(ctx, ppcList, client.InNamespace(pod.Namespace)); err != nil {
 		pod.handleError(err, "failed to list existing PodPlacementConfigs in namespace")
 		return
+	}
+	// The informer cache can lag behind the API server. If the cache shows no PPCs,
+	// verify with a direct API read to avoid a race where a just-created PPC is missed
+	// and the pod is permanently ungated without its preferred affinity.
+	if len(ppcList.Items) == 0 {
+		if err := r.APIReader.List(ctx, ppcList, client.InNamespace(pod.Namespace)); err != nil {
+			pod.handleError(err, "failed to list PodPlacementConfigs from API server")
+			return
+		}
 	}
 
 	// Filter to only PPCs that match this pod's labels - do this once for efficiency
