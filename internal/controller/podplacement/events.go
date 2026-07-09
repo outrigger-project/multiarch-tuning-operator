@@ -25,9 +25,13 @@ const (
 	ArchitecturePreferredAffinityAllDuplicatesMsg  = "Skipped all architecture preferences from configuration; all were already set"
 	ArchitecturePreferredPredicateSkippedMsg       = "Skipped configuration; no architecture preferences were provided"
 
-	ImageArchitectureInspectionErrorMsg = "Failed to retrieve the supported architectures: "
+	ImageArchitectureInspectionErrorMsg = "The operator encountered an error while inspecting the container image to determine its supported architectures. " +
+		"This is typically caused by the image registry being unreachable, returning an error, or a misconfiguration. " +
+		"Registry error: "
 	NoSupportedArchitecturesFoundMsg    = "Pod cannot be scheduled due to incompatible image architectures; container images have no supported architectures in common"
 	ArchitectureAwareGatedPodIgnoredMsg = "The gated pod has been modified and is no longer eligible for architecture-aware scheduling"
-	ImageInspectionErrorMaxRetriesMsg   = "Failed to retrieve the supported architectures after multiple retries"
-	ArchitectureFallbackSetupMsg        = "Image inspection failed; setting the nodeAffinity to the fallback architecture: "
+	ImageInspectionErrorMaxRetriesMsg   = "The operator was unable to determine the supported architectures after multiple retries. " +
+		"This is typically caused by the image registry being unreachable, returning an error, or a misconfiguration in the cluster's pull secrets or network. " +
+		"Registry error"
+	ArchitectureFallbackSetupMsg = "Image inspection failed; setting the nodeAffinity to the fallback architecture: "
 )
