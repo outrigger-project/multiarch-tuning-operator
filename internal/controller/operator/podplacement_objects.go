@@ -116,7 +116,7 @@ func buildControllerDeployment(clusterPodPlacementConfig *v1beta1.ClusterPodPlac
 			Name: "docker-conf",
 			VolumeSource: corev1.VolumeSource{
 				HostPath: &corev1.HostPathVolumeSource{
-					Path: "/etc/docker/",
+					Path: "/etc/docker/certs.d/",
 					Type: utils.NewPtr(corev1.HostPathDirectoryOrCreate),
 				},
 			},
@@ -126,7 +126,9 @@ func buildControllerDeployment(clusterPodPlacementConfig *v1beta1.ClusterPodPlac
 			VolumeSource: corev1.VolumeSource{
 				HostPath: &corev1.HostPathVolumeSource{
 					Path: "/etc/containers/",
-					Type: utils.NewPtr(corev1.HostPathDirectoryOrCreate),
+					// HostPathDirectory requires the directory to pre-exist on every node.
+					// This is always true on OpenShift nodes but may not hold on vanilla Kubernetes.
+					Type: utils.NewPtr(corev1.HostPathDirectory),
 				},
 			},
 		},
@@ -146,7 +148,7 @@ func buildControllerDeployment(clusterPodPlacementConfig *v1beta1.ClusterPodPlac
 		},
 		{
 			Name:      "docker-conf",
-			MountPath: "/etc/docker/",
+			MountPath: "/etc/docker/certs.d/",
 			ReadOnly:  true,
 		},
 		{
@@ -252,7 +254,12 @@ func buildClusterRoleController() *rbacv1.ClusterRole {
 		},
 		{
 			APIGroups: []string{""},
-			Resources: []string{"configmaps", "secrets"},
+			Resources: []string{"configmaps"},
+			Verbs:     []string{LIST, WATCH, GET},
+		},
+		{
+			APIGroups: []string{""},
+			Resources: []string{"secrets"},
 			Verbs:     []string{LIST, WATCH, GET},
 		},
 		{

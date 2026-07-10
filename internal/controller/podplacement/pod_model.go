@@ -416,8 +416,11 @@ func (pod *Pod) ensureArchitectureLabels(requirement corev1.NodeSelectorRequirem
 	default:
 		pod.EnsureLabel(utils.MultiArchLabel, "")
 	}
+	validArchitectures := utils.AllSupportedArchitecturesSet()
 	for _, value := range requirement.Values {
-		pod.EnsureLabel(utils.ArchLabelValue(value), "")
+		if validArchitectures.Has(value) {
+			pod.EnsureLabel(utils.ArchLabelValue(value), "")
+		}
 	}
 }
 
@@ -497,10 +500,15 @@ func (pod *Pod) handleError(err error, s string) {
 	}
 	log := ctrllog.FromContext(pod.Ctx())
 	metrics.FailedInspectionCounter.Inc()
+	errMsg := err.Error()
+	runes := []rune(errMsg)
+	if len(runes) > 256 {
+		errMsg = string(runes[:256])
+	}
 	pod.EnsureLabel(utils.ImageInspectionErrorLabel, "")
-	pod.EnsureAnnotation(utils.ImageInspectionErrorLabel, err.Error())
+	pod.EnsureAnnotation(utils.ImageInspectionErrorLabel, errMsg)
 	pod.EnsureAndIncrementLabel(utils.ImageInspectionErrorCountLabel)
-	pod.PublishEvent(corev1.EventTypeWarning, ImageArchitectureInspectionError, ImageArchitectureInspectionErrorMsg+err.Error())
+	pod.PublishEvent(corev1.EventTypeWarning, ImageArchitectureInspectionError, ImageArchitectureInspectionErrorMsg+errMsg)
 	log.Error(err, s)
 }
 

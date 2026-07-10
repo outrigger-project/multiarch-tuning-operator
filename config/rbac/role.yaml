@@ -24,6 +24,7 @@ rules:
   - ""
   resources:
   - namespaces
+  - pods/status
   verbs:
   - get
   - update
@@ -44,14 +45,6 @@ rules:
   - patch
   - update
   - watch
-- apiGroups:
-  - ""
-  resources:
-  - pods/status
-  verbs:
-  - get
-  - patch
-  - update
 - apiGroups:
   - ""
   resources:
@@ -84,12 +77,19 @@ rules:
   - mutatingwebhookconfigurations
   verbs:
   - create
+  - list
+  - watch
+- apiGroups:
+  - admissionregistration.k8s.io
+  resourceNames:
+  - pod-placement-mutating-webhook-configuration
+  resources:
+  - mutatingwebhookconfigurations
+  verbs:
   - delete
   - get
-  - list
   - patch
   - update
-  - watch
 - apiGroups:
   - admissionregistration.k8s.io
   resources:
@@ -168,6 +168,21 @@ rules:
   - update
 - apiGroups:
   - rbac.authorization.k8s.io
+  resourceNames:
+  - enoexec-event-daemon
+  - enoexec-event-handler-controller
+  - pod-placement-controller
+  - pod-placement-web-hook
+  resources:
+  - clusterrolebindings
+  - clusterroles
+  verbs:
+  - delete
+  - get
+  - patch
+  - update
+- apiGroups:
+  - rbac.authorization.k8s.io
   resources:
   - clusterrolebindings
   - clusterroles
@@ -175,11 +190,7 @@ rules:
   - roles
   verbs:
   - create
-  - delete
-  - get
   - list
-  - patch
-  - update
   - watch
 - apiGroups:
   - rbac.authorization.k8s.io
@@ -199,6 +210,20 @@ rules:
   - roles/status
   verbs:
   - get
+- apiGroups:
+  - rbac.authorization.k8s.io
+  resourceNames:
+  - enoexec-event-daemon
+  - enoexec-event-handler-controller
+  - pod-placement-controller
+  resources:
+  - rolebindings
+  - roles
+  verbs:
+  - delete
+  - get
+  - patch
+  - update
 - apiGroups:
   - security.openshift.io
   resources:

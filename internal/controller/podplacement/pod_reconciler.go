@@ -52,13 +52,10 @@ type PodReconciler struct {
 	Recorder  record.EventRecorder
 }
 
-// RBACs for the operands' controllers are added manually because kubebuilder can't handle multiple service accounts
-// and roles.
-//+kubebuilder:rbac:groups=core,resources=pods,verbs=get;list;watch;update;patch
-//+kubebuilder:rbac:groups=core,resources=pods/status,verbs=get;update;patch
-//+kubebuilder:rbac:groups=core,resources=secrets,verbs=get;list;watch
-//+kubebuilder:rbac:groups=security.openshift.io,resources=securitycontextconstraints,verbs=use
-//+kubebuilder:rbac:groups=core,resources=configmaps,verbs=get;list;watch
+// Note: The operand (pod-placement-controller) RBAC is defined programmatically in
+// podplacement_objects.go buildClusterRoleController(). Do NOT add operand-specific
+// RBAC markers here — kubebuilder merges all markers into the manager's ClusterRole,
+// which would over-provision the operator SA with permissions only the operand needs.
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.

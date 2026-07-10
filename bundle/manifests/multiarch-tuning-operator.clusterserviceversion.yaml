@@ -129,6 +129,7 @@ spec:
           - ""
           resources:
           - namespaces
+          - pods/status
           verbs:
           - get
           - update
@@ -149,14 +150,6 @@ spec:
           - patch
           - update
           - watch
-        - apiGroups:
-          - ""
-          resources:
-          - pods/status
-          verbs:
-          - get
-          - patch
-          - update
         - apiGroups:
           - ""
           resources:
@@ -189,12 +182,19 @@ spec:
           - mutatingwebhookconfigurations
           verbs:
           - create
+          - list
+          - watch
+        - apiGroups:
+          - admissionregistration.k8s.io
+          resourceNames:
+          - pod-placement-mutating-webhook-configuration
+          resources:
+          - mutatingwebhookconfigurations
+          verbs:
           - delete
           - get
-          - list
           - patch
           - update
-          - watch
         - apiGroups:
           - admissionregistration.k8s.io
           resources:
@@ -273,6 +273,21 @@ spec:
           - update
         - apiGroups:
           - rbac.authorization.k8s.io
+          resourceNames:
+          - enoexec-event-daemon
+          - enoexec-event-handler-controller
+          - pod-placement-controller
+          - pod-placement-web-hook
+          resources:
+          - clusterrolebindings
+          - clusterroles
+          verbs:
+          - delete
+          - get
+          - patch
+          - update
+        - apiGroups:
+          - rbac.authorization.k8s.io
           resources:
           - clusterrolebindings
           - clusterroles
@@ -280,11 +295,7 @@ spec:
           - roles
           verbs:
           - create
-          - delete
-          - get
           - list
-          - patch
-          - update
           - watch
         - apiGroups:
           - rbac.authorization.k8s.io
@@ -304,6 +315,20 @@ spec:
           - roles/status
           verbs:
           - get
+        - apiGroups:
+          - rbac.authorization.k8s.io
+          resourceNames:
+          - enoexec-event-daemon
+          - enoexec-event-handler-controller
+          - pod-placement-controller
+          resources:
+          - rolebindings
+          - roles
+          verbs:
+          - delete
+          - get
+          - patch
+          - update
         - apiGroups:
           - security.openshift.io
           resources:
