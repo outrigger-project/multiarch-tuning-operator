@@ -59,6 +59,7 @@ import (
 // ClusterPodPlacementConfigReconciler reconciles a ClusterPodPlacementConfig object
 type ClusterPodPlacementConfigReconciler struct {
 	client.Client
+	APIReader     client.Reader
 	DynamicClient *dynamic.DynamicClient
 	Scheme        *runtime.Scheme
 	ClientSet     *kubernetes.Clientset
@@ -151,7 +152,7 @@ func (r *ClusterPodPlacementConfigReconciler) Reconcile(ctx context.Context, req
 	clusterPodPlacementConfig := &multiarchv1beta1.ClusterPodPlacementConfig{}
 	var err error
 
-	if err = r.Get(ctx, client.ObjectKey{
+	if err = r.APIReader.Get(ctx, client.ObjectKey{
 		Name: req.Name,
 	}, clusterPodPlacementConfig); err != nil {
 		log.Error(err, "Unable to fetch ClusterPodPlacementConfig")

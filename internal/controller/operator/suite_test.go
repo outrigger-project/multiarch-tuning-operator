@@ -241,6 +241,7 @@ func runManager() {
 	}
 	Expect((&ClusterPodPlacementConfigReconciler{
 		Client:        mgr.GetClient(),
+		APIReader:     mgr.GetAPIReader(),
 		Scheme:        mgr.GetScheme(),
 		ClientSet:     clientset,
 		DynamicClient: dynamic.NewForConfigOrDie(cfg),

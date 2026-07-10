@@ -220,6 +220,7 @@ func RunOperator(mgr ctrl.Manager) {
 	// Set up the reconciler
 	must((&operator.ClusterPodPlacementConfigReconciler{
 		Client:        mgr.GetClient(),
+		APIReader:     mgr.GetAPIReader(),
 		Scheme:        mgr.GetScheme(),
 		ClientSet:     clientset,
 		DynamicClient: dynamic.NewForConfigOrDie(config),
