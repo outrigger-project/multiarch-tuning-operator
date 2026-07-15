@@ -94,6 +94,72 @@ spec:
                   Plugins defines the configurable plugins for this component.
                   This field is required.
                 properties:
+                  celArchitecturePlacement:
+                    description: |-
+                      CelArchitecturePlacement is a plugin that provides CEL-based architecture selection rules.
+                      This plugin is only available in namespace-scoped PodPlacementConfig resources.
+                      When a rule matches, the plugin removes any existing architecture constraints from the pod's
+                      nodeSelector and nodeAffinity, then sets new architecture constraints based on the rule.
+                    properties:
+                      enabled:
+                        description: Enabled indicates whether the plugin is enabled.
+                        type: boolean
+                      fallbackArchitectures:
+                        description: |-
+                          fallbackArchitectures is a required list of architectures to use when no rules match.
+                          This limits the explosion of possible rules by providing a sensible default.
+                          When applied, existing architecture constraints are removed and replaced with these architectures.
+                        items:
+                          type: string
+                        maxItems: 4
+                        minItems: 1
+                        type: array
+                      rules:
+                        description: |-
+                          Rules is a list of architecture selection rules evaluated in order.
+                          The first matching rule determines the target architecture.
+                          When a rule matches, existing architecture constraints are removed and replaced.
+                          Maximum of 1000 rules per configuration to prevent excessive evaluation time during
+                          pod admission. This limit balances flexibility with performance, ensuring CEL
+                          evaluation completes within acceptable latency bounds (microseconds per expression).
+                          The limit may be adjusted based on production usage patterns and performance data.
+                        items:
+                          description: ArchitectureRule defines a single CEL-based
+                            rule for architecture selection
+                          properties:
+                            architectures:
+                              description: |-
+                                Architectures is the list of target architectures to use when this rule matches.
+                                When applied, any existing architecture constraints in the pod's nodeSelector
+                                and nodeAffinity are removed and replaced with these architectures.
+                              items:
+                                type: string
+                              maxItems: 4
+                              minItems: 1
+                              type: array
+                            expression:
+                              description: |-
+                                Expression is a CEL expression that evaluates against a Pod resource.
+                                The expression must return a boolean value.
+                                The expression has access to the pod via the 'self' variable.
+                              minLength: 1
+                              type: string
+                            name:
+                              description: Name is a descriptive name for this rule
+                              maxLength: 253
+                              minLength: 1
+                              type: string
+                          required:
+                          - architectures
+                          - expression
+                          - name
+                          type: object
+                        maxItems: 1000
+                        type: array
+                    required:
+                    - enabled
+                    - fallbackArchitectures
+                    type: object
                   nodeAffinityScoring:
                     description: NodeAffinityScoring is the plugin that implements
                       the ScorePlugin interface.
