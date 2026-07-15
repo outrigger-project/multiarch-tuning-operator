@@ -19,6 +19,7 @@ package podplacement
 import (
 	"context"
 	"net/http"
+	"sort"
 	"sync"
 	"time"
 
@@ -68,6 +69,7 @@ func (a *PodSchedulingGateMutatingWebHook) Handle(ctx context.Context, req admis
 	responseTimeStart := time.Now()
 	defer utils.HistogramObserve(responseTimeStart, metrics.ResponseTime)
 	metrics.ProcessedPodsWH.Inc()
+
 	a.once.Do(func() {
 		a.decoder = admission.NewDecoder(a.scheme)
 	})
@@ -77,6 +79,7 @@ func (a *PodSchedulingGateMutatingWebHook) Handle(ctx context.Context, req admis
 	if err != nil {
 		return admission.Errored(http.StatusBadRequest, err)
 	}
+
 	log := ctrllog.FromContext(ctx).WithValues("namespace", pod.Namespace, "name", pod.Name)
 
 	cppc := clusterpodplacementconfig.GetClusterPodPlacementConfig()
@@ -104,6 +107,9 @@ func (a *PodSchedulingGateMutatingWebHook) Handle(ctx context.Context, req admis
 		log.V(3).Info("Ignoring the pod")
 		return a.patchedPodResponse(pod.PodObject(), req)
 	}
+
+	// Apply CEL architecture placement in webhook before pod is persisted
+	a.applyCELInWebhook(ctx, pod, matchingPPCs)
 
 	pod.ensureSchedulingGate()
 	// We also add a label to the pod to indicate that the scheduling gate was added
@@ -162,6 +168,60 @@ func (a *PodSchedulingGateMutatingWebHook) delayedSchedulingGatedEvent(ctx conte
 	if err != nil {
 		ctrllog.FromContext(ctx).WithValues("namespace", pod.Namespace, "name", pod.Name,
 			"function", "delayedSchedulingGatedEvent").Error(err, "Failed to submit the delayedSchedulingGatedEvent job")
+	}
+}
+
+// applyCELInWebhook evaluates and applies CEL architecture placement during pod admission.
+//
+// CEL architecture placement must occur during admission because Kubernetes rejects updates
+// that modify existing NodeSelectorTerms (immutable field constraint). By applying architecture
+// constraints before the pod is persisted to etcd, we avoid "no additions/deletions to non-empty
+// NodeSelectorTerms list are allowed" API rejections during controller reconciliation.
+//
+// This is a deliberate deviation from the enhancement document (which specified controller-based
+// evaluation) to satisfy OPENSHIFTP-636 requirements.
+func (a *PodSchedulingGateMutatingWebHook) applyCELInWebhook(ctx context.Context, pod *Pod, matchingPPCs []multiarchv1beta1.PodPlacementConfig) {
+	log := ctrllog.FromContext(ctx)
+
+	// Sort matching PPCs by descending priority to process highest priority first
+	sort.Slice(matchingPPCs, func(i, j int) bool {
+		return matchingPPCs[i].Spec.Priority > matchingPPCs[j].Spec.Priority
+	})
+
+	// Evaluate PPCs in priority order. If a higher-priority PPC has CEL evaluation errors,
+	// we continue to the next PPC (soft failure model). This ensures pod admission always
+	// succeeds even if some PPCs are misconfigured.
+	for _, ppc := range matchingPPCs {
+		if !ppc.PluginsEnabled(common.CelArchitecturePlacementPluginName) {
+			continue
+		}
+
+		celPlugin := ppc.Spec.Plugins.CelArchitecturePlacement
+		if celPlugin == nil {
+			// This should never happen due to webhook validation, but handle defensively
+			log.Error(nil, "CEL plugin enabled but configuration is nil", "PodPlacementConfig", ppc.Name, "pod", pod.Name)
+			return
+		}
+
+		// Evaluate CEL rules against the pod
+		result, err := evaluateCELArchitecturePlacement(celPlugin.Rules, celPlugin.FallbackArchitectures, pod.PodObject())
+		if err != nil {
+			// Log error and continue to next PPC (soft failure - don't block pod admission)
+			log.Error(err, "Failed to evaluate CEL rules, trying next PPC", "PodPlacementConfig", ppc.Name, "pod", pod.Name)
+			continue
+		}
+
+		// Apply architecture constraints (removes existing constraints and sets new ones)
+		applyArchitectureConstraints(pod.PodObject(), result.architectures)
+		log.V(1).Info("Applied CEL architecture constraints",
+			"pod", pod.Name,
+			"PodPlacementConfig", ppc.Name,
+			"architectures", result.architectures,
+			"ruleMatched", result.matched,
+			"ruleName", result.ruleName)
+
+		// First matching PPC wins - stop processing remaining PPCs
+		return
 	}
 }
 
