@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"sync"
 
+	"github.com/google/cel-go/cel"
 	admissionv1 "k8s.io/api/admission/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -65,6 +66,24 @@ func (w *PodPlacementConfigWebhook) Handle(ctx context.Context, req admission.Re
 			}
 		}
 
+		// Validate CEL expressions in CelArchitecturePlacement plugin
+		if newPPC.PluginsEnabled(common.CelArchitecturePlacementPluginName) {
+			celPlugin := newPPC.Spec.Plugins.CelArchitecturePlacement
+			if celPlugin != nil {
+				// Validate architectures
+				if err := celPlugin.ValidateArchitectures(); err != nil {
+					return admission.Denied(fmt.Sprintf("invalid architectures in celArchitecturePlacement plugin: %v", err))
+				}
+
+				// Validate CEL expressions at admission time
+				for _, rule := range celPlugin.Rules {
+					if err := validateCELExpressionAtAdmission(rule.Expression); err != nil {
+						return admission.Denied(fmt.Sprintf("invalid CEL expression in rule %q: %v", rule.Name, err))
+					}
+				}
+			}
+		}
+
 		// List existing PodPlacementConfigs in the same namespace
 		existingPPCs := &multiarchv1beta1.PodPlacementConfigList{}
 		if err := w.apiReader.List(ctx, existingPPCs, client.InNamespace(req.Namespace)); err != nil {
@@ -92,6 +111,31 @@ func (w *PodPlacementConfigWebhook) Handle(ctx context.Context, req admission.Re
 	default:
 		return admission.Allowed("operation not explicitly handled")
 	}
+}
+
+// validateCELExpressionAtAdmission validates a CEL expression at admission time
+// This ensures that invalid CEL expressions are rejected before they can cause runtime errors
+func validateCELExpressionAtAdmission(expression string) error {
+	// Create a minimal CEL environment for validation
+	env, err := cel.NewEnv(
+		cel.Variable("self", cel.DynType),
+	)
+	if err != nil {
+		return fmt.Errorf("failed to create CEL environment: %w", err)
+	}
+
+	// Compile the expression
+	ast, issues := env.Compile(expression)
+	if issues != nil && issues.Err() != nil {
+		return fmt.Errorf("CEL compilation error: %w", issues.Err())
+	}
+
+	// Check that the expression returns a boolean
+	if ast.OutputType() != cel.BoolType {
+		return fmt.Errorf("CEL expression must return a boolean, got %v", ast.OutputType())
+	}
+
+	return nil
 }
 
 func NewPodPlacementConfigWebhook(apiReader client.Reader, scheme *runtime.Scheme) *PodPlacementConfigWebhook {
