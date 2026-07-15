@@ -358,66 +358,32 @@ func (pod *Pod) imagesNamesSet() sets.Set[containerImage] {
 func (pod *Pod) intersectImagesArchitecture(pullSecretDataList [][]byte) (supportedArchitectures []string, err error) {
 	log := ctrllog.FromContext(pod.Ctx())
 	imageNamesSet := pod.imagesNamesSet()
-	log.Info("Image inspection: Starting", "pod", pod.Name, "namespace", pod.Namespace, "imageCount", imageNamesSet.Len())
-
+	log.V(1).Info("Images list for pod", "imageNamesSet", fmt.Sprintf("%+v", imageNamesSet))
 	// https://github.com/containers/skopeo/blob/v1.11.1/cmd/skopeo/inspect.go#L72
 	// Iterate over the images, get their architectures and intersect (as in set intersection) them each other
 	var supportedArchitecturesSet sets.Set[string]
 	nowExternal := time.Now()
 	defer utils.HistogramObserve(nowExternal, metrics.TimeToInspectPodImages)
-
-	imageIndex := 0
 	for imageContainer := range imageNamesSet {
-		imageIndex++
-		log.Info("Image inspection: Inspecting image",
-			"pod", pod.Name,
-			"imageIndex", imageIndex,
-			"totalImages", imageNamesSet.Len(),
-			"imageName", imageContainer.imageName,
-			"skipCache", imageContainer.skipCache)
-
+		log.V(3).Info("Checking image", "imageName", imageContainer.imageName,
+			"skipCache (imagePullPolicy==Always)", imageContainer.skipCache)
 		// We are collecting the time to inspect the image here to avoid implementing a metric in each of the
 		// cache implementations.
 		now := time.Now()
 		currentImageSupportedArchitectures, err := imageInspectionCache.GetCompatibleArchitecturesSet(pod.Ctx(),
 			imageContainer.imageName, imageContainer.skipCache, pullSecretDataList)
 		utils.HistogramObserve(now, metrics.TimeToInspectImage)
-
 		if err != nil {
-			log.Error(err, "Image inspection: Failed to inspect image",
-				"pod", pod.Name,
-				"imageName", imageContainer.imageName,
-				"imageIndex", imageIndex)
+			log.V(1).Error(err, "Error inspecting the image", "imageName", imageContainer.imageName)
 			return nil, err
 		}
-
-		archList := sets.List(currentImageSupportedArchitectures)
-		log.Info("Image inspection: Image architectures detected",
-			"pod", pod.Name,
-			"imageName", imageContainer.imageName,
-			"architectures", archList)
-
 		if supportedArchitecturesSet == nil {
 			supportedArchitecturesSet = currentImageSupportedArchitectures
 		} else {
-			beforeIntersection := sets.List(supportedArchitecturesSet)
 			supportedArchitecturesSet = supportedArchitecturesSet.Intersection(currentImageSupportedArchitectures)
-			afterIntersection := sets.List(supportedArchitecturesSet)
-			log.Info("Image inspection: Architecture intersection",
-				"pod", pod.Name,
-				"before", beforeIntersection,
-				"current", archList,
-				"after", afterIntersection)
 		}
 	}
-
-	finalArchitectures := sets.List(supportedArchitecturesSet)
-	log.Info("Image inspection: Completed",
-		"pod", pod.Name,
-		"namespace", pod.Namespace,
-		"finalArchitectures", finalArchitectures)
-
-	return finalArchitectures, nil
+	return sets.List(supportedArchitecturesSet), nil
 }
 
 func (pod *Pod) maxRetries() bool {
@@ -469,122 +435,11 @@ func (pod *Pod) ensureArchitectureLabels(requirement corev1.NodeSelectorRequirem
 //   - preferred affinity is already configured, OR
 //   - both CPPC and all matching PPCs have the NodeAffinityScoring plugin disabled
 func (pod *Pod) shouldIgnorePod(cppc *v1beta1.ClusterPodPlacementConfig, matchingPPCs []v1beta1.PodPlacementConfig) bool {
-	log := ctrllog.FromContext(pod.Ctx())
-
-	cppcPresent := cppc != nil
-	log.Info("[SHOULD_IGNORE] ENTER",
-		"pod", pod.Name,
-		"namespace", pod.Namespace,
-		"matchingPPCCount", len(matchingPPCs),
-		"cppcPresent", cppcPresent,
-		"labels", pod.Labels,
-		"ownerReferences", pod.OwnerReferences,
-		"schedulingGates", pod.Spec.SchedulingGates,
-		"nodeName", pod.Spec.NodeName,
-		"phase", pod.Status.Phase)
-
-	defer log.Info("[SHOULD_IGNORE] EXIT", "pod", pod.Name, "namespace", pod.Namespace)
-
-	// Check operator namespace
-	if utils.Namespace() == pod.Namespace {
-		log.Info("[SHOULD_IGNORE] RETURN",
-			"pod", pod.Name,
-			"namespace", pod.Namespace,
-			"reason", "pod is in operator namespace",
-			"operatorNamespace", utils.Namespace())
-		return true
-	}
-
-	// Check kube- prefix
-	if strings.HasPrefix(pod.Namespace, "kube-") {
-		log.Info("[SHOULD_IGNORE] RETURN",
-			"pod", pod.Name,
-			"namespace", pod.Namespace,
-			"reason", "pod namespace has kube- prefix")
-		return true
-	}
-
-	// Check if pod already assigned to node
-	if pod.Spec.NodeName != "" {
-		log.Info("[SHOULD_IGNORE] RETURN",
-			"pod", pod.Name,
-			"namespace", pod.Namespace,
-			"reason", "pod already assigned to node",
-			"nodeName", pod.Spec.NodeName)
-		return true
-	}
-
-	// Check control plane node selector
-	if pod.HasControlPlaneNodeSelector() {
-		log.Info("[SHOULD_IGNORE] RETURN",
-			"pod", pod.Name,
-			"namespace", pod.Namespace,
-			"reason", "pod has control plane node selector")
-		return true
-	}
-
-	// Check if from DaemonSet
-	if pod.IsFromDaemonSet() {
-		log.Info("[SHOULD_IGNORE] RETURN",
-			"pod", pod.Name,
-			"namespace", pod.Namespace,
-			"reason", "pod is from DaemonSet",
-			"ownerReferences", pod.OwnerReferences)
-		return true
-	}
-
-	// Check architecture configuration
-	isNodeSelectorConfigured := pod.isNodeSelectorConfiguredForArchitecture()
-	log.Info("[SHOULD_IGNORE] Architecture check",
-		"pod", pod.Name,
-		"isNodeSelectorConfiguredForArchitecture", isNodeSelectorConfigured)
-
-	if !isNodeSelectorConfigured {
-		log.Info("[SHOULD_IGNORE] RETURN",
-			"pod", pod.Name,
-			"namespace", pod.Namespace,
-			"reason", "architecture not configured in nodeSelector - pod should be processed",
-			"result", false)
-		return false
-	}
-
-	// Architecture is configured, check if we should still ignore
-	isPreferredConfigured := pod.isPreferredAffinityConfiguredForArchitecture()
-	log.Info("[SHOULD_IGNORE] Preferred affinity check",
-		"pod", pod.Name,
-		"isPreferredAffinityConfiguredForArchitecture", isPreferredConfigured)
-
-	if isPreferredConfigured {
-		log.Info("[SHOULD_IGNORE] RETURN",
-			"pod", pod.Name,
-			"namespace", pod.Namespace,
-			"reason", "architecture configured in nodeSelector AND preferred affinity configured")
-		return true
-	}
-
-	// Check plugin configuration
-	cppcPluginEnabled := cppc.PluginsEnabled(common.NodeAffinityScoringPluginName)
-	hasMatchingPPCWithPlugin := pod.hasMatchingPPCWithPlugin(matchingPPCs)
-
-	log.Info("[SHOULD_IGNORE] Plugin check",
-		"pod", pod.Name,
-		"cppcPluginEnabled", cppcPluginEnabled,
-		"hasMatchingPPCWithPlugin", hasMatchingPPCWithPlugin)
-
-	if !cppcPluginEnabled && !hasMatchingPPCWithPlugin {
-		log.Info("[SHOULD_IGNORE] RETURN",
-			"pod", pod.Name,
-			"namespace", pod.Namespace,
-			"reason", "architecture configured in nodeSelector AND preferred affinity not configured AND no plugins enabled (CPPC and all matching PPCs have NodeAffinityScoring disabled)")
-		return true
-	}
-
-	log.Info("[SHOULD_IGNORE] RETURN",
-		"pod", pod.Name,
-		"namespace", pod.Namespace,
-		"reason", "pod should be processed - architecture configured but plugins are enabled",
-		"result", false)
-	return false
+	return utils.Namespace() == pod.Namespace || strings.HasPrefix(pod.Namespace, "kube-") ||
+		pod.Spec.NodeName != "" || pod.HasControlPlaneNodeSelector() || pod.IsFromDaemonSet() ||
+		pod.isNodeSelectorConfiguredForArchitecture() &&
+			(pod.isPreferredAffinityConfiguredForArchitecture() ||
+				(!cppc.PluginsEnabled(common.NodeAffinityScoringPluginName) && !pod.hasMatchingPPCWithPlugin(matchingPPCs)))
 }
 
 // isNodeSelectorConfiguredForArchitecture returns true if the pod has already a nodeSelector for the architecture label
@@ -697,12 +552,11 @@ func (pod *Pod) filterMatchingPPCs(ppcList *v1beta1.PodPlacementConfigList) []v1
 	return matching
 }
 
-// hasMatchingPPCWithPlugin checks if any of the matching PPCs have plugins that require a scheduling gate enabled.
-// This includes plugins like NodeAffinityScoring and CelArchitecturePlacement that need to process pods before scheduling.
+// hasMatchingPPCWithPlugin checks if any of the matching PPCs have the NodeAffinityScoring plugin enabled.
 // The matchingPPCs slice should already be filtered to only include PPCs whose label selector matches the pod.
 func (pod *Pod) hasMatchingPPCWithPlugin(matchingPPCs []v1beta1.PodPlacementConfig) bool {
 	for _, ppc := range matchingPPCs {
-		if ppc.HasEnabledPluginsRequiringSchedulingGate() {
+		if ppc.PluginsEnabled(common.NodeAffinityScoringPluginName) {
 			return true
 		}
 	}

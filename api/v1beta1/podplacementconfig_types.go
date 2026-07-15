@@ -67,16 +67,6 @@ func (p *PodPlacementConfig) PluginsEnabled(plugin common.Plugin) bool {
 	return false
 }
 
-// HasEnabledPluginsRequiringSchedulingGate checks if any plugins that require a scheduling gate are enabled.
-// This includes plugins that need to process pods before they are scheduled, such as:
-// - NodeAffinityScoringPluginName: Sets preferred node affinity based on architecture scoring
-// - CelArchitecturePlacementPluginName: Applies architecture constraints based on CEL rules
-// Returns true if at least one such plugin is enabled, false otherwise.
-func (p *PodPlacementConfig) HasEnabledPluginsRequiringSchedulingGate() bool {
-	return p.PluginsEnabled(common.NodeAffinityScoringPluginName) ||
-		p.PluginsEnabled(common.CelArchitecturePlacementPluginName)
-}
-
 // ValidatePriorityUpdate checks whether the updated Priority value is valid
 func (p *PodPlacementConfig) ValidatePriorityUpdate(old *PodPlacementConfig, list runtime.Object) (bool, error) {
 	// Assert list type to *PodPlacementConfigList
