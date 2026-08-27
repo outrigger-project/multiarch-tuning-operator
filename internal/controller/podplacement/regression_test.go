@@ -24,7 +24,6 @@ package podplacement
 import (
 	"context"
 	"sync"
-	"testing"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -148,16 +147,43 @@ var _ = Describe("Finding #1: CEL evaluated with user preferred affinity", func(
 // After the fix the reconciler uses applyArchitectureNodeAffinity (in-place
 // update only), which never changes the term count.
 
-func TestKEP3838ReconcilerDoesNotShrinkNodeSelectorTerms(t *testing.T) {
-	tests := []struct {
-		name              string
-		initialTerms      []corev1.NodeSelectorTerm
-		architectures     []string
-		expectedTermCount int
-	}{
-		{
-			name: "arch-only term is NOT deleted, arch is replaced in-place",
-			initialTerms: []corev1.NodeSelectorTerm{
+var _ = Describe("Finding #3+#4: KEP-3838 reconciler does not shrink NodeSelectorTerms", func() {
+	DescribeTable("should preserve term count after in-place architecture update",
+		func(initialTerms []corev1.NodeSelectorTerm, architectures []string, expectedTermCount int) {
+			pod := NewPod().WithName("kep3838-pod").Build()
+			pod.Spec.Affinity = &corev1.Affinity{
+				NodeAffinity: &corev1.NodeAffinity{
+					RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
+						NodeSelectorTerms: initialTerms,
+					},
+				},
+			}
+
+			// The reconciler path: removeArchitectureFromNodeSelector then applyArchitectureNodeAffinity.
+			// (NOT removeAllArchitectureConstraints which could delete terms.)
+			removeArchitectureFromNodeSelector(pod)
+			applyArchitectureNodeAffinity(pod, architectures)
+
+			terms := pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms
+			Expect(terms).To(HaveLen(expectedTermCount),
+				"term count changed — would cause HTTP 422 on Update")
+
+			// Verify the new arch is present in every term
+			for i, term := range terms {
+				found := false
+				for _, expr := range term.MatchExpressions {
+					if expr.Key == utils.ArchLabel {
+						found = true
+						Expect(expr.Values).To(HaveLen(len(architectures)),
+							"term %d: expected %v architectures, got %v", i, architectures, expr.Values)
+					}
+				}
+				Expect(found).To(BeTrue(),
+					"term %d: architecture constraint missing after in-place update", i)
+			}
+		},
+		Entry("arch-only term is NOT deleted, arch is replaced in-place",
+			[]corev1.NodeSelectorTerm{
 				{
 					// arch-only term (was removed by old removeAllArchitectureConstraints)
 					MatchExpressions: []corev1.NodeSelectorRequirement{
@@ -171,12 +197,11 @@ func TestKEP3838ReconcilerDoesNotShrinkNodeSelectorTerms(t *testing.T) {
 					},
 				},
 			},
-			architectures:     []string{utils.ArchitecturePpc64le},
-			expectedTermCount: 2, // MUST stay 2 — reconciler must not shrink
-		},
-		{
-			name: "multiple terms with arch — count preserved",
-			initialTerms: []corev1.NodeSelectorTerm{
+			[]string{utils.ArchitecturePpc64le},
+			2, // MUST stay 2 — reconciler must not shrink
+		),
+		Entry("multiple terms with arch — count preserved",
+			[]corev1.NodeSelectorTerm{
 				{
 					MatchExpressions: []corev1.NodeSelectorRequirement{
 						{Key: utils.ArchLabel, Operator: corev1.NodeSelectorOpIn, Values: []string{utils.ArchitectureAmd64}},
@@ -190,94 +215,54 @@ func TestKEP3838ReconcilerDoesNotShrinkNodeSelectorTerms(t *testing.T) {
 					},
 				},
 			},
-			architectures:     []string{utils.ArchitecturePpc64le},
-			expectedTermCount: 2,
-		},
-		{
-			name: "single term without arch — count preserved",
-			initialTerms: []corev1.NodeSelectorTerm{
+			[]string{utils.ArchitecturePpc64le},
+			2,
+		),
+		Entry("single term without arch — count preserved",
+			[]corev1.NodeSelectorTerm{
 				{
 					MatchExpressions: []corev1.NodeSelectorRequirement{
 						{Key: "kubernetes.io/os", Operator: corev1.NodeSelectorOpIn, Values: []string{"linux"}},
 					},
 				},
 			},
-			architectures:     []string{utils.ArchitectureArm64},
-			expectedTermCount: 1,
-		},
-	}
-
-	for _, tt := range tests {
-		tt := tt
-		t.Run(tt.name, func(t *testing.T) {
-			pod := NewPod().WithName("kep3838-pod").Build()
-			pod.Spec.Affinity = &corev1.Affinity{
-				NodeAffinity: &corev1.NodeAffinity{
-					RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
-						NodeSelectorTerms: tt.initialTerms,
-					},
-				},
-			}
-
-			// The reconciler path: removeArchitectureFromNodeSelector then applyArchitectureNodeAffinity.
-			// (NOT removeAllArchitectureConstraints which could delete terms.)
-			removeArchitectureFromNodeSelector(pod)
-			applyArchitectureNodeAffinity(pod, tt.architectures)
-
-			terms := pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms
-			if len(terms) != tt.expectedTermCount {
-				t.Errorf("term count changed from %d to %d — would cause HTTP 422 on Update",
-					tt.expectedTermCount, len(terms))
-			}
-
-			// Verify the new arch is present in every term
-			for i, term := range terms {
-				found := false
-				for _, expr := range term.MatchExpressions {
-					if expr.Key == utils.ArchLabel {
-						found = true
-						if len(expr.Values) != len(tt.architectures) {
-							t.Errorf("term %d: expected %v architectures, got %v", i, tt.architectures, expr.Values)
-						}
-					}
-				}
-				if !found {
-					t.Errorf("term %d: architecture constraint missing after in-place update", i)
-				}
-			}
-		})
-	}
-}
+			[]string{utils.ArchitectureArm64},
+			1,
+		),
+	)
+})
 
 // Prove that the OLD code (applyArchitectureConstraints = removeAll + apply)
 // WOULD shrink the term count when an arch-only term exists, confirming the
 // production risk was real.
-func TestKEP3838OldCodeShrinksTerm(t *testing.T) {
-	pod := NewPod().WithName("kep3838-old").
-		WithNodeSelectorTermsMatchExpressions(
-			[]corev1.NodeSelectorRequirement{
-				{Key: utils.ArchLabel, Operator: corev1.NodeSelectorOpIn, Values: []string{utils.ArchitectureAmd64}},
-			},
-			[]corev1.NodeSelectorRequirement{
-				{Key: "topology.kubernetes.io/zone", Operator: corev1.NodeSelectorOpIn, Values: []string{"us-east-1a"}},
-			},
-		).Build()
+var _ = Describe("Finding #3+#4: KEP-3838 old code shrinks terms", func() {
+	It("should document that old applyArchitectureConstraints path shrinks term count", func() {
+		pod := NewPod().WithName("kep3838-old").
+			WithNodeSelectorTermsMatchExpressions(
+				[]corev1.NodeSelectorRequirement{
+					{Key: utils.ArchLabel, Operator: corev1.NodeSelectorOpIn, Values: []string{utils.ArchitectureAmd64}},
+				},
+				[]corev1.NodeSelectorRequirement{
+					{Key: "topology.kubernetes.io/zone", Operator: corev1.NodeSelectorOpIn, Values: []string{"us-east-1a"}},
+				},
+			).Build()
 
-	// Simulate the OLD path
-	applyArchitectureConstraints(pod, []string{utils.ArchitecturePpc64le})
+		// Simulate the OLD path
+		applyArchitectureConstraints(pod, []string{utils.ArchitecturePpc64le})
 
-	terms := pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms
-	// The old path produces 1 term (zone + arch merged) from the original 2.
-	// This documents the production risk: HTTP 422 when reconciler sends fewer terms.
-	// After fix this path is no longer called from the reconciler.
-	if len(terms) != 1 {
-		t.Logf("NOTE: old applyArchitectureConstraints produced %d terms (not 1); production risk may vary", len(terms))
-	}
-	// The key assertion: if old code produces fewer terms than the original 2, that IS the KEP-3838 risk.
-	if len(terms) >= 2 {
-		t.Log("Old code did not shrink terms in this case — KEP-3838 risk is lower than expected, but fix is still correct for safety")
-	}
-}
+		terms := pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms
+		// The old path produces 1 term (zone + arch merged) from the original 2.
+		// This documents the production risk: HTTP 422 when reconciler sends fewer terms.
+		// After fix this path is no longer called from the reconciler.
+		if len(terms) != 1 {
+			GinkgoWriter.Printf("NOTE: old applyArchitectureConstraints produced %d terms (not 1); production risk may vary\n", len(terms))
+		}
+		// The key assertion: if old code produces fewer terms than the original 2, that IS the KEP-3838 risk.
+		if len(terms) >= 2 {
+			GinkgoWriter.Printf("Old code did not shrink terms in this case — KEP-3838 risk is lower than expected, but fix is still correct for safety\n")
+		}
+	})
+})
 
 // ─── Finding #5: informer retry – unit test for retry-until-success ───────────
 //
@@ -288,185 +273,185 @@ func TestKEP3838OldCodeShrinksTerm(t *testing.T) {
 // verifies: first call fails → returns false; second call succeeds → informer
 // HasSynced is consulted and persisted.
 
-func TestInformerRetryOnTransientFailure(t *testing.T) {
-	callCount := 0
-	var ppcHasSynced func() bool
-	var mu sync.Mutex
+var _ = Describe("Finding #5: informer retry on transient failure", func() {
+	It("should retry getInformer until success and then cache the result", func() {
+		callCount := 0
+		var ppcHasSynced func() bool
+		var mu sync.Mutex
 
-	// Fake "HasSynced" that always reports true once we get the informer.
-	fakeSynced := func() bool { return true }
+		// Fake "HasSynced" that always reports true once we get the informer.
+		fakeSynced := func() bool { return true }
 
-	// getInformer fails on the first call, succeeds on subsequent calls.
-	getInformer := func() (func() bool, error) {
-		callCount++
-		if callCount == 1 {
-			return nil, nil // simulate transient error (returning nil instead of error for brevity)
+		// getInformer fails on the first call, succeeds on subsequent calls.
+		getInformer := func() (func() bool, error) {
+			callCount++
+			if callCount == 1 {
+				return nil, nil // simulate transient error (returning nil instead of error for brevity)
+			}
+			return fakeSynced, nil
 		}
-		return fakeSynced, nil
-	}
 
-	// NEW ppcCacheSynced logic replicated here.
-	ppcCacheSynced := func() bool {
-		mu.Lock()
-		local := ppcHasSynced
-		mu.Unlock()
-		if local != nil {
-			return local()
+		// NEW ppcCacheSynced logic replicated here.
+		ppcCacheSynced := func() bool {
+			mu.Lock()
+			local := ppcHasSynced
+			mu.Unlock()
+			if local != nil {
+				return local()
+			}
+			fn, err := getInformer()
+			if err != nil || fn == nil {
+				return false // transient — retry next time
+			}
+			mu.Lock()
+			ppcHasSynced = fn
+			mu.Unlock()
+			return fn()
 		}
-		fn, err := getInformer()
-		if err != nil || fn == nil {
-			return false // transient — retry next time
-		}
-		mu.Lock()
-		ppcHasSynced = fn
-		mu.Unlock()
-		return fn()
-	}
 
-	// First call: informer not available yet.
-	if ppcCacheSynced() {
-		t.Error("expected false on first call when informer not yet available")
-	}
-	if callCount != 1 {
-		t.Errorf("expected 1 call to getInformer, got %d", callCount)
-	}
+		By("First call: informer not available yet")
+		Expect(ppcCacheSynced()).To(BeFalse(),
+			"expected false on first call when informer not yet available")
+		Expect(callCount).To(Equal(1),
+			"expected 1 call to getInformer")
 
-	// Second call: informer succeeds.
-	if !ppcCacheSynced() {
-		t.Error("expected true on second call when informer succeeded")
-	}
-	if callCount != 2 {
-		t.Errorf("expected 2 calls to getInformer, got %d", callCount)
-	}
+		By("Second call: informer succeeds")
+		Expect(ppcCacheSynced()).To(BeTrue(),
+			"expected true on second call when informer succeeded")
+		Expect(callCount).To(Equal(2),
+			"expected 2 calls to getInformer")
 
-	// Subsequent calls: short-circuit via ppcHasSynced (no more getInformer calls).
-	if !ppcCacheSynced() {
-		t.Error("expected true on third call (cached)")
-	}
-	if callCount != 2 {
-		t.Errorf("getInformer must not be called again after success; got %d calls", callCount)
-	}
-}
+		By("Subsequent calls: short-circuit via cached ppcHasSynced")
+		Expect(ppcCacheSynced()).To(BeTrue(),
+			"expected true on third call (cached)")
+		Expect(callCount).To(Equal(2),
+			"getInformer must not be called again after success")
+	})
+})
 
 // ─── Finding #6: CEL LRU cache eviction ──────────────────────────────────────
 //
 // Production risk: old cache was a plain map[string]cel.Program with no eviction.
 // New cache is bounded at celExpressionCacheSize.
 
-func TestCELEvaluatorLRUEviction(t *testing.T) {
-	evaluator, err := newCELEvaluator()
-	if err != nil {
-		t.Fatalf("newCELEvaluator: %v", err)
-	}
+var _ = Describe("Finding #6: CEL LRU cache eviction", func() {
+	It("should evict oldest entry when cache exceeds capacity", func() {
+		evaluator, err := newCELEvaluator()
+		Expect(err).NotTo(HaveOccurred(), "newCELEvaluator failed")
 
-	// Fill the cache to exactly the capacity limit.
-	for i := 0; i < celExpressionCacheSize; i++ {
-		expr := generateDistinctExpression(i)
-		if _, compileErr := evaluator.compile(expr); compileErr != nil {
-			t.Fatalf("compile[%d] failed: %v", i, compileErr)
+		By("Filling the cache to exactly the capacity limit")
+		for i := 0; i < celExpressionCacheSize; i++ {
+			expr := generateDistinctExpression(i)
+			_, compileErr := evaluator.compile(expr)
+			Expect(compileErr).NotTo(HaveOccurred(), "compile[%d] failed", i)
 		}
-	}
 
-	evaluator.mu.Lock()
-	sizeBefore := evaluator.cache.Len()
-	evaluator.mu.Unlock()
+		evaluator.mu.Lock()
+		sizeBefore := evaluator.cache.Len()
+		evaluator.mu.Unlock()
 
-	if sizeBefore != celExpressionCacheSize {
-		t.Errorf("expected cache size %d, got %d", celExpressionCacheSize, sizeBefore)
-	}
+		Expect(sizeBefore).To(Equal(celExpressionCacheSize),
+			"cache size should equal capacity")
 
-	// Adding one more entry must evict the oldest.
-	overflow := generateDistinctExpression(celExpressionCacheSize)
-	if _, compileErr := evaluator.compile(overflow); compileErr != nil {
-		t.Fatalf("compile overflow failed: %v", compileErr)
-	}
+		By("Adding one more entry to trigger eviction")
+		overflow := generateDistinctExpression(celExpressionCacheSize)
+		_, compileErr := evaluator.compile(overflow)
+		Expect(compileErr).NotTo(HaveOccurred(), "compile overflow failed")
 
-	evaluator.mu.Lock()
-	sizeAfter := evaluator.cache.Len()
-	evaluator.mu.Unlock()
+		evaluator.mu.Lock()
+		sizeAfter := evaluator.cache.Len()
+		evaluator.mu.Unlock()
 
-	if sizeAfter != celExpressionCacheSize {
-		t.Errorf("expected cache to remain at %d after eviction, got %d", celExpressionCacheSize, sizeAfter)
-	}
-}
+		Expect(sizeAfter).To(Equal(celExpressionCacheSize),
+			"cache should remain at capacity after eviction")
+	})
+})
 
-func TestMalformedPPCDoesNotBlockLowerPriorityValidPPC(t *testing.T) {
-	ctx := context.Background()
-	recorder := record.NewFakeRecorder(8)
-	r := &PodReconciler{Recorder: recorder}
+var _ = Describe("Malformed PPC does not block lower priority valid PPC", func() {
+	var (
+		recorder     *record.FakeRecorder
+		r            *PodReconciler
+		malformedPPC multiarchv1beta1.PodPlacementConfig
+	)
 
-	// Scenario 1: high-priority PPC with all malformed CEL rules.
-	// applyCELArchitecturePlacement must return false and must NOT mutate the pod.
-	malformedPPC := *NewPodPlacementConfig().WithName("high-priority-malformed").WithNamespace("default").WithPriority(200).
-		WithCelArchitecturePlacement(true, []string{utils.ArchitectureAmd64}, []plugins.ArchitectureRule{
-			NewRule("bad-rule", "self.metadata.name ==", utils.ArchitectureS390x),
-		}).Build()
+	BeforeEach(func() {
+		recorder = record.NewFakeRecorder(8)
+		r = &PodReconciler{Recorder: recorder}
 
-	pod := newPod(NewPod().WithName("test-pod").WithNamespace("default").Build(), ctx, recorder)
+		// High-priority PPC with all malformed CEL rules.
+		malformedPPC = *NewPodPlacementConfig().WithName("high-priority-malformed").WithNamespace("default").WithPriority(200).
+			WithCelArchitecturePlacement(true, []string{utils.ArchitectureAmd64}, []plugins.ArchitectureRule{
+				NewRule("bad-rule", "self.metadata.name ==", utils.ArchitectureS390x),
+			}).Build()
+	})
 
-	applied := r.applyCELArchitecturePlacement(ctx, malformedPPC, pod)
-	if applied {
-		t.Fatalf("applyCELArchitecturePlacement returned true for a fully-malformed PPC; expected false")
-	}
-	// The fallback architecture from the malformed PPC must NOT appear on the pod.
-	if pod.Spec.Affinity != nil {
-		na := pod.Spec.Affinity.NodeAffinity
-		if na != nil && na.RequiredDuringSchedulingIgnoredDuringExecution != nil {
-			for _, term := range na.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms {
-				for _, expr := range term.MatchExpressions {
-					if expr.Key == utils.ArchLabel {
-						t.Errorf("malformed PPC fallback architecture was applied to the pod; values: %v", expr.Values)
+	It("should not apply fallback architecture from a fully-malformed PPC", func() {
+		testCtx := context.Background()
+		pod := newPod(NewPod().WithName("test-pod").WithNamespace("default").Build(), testCtx, recorder)
+
+		applied := r.applyCELArchitecturePlacement(testCtx, malformedPPC, pod)
+		Expect(applied).To(BeFalse(),
+			"applyCELArchitecturePlacement should return false for a fully-malformed PPC")
+
+		// The fallback architecture from the malformed PPC must NOT appear on the pod.
+		if pod.Spec.Affinity != nil {
+			na := pod.Spec.Affinity.NodeAffinity
+			if na != nil && na.RequiredDuringSchedulingIgnoredDuringExecution != nil {
+				for _, term := range na.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms {
+					for _, expr := range term.MatchExpressions {
+						Expect(expr.Key).NotTo(Equal(utils.ArchLabel),
+							"malformed PPC fallback architecture was applied to the pod; values: %v", expr.Values)
 					}
 				}
 			}
 		}
-	}
+	})
 
-	// Scenario 2: lower-priority PPC with a valid matching CEL rule.
-	// applyMatchingPPCs must skip the malformed PPC and apply the valid one.
-	validPPC := *NewPodPlacementConfig().WithName("low-priority-valid").WithNamespace("default").WithPriority(100).
-		WithCelArchitecturePlacement(true, []string{utils.ArchitectureArm64}, []plugins.ArchitectureRule{
-			NewRule("valid-rule", "true", utils.ArchitecturePpc64le),
-		}).Build()
+	It("should skip the malformed PPC and apply the valid lower-priority PPC", func() {
+		testCtx := context.Background()
+		validPPC := *NewPodPlacementConfig().WithName("low-priority-valid").WithNamespace("default").WithPriority(100).
+			WithCelArchitecturePlacement(true, []string{utils.ArchitectureArm64}, []plugins.ArchitectureRule{
+				NewRule("valid-rule", "true", utils.ArchitecturePpc64le),
+			}).Build()
 
-	pod2 := newPod(NewPod().WithName("test-pod").WithNamespace("default").Build(), ctx, recorder)
+		pod := newPod(NewPod().WithName("test-pod").WithNamespace("default").Build(), testCtx, recorder)
 
-	// applyMatchingPPCs sorts by priority internally; order here is arbitrary.
-	celApplied := r.applyMatchingPPCs(ctx, []multiarchv1beta1.PodPlacementConfig{malformedPPC, validPPC}, pod2, pod2.isPreferredAffinityConfiguredForArchitecture())
-	if !celApplied {
-		t.Fatalf("applyMatchingPPCs returned false; lower-priority valid PPC should have applied")
-	}
+		// applyMatchingPPCs sorts by priority internally; order here is arbitrary.
+		celApplied := r.applyMatchingPPCs(testCtx, []multiarchv1beta1.PodPlacementConfig{malformedPPC, validPPC}, pod, pod.isPreferredAffinityConfiguredForArchitecture())
+		Expect(celApplied).To(BeTrue(),
+			"applyMatchingPPCs should return true; lower-priority valid PPC should have applied")
 
-	// ppc64le from the valid PPC must be present; amd64 from the malformed PPC's fallback must not.
-	foundPpc64le := false
-	foundAmd64 := false
+		// ppc64le from the valid PPC must be present; amd64 from the malformed PPC's fallback must not.
+		Expect(pod.Spec.Affinity).NotTo(BeNil(),
+			"pod should have affinity after applyMatchingPPCs")
+		Expect(pod.Spec.Affinity.NodeAffinity).NotTo(BeNil(),
+			"pod should have node affinity after applyMatchingPPCs")
+		Expect(pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution).NotTo(BeNil(),
+			"pod should have required node affinity after applyMatchingPPCs")
 
-	if pod2.Spec.Affinity == nil || pod2.Spec.Affinity.NodeAffinity == nil ||
-		pod2.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution == nil {
-		t.Fatalf("pod has no required node affinity after applyMatchingPPCs")
-	}
-	for _, term := range pod2.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms {
-		for _, expr := range term.MatchExpressions {
-			if expr.Key != utils.ArchLabel {
-				continue
-			}
-			for _, v := range expr.Values {
-				switch v {
-				case utils.ArchitecturePpc64le:
-					foundPpc64le = true
-				case utils.ArchitectureAmd64:
-					foundAmd64 = true
+		foundPpc64le := false
+		foundAmd64 := false
+		for _, term := range pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms {
+			for _, expr := range term.MatchExpressions {
+				if expr.Key != utils.ArchLabel {
+					continue
+				}
+				for _, v := range expr.Values {
+					switch v {
+					case utils.ArchitecturePpc64le:
+						foundPpc64le = true
+					case utils.ArchitectureAmd64:
+						foundAmd64 = true
+					}
 				}
 			}
 		}
-	}
-	if !foundPpc64le {
-		t.Errorf("lower-priority valid PPC architecture (ppc64le) not applied to the pod")
-	}
-	if foundAmd64 {
-		t.Errorf("malformed PPC's fallback architecture (amd64) was incorrectly applied to the pod")
-	}
-}
+		Expect(foundPpc64le).To(BeTrue(),
+			"lower-priority valid PPC architecture (ppc64le) not applied to the pod")
+		Expect(foundAmd64).To(BeFalse(),
+			"malformed PPC's fallback architecture (amd64) was incorrectly applied to the pod")
+	})
+})
 
 // generateDistinctExpression returns a unique but valid CEL boolean expression for index i.
 func generateDistinctExpression(i int) string {

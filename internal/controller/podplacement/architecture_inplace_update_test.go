@@ -17,30 +17,78 @@ limitations under the License.
 package podplacement
 
 import (
-	"testing"
-
 	corev1 "k8s.io/api/core/v1"
+
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 
 	. "github.com/openshift/multiarch-tuning-operator/pkg/testing/builder"
 	"github.com/openshift/multiarch-tuning-operator/pkg/utils"
 )
 
-// TestApplyArchitectureNodeAffinityInPlaceUpdate verifies that architecture constraints
+// ApplyArchitectureNodeAffinityInPlaceUpdate verifies that architecture constraints
 // are updated in-place without removing and re-adding NodeSelectorTerms, which would
 // cause Kubernetes to reject the update with:
 // "no additions/deletions to non-empty NodeSelectorTerms list are allowed"
-func TestApplyArchitectureNodeAffinityInPlaceUpdate(t *testing.T) {
-	tests := []struct {
-		name                   string
-		pod                    *corev1.Pod
-		architectures          []string
-		expectedTermCount      int
-		expectedArchInEachTerm []string
-		verifyOtherConstraints bool
-	}{
-		{
-			name: "update existing arch constraint in-place",
-			pod: NewPod().WithName("test-pod").WithNodeSelectorTermsMatchExpressions(
+var _ = Describe("ApplyArchitectureNodeAffinityInPlaceUpdate", func() {
+	DescribeTable("should update architecture constraints in-place",
+		func(pod *corev1.Pod, architectures []string, expectedTermCount int, expectedArchInEachTerm []string, verifyOtherConstraints bool) {
+			// Store original term count to verify in-place update
+			originalTermCount := 0
+			if pod.Spec.Affinity != nil &&
+				pod.Spec.Affinity.NodeAffinity != nil &&
+				pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution != nil {
+				originalTermCount = len(pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms)
+			}
+
+			applyArchitectureNodeAffinity(pod, architectures)
+
+			// Verify the term count matches expected (should be preserved for in-place update)
+			Expect(pod.Spec.Affinity).NotTo(BeNil(), "Expected affinity structure to be created")
+			Expect(pod.Spec.Affinity.NodeAffinity).NotTo(BeNil(), "Expected affinity structure to be created")
+			Expect(pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution).NotTo(BeNil(),
+				"Expected affinity structure to be created")
+
+			terms := pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms
+			Expect(terms).To(HaveLen(expectedTermCount))
+
+			// For in-place updates, term count should be preserved
+			if originalTermCount > 0 {
+				Expect(terms).To(HaveLen(originalTermCount),
+					"Term count changed from %d to %d - this would cause Kubernetes API rejection", originalTermCount, len(terms))
+			}
+
+			// Verify each term has the correct architecture constraint
+			for i, term := range terms {
+				foundArch := false
+				for _, expr := range term.MatchExpressions {
+					if expr.Key == utils.ArchLabel {
+						foundArch = true
+						Expect(expr.Operator).To(Equal(corev1.NodeSelectorOpIn),
+							"Term %d: Expected operator In", i)
+						Expect(expr.Values).To(Equal(expectedArchInEachTerm),
+							"Term %d: architecture values mismatch", i)
+					}
+				}
+				Expect(foundArch).To(BeTrue(), "Term %d: Architecture constraint not found", i)
+
+				// Verify other constraints are preserved
+				if verifyOtherConstraints {
+					nonArchCount := 0
+					for _, expr := range term.MatchExpressions {
+						if expr.Key != utils.ArchLabel {
+							nonArchCount++
+						}
+					}
+					if i == 0 && originalTermCount > 0 {
+						Expect(nonArchCount).NotTo(BeZero(),
+							"Term %d: Other constraints were removed but should be preserved", i)
+					}
+				}
+			}
+		},
+		Entry("update existing arch constraint in-place",
+			NewPod().WithName("test-pod").WithNodeSelectorTermsMatchExpressions(
 				[]corev1.NodeSelectorRequirement{
 					{
 						Key:      "kubernetes.io/os",
@@ -54,14 +102,13 @@ func TestApplyArchitectureNodeAffinityInPlaceUpdate(t *testing.T) {
 					},
 				},
 			).Build(),
-			architectures:          []string{"ppc64le"},
-			expectedTermCount:      1,
-			expectedArchInEachTerm: []string{"ppc64le"},
-			verifyOtherConstraints: true,
-		},
-		{
-			name: "update multiple terms with arch constraints",
-			pod: NewPod().WithName("test-pod").WithNodeSelectorTermsMatchExpressions(
+			[]string{"ppc64le"},
+			1,
+			[]string{"ppc64le"},
+			true,
+		),
+		Entry("update multiple terms with arch constraints",
+			NewPod().WithName("test-pod").WithNodeSelectorTermsMatchExpressions(
 				[]corev1.NodeSelectorRequirement{
 					{
 						Key:      "kubernetes.io/os",
@@ -87,14 +134,13 @@ func TestApplyArchitectureNodeAffinityInPlaceUpdate(t *testing.T) {
 					},
 				},
 			).Build(),
-			architectures:          []string{"ppc64le"},
-			expectedTermCount:      2,
-			expectedArchInEachTerm: []string{"ppc64le"},
-			verifyOtherConstraints: true,
-		},
-		{
-			name: "add arch to term without arch constraint",
-			pod: NewPod().WithName("test-pod").WithNodeSelectorTermsMatchExpressions(
+			[]string{"ppc64le"},
+			2,
+			[]string{"ppc64le"},
+			true,
+		),
+		Entry("add arch to term without arch constraint",
+			NewPod().WithName("test-pod").WithNodeSelectorTermsMatchExpressions(
 				[]corev1.NodeSelectorRequirement{
 					{
 						Key:      "kubernetes.io/os",
@@ -103,144 +149,70 @@ func TestApplyArchitectureNodeAffinityInPlaceUpdate(t *testing.T) {
 					},
 				},
 			).Build(),
-			architectures:          []string{"ppc64le"},
-			expectedTermCount:      1,
-			expectedArchInEachTerm: []string{"ppc64le"},
-			verifyOtherConstraints: true,
-		},
-	}
+			[]string{"ppc64le"},
+			1,
+			[]string{"ppc64le"},
+			true,
+		),
+	)
+})
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Store original term count to verify in-place update
-			originalTermCount := 0
-			if tt.pod.Spec.Affinity != nil &&
-				tt.pod.Spec.Affinity.NodeAffinity != nil &&
-				tt.pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution != nil {
-				originalTermCount = len(tt.pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms)
-			}
-
-			applyArchitectureNodeAffinity(tt.pod, tt.architectures)
-
-			// Verify the term count matches expected (should be preserved for in-place update)
-			if tt.pod.Spec.Affinity == nil ||
-				tt.pod.Spec.Affinity.NodeAffinity == nil ||
-				tt.pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution == nil {
-				t.Fatal("Expected affinity structure to be created")
-			}
-
-			terms := tt.pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms
-			if len(terms) != tt.expectedTermCount {
-				t.Errorf("Expected %d terms, got %d", tt.expectedTermCount, len(terms))
-			}
-
-			// For in-place updates, term count should be preserved
-			if originalTermCount > 0 && len(terms) != originalTermCount {
-				t.Errorf("Term count changed from %d to %d - this would cause Kubernetes API rejection", originalTermCount, len(terms))
-			}
-
-			// Verify each term has the correct architecture constraint
-			for i, term := range terms {
-				foundArch := false
-				for _, expr := range term.MatchExpressions {
-					if expr.Key == utils.ArchLabel {
-						foundArch = true
-						if expr.Operator != corev1.NodeSelectorOpIn {
-							t.Errorf("Term %d: Expected operator In, got %s", i, expr.Operator)
-						}
-						if len(expr.Values) != len(tt.expectedArchInEachTerm) {
-							t.Errorf("Term %d: Expected %d architectures, got %d", i, len(tt.expectedArchInEachTerm), len(expr.Values))
-						}
-						for j, expectedArch := range tt.expectedArchInEachTerm {
-							if j >= len(expr.Values) || expr.Values[j] != expectedArch {
-								t.Errorf("Term %d: Expected architecture %s at index %d, got %v", i, expectedArch, j, expr.Values)
-							}
-						}
-					}
-				}
-				if !foundArch {
-					t.Errorf("Term %d: Architecture constraint not found", i)
-				}
-
-				// Verify other constraints are preserved
-				if tt.verifyOtherConstraints {
-					nonArchCount := 0
-					for _, expr := range term.MatchExpressions {
-						if expr.Key != utils.ArchLabel {
-							nonArchCount++
-						}
-					}
-					if i == 0 && nonArchCount == 0 && originalTermCount > 0 {
-						t.Errorf("Term %d: Other constraints were removed but should be preserved", i)
-					}
-				}
-			}
-		})
-	}
-}
-
-// TestApplyArchitectureConstraintsPreservesTermStructure verifies that the complete
+// ApplyArchitectureConstraintsPreservesTermStructure verifies that the complete
 // applyArchitectureConstraints function preserves the NodeSelectorTerms structure
-func TestApplyArchitectureConstraintsPreservesTermStructure(t *testing.T) {
-	pod := NewPod().WithName("test-pod").WithNodeSelectors(utils.ArchLabel, "amd64").WithNodeSelectorTermsMatchExpressions(
-		[]corev1.NodeSelectorRequirement{
-			{
-				Key:      "kubernetes.io/os",
-				Operator: corev1.NodeSelectorOpIn,
-				Values:   []string{"linux"},
+var _ = Describe("ApplyArchitectureConstraintsPreservesTermStructure", func() {
+	It("should preserve term structure during in-place update", func() {
+		pod := NewPod().WithName("test-pod").WithNodeSelectors(utils.ArchLabel, "amd64").WithNodeSelectorTermsMatchExpressions(
+			[]corev1.NodeSelectorRequirement{
+				{
+					Key:      "kubernetes.io/os",
+					Operator: corev1.NodeSelectorOpIn,
+					Values:   []string{"linux"},
+				},
+				{
+					Key:      utils.ArchLabel,
+					Operator: corev1.NodeSelectorOpIn,
+					Values:   []string{"amd64", "ppc64le", "s390x"},
+				},
 			},
-			{
-				Key:      utils.ArchLabel,
-				Operator: corev1.NodeSelectorOpIn,
-				Values:   []string{"amd64", "ppc64le", "s390x"},
-			},
-		},
-	).Build()
+		).Build()
 
-	originalTermCount := len(pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms)
+		originalTermCount := len(pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms)
 
-	modified := applyArchitectureConstraints(pod, []string{"ppc64le"})
+		modified := applyArchitectureConstraints(pod, []string{"ppc64le"})
 
-	if !modified {
-		t.Error("Expected modified to be true")
-	}
+		Expect(modified).To(BeTrue(), "Expected modified to be true")
 
-	// Verify nodeSelector arch was removed
-	if _, exists := pod.Spec.NodeSelector[utils.ArchLabel]; exists {
-		t.Error("Architecture constraint should be removed from nodeSelector")
-	}
+		// Verify nodeSelector arch was removed
+		_, exists := pod.Spec.NodeSelector[utils.ArchLabel]
+		Expect(exists).To(BeFalse(), "Architecture constraint should be removed from nodeSelector")
 
-	// Verify term count is preserved (in-place update)
-	terms := pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms
-	if len(terms) != originalTermCount {
-		t.Errorf("Term count changed from %d to %d - this would cause Kubernetes API rejection", originalTermCount, len(terms))
-	}
+		// Verify term count is preserved (in-place update)
+		terms := pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms
+		Expect(terms).To(HaveLen(originalTermCount),
+			"Term count changed from %d to %d - this would cause Kubernetes API rejection", originalTermCount, len(terms))
 
-	// Verify architecture was updated to ppc64le
-	foundPpc64le := false
-	for _, term := range terms {
-		for _, expr := range term.MatchExpressions {
-			if expr.Key == utils.ArchLabel {
-				if len(expr.Values) == 1 && expr.Values[0] == "ppc64le" {
-					foundPpc64le = true
+		// Verify architecture was updated to ppc64le
+		foundPpc64le := false
+		for _, term := range terms {
+			for _, expr := range term.MatchExpressions {
+				if expr.Key == utils.ArchLabel {
+					if len(expr.Values) == 1 && expr.Values[0] == "ppc64le" {
+						foundPpc64le = true
+					}
 				}
 			}
 		}
-	}
-	if !foundPpc64le {
-		t.Error("Expected architecture to be updated to ppc64le")
-	}
+		Expect(foundPpc64le).To(BeTrue(), "Expected architecture to be updated to ppc64le")
 
-	// Verify os constraint is preserved
-	foundOS := false
-	for _, term := range terms {
-		for _, expr := range term.MatchExpressions {
-			if expr.Key == "kubernetes.io/os" {
-				foundOS = true
+		// Verify os constraint is preserved
+		foundOS := false
+		for _, term := range terms {
+			for _, expr := range term.MatchExpressions {
+				if expr.Key == "kubernetes.io/os" {
+					foundOS = true
+				}
 			}
 		}
-	}
-	if !foundOS {
-		t.Error("OS constraint should be preserved")
-	}
-}
+		Expect(foundOS).To(BeTrue(), "OS constraint should be preserved")
+	})
+})

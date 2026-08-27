@@ -88,247 +88,6 @@ func newHandleWebhook() *PodSchedulingGateMutatingWebHook {
 	return NewPodSchedulingGateMutatingWebHook(fakeClient, nil, nil, nil, s, record.NewFakeRecorder(32), pool)
 }
 
-var _ = Describe("Webhook CEL Handle admission", func() {
-
-	// TestHandleAdmission_ResponseAllowed
-	It("should return Allowed=true for a plain pod", func() {
-		pod := NewPod().WithName("plain-pod").WithNamespace("test-wh").WithContainersImages("nginx:latest").Build()
-		wh := newHandleWebhook()
-		resp := wh.Handle(context.Background(), buildHandleRequest(pod))
-		Expect(resp.Allowed).To(BeTrue(), "expected Allowed=true, got: %v", resp.Result)
-	})
-
-	// TestHandleAdmission_SchedulingGatePatchPresent
-	It("should include a patch that adds /spec/schedulingGates", func() {
-		pod := NewPod().WithName("plain-pod").WithNamespace("test-wh").WithContainersImages("nginx:latest").Build()
-		wh := newHandleWebhook()
-		resp := wh.Handle(context.Background(), buildHandleRequest(pod))
-		Expect(resp.Allowed).To(BeTrue(), "expected Allowed=true, got: %v", resp.Result)
-
-		gateFound := false
-		for _, p := range resp.Patches {
-			if p.Path == "/spec/schedulingGates" && p.Operation == "add" {
-				gateFound = true
-			}
-		}
-		Expect(gateFound).To(BeTrue(),
-			"expected patch to add /spec/schedulingGates; patches=%v", resp.Patches)
-	})
-
-	// TestHandleAdmission_SchedulingGateLabelPatchPresent
-	It("should include the scheduling gate label in the patch", func() {
-		pod := NewPod().WithName("plain-pod").WithNamespace("test-wh").WithContainersImages("nginx:latest").Build()
-		wh := newHandleWebhook()
-		resp := wh.Handle(context.Background(), buildHandleRequest(pod))
-		Expect(resp.Allowed).To(BeTrue(), "expected Allowed=true, got: %v", resp.Result)
-
-		originalJSON, _ := json.Marshal(pod)
-		patchedJSON, err := applyJSONPatches(originalJSON, resp.Patches)
-		if err != nil {
-			// Fallback: inspect labels directly via the patch values.
-			for _, p := range resp.Patches {
-				if p.Path == "/metadata/labels" || p.Path == "/metadata/labels/"+escapeJSONPointer(utils.SchedulingGateLabel) {
-					return // Label patch found, test passes
-				}
-			}
-			Fail("could not apply patches: " + err.Error())
-			return
-		}
-
-		var patched corev1.Pod
-		Expect(json.Unmarshal(patchedJSON, &patched)).To(Succeed(), "unmarshal patched pod")
-		Expect(patched.Labels[utils.SchedulingGateLabel]).To(Equal(utils.SchedulingGateLabelValueGated),
-			"label %q = %q, want %q — all labels: %v",
-			utils.SchedulingGateLabel, patched.Labels[utils.SchedulingGateLabel],
-			utils.SchedulingGateLabelValueGated, patched.Labels)
-	})
-
-	// TestHandleAdmission_PodWithNodeName_GateNotAdded
-	It("should not add the scheduling gate to pods already bound to a node (NodeName set)", func() {
-		pod := NewPod().WithName("bound-pod").WithNamespace("test-wh").WithNodeName("worker-1").WithContainersImages("nginx:latest").Build()
-		wh := newHandleWebhook()
-		resp := wh.Handle(context.Background(), buildHandleRequest(pod))
-		Expect(resp.Allowed).To(BeTrue(), "expected Allowed=true for already-bound pod")
-		for _, p := range resp.Patches {
-			Expect(p.Path == "/spec/schedulingGates" && p.Operation == "add").To(BeFalse(),
-				"should not add scheduling gate to pod with NodeName set; patch=%v", p)
-		}
-	})
-
-	// TestHandleAdmission_BadRawInput_ReturnsBadRequest
-	It("should return Allowed=false when the raw object bytes cannot be decoded as a Pod", func() {
-		wh := newHandleWebhook()
-		resp := wh.Handle(context.Background(), admission.Request{
-			AdmissionRequest: admissionv1.AdmissionRequest{
-				UID:       "bad-uid",
-				Operation: admissionv1.Create,
-				Object:    runtime.RawExtension{Raw: []byte(`{invalid json`)},
-				Resource:  metav1.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"},
-			},
-		})
-		Expect(resp.Allowed).To(BeFalse(), "expected Allowed=false for malformed raw input")
-	})
-
-	// TestHandleAdmission_AlreadyGatedPod_NoDuplicateGate
-	It("should not add a duplicate scheduling gate when the pod already carries it", func() {
-		pod := NewPod().WithName("pre-gated").WithNamespace("test-wh").WithSchedulingGates(utils.SchedulingGateName).WithContainersImages("nginx:latest").Build()
-		wh := newHandleWebhook()
-		resp := wh.Handle(context.Background(), buildHandleRequest(pod))
-		Expect(resp.Allowed).To(BeTrue(), "expected Allowed=true")
-
-		originalJSON, _ := json.Marshal(pod)
-		patchedJSON, err := applyJSONPatches(originalJSON, resp.Patches)
-		if err != nil {
-			addGateOps := 0
-			for _, p := range resp.Patches {
-				if p.Path == "/spec/schedulingGates" && p.Operation == "add" {
-					addGateOps++
-				}
-			}
-			Expect(addGateOps).To(BeNumerically("<=", 1),
-				"expected at most 1 add-schedulingGates patch, got %d", addGateOps)
-			return
-		}
-
-		var patched corev1.Pod
-		Expect(json.Unmarshal(patchedJSON, &patched)).To(Succeed(), "unmarshal patched pod")
-
-		count := 0
-		for _, g := range patched.Spec.SchedulingGates {
-			if g.Name == utils.SchedulingGateName {
-				count++
-			}
-		}
-		Expect(count).To(BeNumerically("<=", 1),
-			"expected exactly 1 scheduling gate in patched pod, got %d — gates=%v",
-			count, patched.Spec.SchedulingGates)
-	})
-
-	// TestHandleAdmission_CELAppliedViaApplyCELInWebhook
-	It("should apply CEL architecture constraints and add the scheduling gate in the correct order", func() {
-		ctx := context.Background()
-		recorder := record.NewFakeRecorder(8)
-
-		raw := NewPod().WithName("my-pod").WithNamespace("test-wh").WithLabels("app", "myapp").WithContainersImages("nginx:latest").Build()
-		pod := newPod(raw, ctx, recorder)
-
-		ppc := buildTestPPCWithCELRule("cel-ppc", "default", 100,
-			utils.ArchitectureAmd64,
-			`self.metadata.name == "my-pod"`,
-			utils.ArchitecturePpc64le)
-
-		wh := &PodSchedulingGateMutatingWebHook{}
-		wh.applyCELInWebhook(ctx, pod, []v1beta1.PodPlacementConfig{ppc})
-		pod.ensureSchedulingGate()
-
-		Expect(pod.Spec.Affinity).NotTo(BeNil())
-		Expect(pod.Spec.Affinity.NodeAffinity).NotTo(BeNil())
-		Expect(pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution).NotTo(BeNil())
-		archFound := false
-		for _, term := range pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms {
-			for _, expr := range term.MatchExpressions {
-				if expr.Key == utils.ArchLabel && len(expr.Values) == 1 && expr.Values[0] == utils.ArchitecturePpc64le {
-					archFound = true
-				}
-			}
-		}
-		Expect(archFound).To(BeTrue(), "expected ppc64le architecture constraint, not found")
-		Expect(pod.HasSchedulingGate()).To(BeTrue(),
-			"expected scheduling gate to be present after ensureSchedulingGate")
-	})
-})
-
-var _ = Describe("Webhook CEL apiReader/ppcCacheSynced behavior", func() {
-
-	// TestHandle_CacheSynced_NoPPC_NoAPIReaderFallback
-	It("should NOT call apiReader when informer cache is synced and returns no PPCs", func() {
-		s := runtime.NewScheme()
-		Expect(clientgoscheme.AddToScheme(s)).To(Succeed())
-		Expect(v1beta1.AddToScheme(s)).To(Succeed())
-
-		fakeClient := fake.NewClientBuilder().WithScheme(s).Build()
-		pool, err := ants.NewMultiPool(1, 1, ants.LeastTasks, ants.WithNonblocking(true))
-		Expect(err).NotTo(HaveOccurred())
-
-		apiReaderCalled := false
-		var mockAPIReader mockReader
-		mockAPIReader.listFn = func() error {
-			apiReaderCalled = true
-			return nil
-		}
-
-		cacheSynced := func() bool { return true }
-		wh := NewPodSchedulingGateMutatingWebHook(fakeClient, &mockAPIReader, cacheSynced, nil, s, record.NewFakeRecorder(32), pool)
-
-		pod := NewPod().WithName("plain-pod").WithNamespace("test-wh").WithContainersImages("nginx:latest").Build()
-		_ = wh.Handle(context.Background(), buildHandleRequest(pod))
-
-		Expect(apiReaderCalled).To(BeFalse(),
-			"apiReader should NOT be called when informer cache is synced and returned no PPCs")
-	})
-
-	// TestHandle_CacheNotSynced_NoPPC_APIReaderFallbackAllowed
-	It("should call apiReader when informer cache is NOT yet synced", func() {
-		s := runtime.NewScheme()
-		Expect(clientgoscheme.AddToScheme(s)).To(Succeed())
-		Expect(v1beta1.AddToScheme(s)).To(Succeed())
-
-		fakeClient := fake.NewClientBuilder().WithScheme(s).Build()
-		pool, err := ants.NewMultiPool(1, 1, ants.LeastTasks, ants.WithNonblocking(true))
-		Expect(err).NotTo(HaveOccurred())
-
-		apiReaderCalled := false
-		var mockAPIReader mockReader
-		mockAPIReader.listFn = func() error {
-			apiReaderCalled = true
-			return nil
-		}
-
-		cacheSynced := func() bool { return false }
-		wh := NewPodSchedulingGateMutatingWebHook(fakeClient, &mockAPIReader, cacheSynced, nil, s, record.NewFakeRecorder(32), pool)
-
-		pod := NewPod().WithName("plain-pod").WithNamespace("test-wh").WithContainersImages("nginx:latest").Build()
-		_ = wh.Handle(context.Background(), buildHandleRequest(pod))
-
-		Expect(apiReaderCalled).To(BeTrue(),
-			"apiReader SHOULD be called when informer cache is not yet synced and returned no PPCs")
-	})
-
-	// TestHandle_NilCacheSynced_NoPPC_APIReaderFallbackAllowed
-	It("should call apiReader when ppcCacheSynced is nil (no informer wired)", func() {
-		s := runtime.NewScheme()
-		Expect(clientgoscheme.AddToScheme(s)).To(Succeed())
-		Expect(v1beta1.AddToScheme(s)).To(Succeed())
-
-		fakeClient := fake.NewClientBuilder().WithScheme(s).Build()
-		pool, err := ants.NewMultiPool(1, 1, ants.LeastTasks, ants.WithNonblocking(true))
-		Expect(err).NotTo(HaveOccurred())
-
-		apiReaderCalled := false
-		var mockAPIReader mockReader
-		mockAPIReader.listFn = func() error {
-			apiReaderCalled = true
-			return nil
-		}
-
-		wh := NewPodSchedulingGateMutatingWebHook(fakeClient, &mockAPIReader, nil, nil, s, record.NewFakeRecorder(32), pool)
-
-		pod := NewPod().WithName("plain-pod").WithNamespace("test-wh").WithContainersImages("nginx:latest").Build()
-		_ = wh.Handle(context.Background(), buildHandleRequest(pod))
-
-		Expect(apiReaderCalled).To(BeTrue(),
-			"apiReader SHOULD be called when ppcCacheSynced is nil (no informer wired)")
-	})
-
-	// TestHandle_ApiReaderNil_NoFallback
-	It("should not panic and return Allowed=true when apiReader is nil", func() {
-		pod := NewPod().WithName("plain-pod").WithNamespace("test-wh").WithContainersImages("nginx:latest").Build()
-		wh := newHandleWebhook()
-		resp := wh.Handle(context.Background(), buildHandleRequest(pod))
-		Expect(resp.Allowed).To(BeTrue(), "expected Allowed=true with nil apiReader, got: %v", resp.Result)
-	})
-})
-
 // ── helpers ───────────────────────────────────────────────────────────────────
 
 // applyJSONPatches applies a slice of JSON Patch operations to srcJSON using
@@ -456,3 +215,752 @@ func (m *mockReader) List(_ context.Context, _ client.ObjectList, _ ...client.Li
 	}
 	return nil
 }
+
+var _ = Describe("CEL Webhook", func() {
+
+	Context("Handle admission", func() {
+
+		// TestHandleAdmission_ResponseAllowed
+		It("should return Allowed=true for a plain pod", func() {
+			pod := NewPod().WithName("plain-pod").WithNamespace("test-wh").WithContainersImages("nginx:latest").Build()
+			wh := newHandleWebhook()
+			resp := wh.Handle(context.Background(), buildHandleRequest(pod))
+			Expect(resp.Allowed).To(BeTrue(), "expected Allowed=true, got: %v", resp.Result)
+		})
+
+		// TestHandleAdmission_SchedulingGatePatchPresent
+		It("should include a patch that adds /spec/schedulingGates", func() {
+			pod := NewPod().WithName("plain-pod").WithNamespace("test-wh").WithContainersImages("nginx:latest").Build()
+			wh := newHandleWebhook()
+			resp := wh.Handle(context.Background(), buildHandleRequest(pod))
+			Expect(resp.Allowed).To(BeTrue(), "expected Allowed=true, got: %v", resp.Result)
+
+			gateFound := false
+			for _, p := range resp.Patches {
+				if p.Path == "/spec/schedulingGates" && p.Operation == "add" {
+					gateFound = true
+				}
+			}
+			Expect(gateFound).To(BeTrue(),
+				"expected patch to add /spec/schedulingGates; patches=%v", resp.Patches)
+		})
+
+		// TestHandleAdmission_SchedulingGateLabelPatchPresent
+		It("should include the scheduling gate label in the patch", func() {
+			pod := NewPod().WithName("plain-pod").WithNamespace("test-wh").WithContainersImages("nginx:latest").Build()
+			wh := newHandleWebhook()
+			resp := wh.Handle(context.Background(), buildHandleRequest(pod))
+			Expect(resp.Allowed).To(BeTrue(), "expected Allowed=true, got: %v", resp.Result)
+
+			originalJSON, _ := json.Marshal(pod)
+			patchedJSON, err := applyJSONPatches(originalJSON, resp.Patches)
+			if err != nil {
+				// Fallback: inspect labels directly via the patch values.
+				for _, p := range resp.Patches {
+					if p.Path == "/metadata/labels" || p.Path == "/metadata/labels/"+escapeJSONPointer(utils.SchedulingGateLabel) {
+						return // Label patch found, test passes
+					}
+				}
+				Fail("could not apply patches: " + err.Error())
+				return
+			}
+
+			var patched corev1.Pod
+			Expect(json.Unmarshal(patchedJSON, &patched)).To(Succeed(), "unmarshal patched pod")
+			Expect(patched.Labels[utils.SchedulingGateLabel]).To(Equal(utils.SchedulingGateLabelValueGated),
+				"label %q = %q, want %q — all labels: %v",
+				utils.SchedulingGateLabel, patched.Labels[utils.SchedulingGateLabel],
+				utils.SchedulingGateLabelValueGated, patched.Labels)
+		})
+
+		// TestHandleAdmission_PodWithNodeName_GateNotAdded
+		It("should not add the scheduling gate to pods already bound to a node (NodeName set)", func() {
+			pod := NewPod().WithName("bound-pod").WithNamespace("test-wh").WithNodeName("worker-1").WithContainersImages("nginx:latest").Build()
+			wh := newHandleWebhook()
+			resp := wh.Handle(context.Background(), buildHandleRequest(pod))
+			Expect(resp.Allowed).To(BeTrue(), "expected Allowed=true for already-bound pod")
+			for _, p := range resp.Patches {
+				Expect(p.Path == "/spec/schedulingGates" && p.Operation == "add").To(BeFalse(),
+					"should not add scheduling gate to pod with NodeName set; patch=%v", p)
+			}
+		})
+
+		// TestHandleAdmission_BadRawInput_ReturnsBadRequest
+		It("should return Allowed=false when the raw object bytes cannot be decoded as a Pod", func() {
+			wh := newHandleWebhook()
+			resp := wh.Handle(context.Background(), admission.Request{
+				AdmissionRequest: admissionv1.AdmissionRequest{
+					UID:       "bad-uid",
+					Operation: admissionv1.Create,
+					Object:    runtime.RawExtension{Raw: []byte(`{invalid json`)},
+					Resource:  metav1.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"},
+				},
+			})
+			Expect(resp.Allowed).To(BeFalse(), "expected Allowed=false for malformed raw input")
+		})
+
+		// TestHandleAdmission_AlreadyGatedPod_NoDuplicateGate
+		It("should not add a duplicate scheduling gate when the pod already carries it", func() {
+			pod := NewPod().WithName("pre-gated").WithNamespace("test-wh").WithSchedulingGates(utils.SchedulingGateName).WithContainersImages("nginx:latest").Build()
+			wh := newHandleWebhook()
+			resp := wh.Handle(context.Background(), buildHandleRequest(pod))
+			Expect(resp.Allowed).To(BeTrue(), "expected Allowed=true")
+
+			originalJSON, _ := json.Marshal(pod)
+			patchedJSON, err := applyJSONPatches(originalJSON, resp.Patches)
+			if err != nil {
+				addGateOps := 0
+				for _, p := range resp.Patches {
+					if p.Path == "/spec/schedulingGates" && p.Operation == "add" {
+						addGateOps++
+					}
+				}
+				Expect(addGateOps).To(BeNumerically("<=", 1),
+					"expected at most 1 add-schedulingGates patch, got %d", addGateOps)
+				return
+			}
+
+			var patched corev1.Pod
+			Expect(json.Unmarshal(patchedJSON, &patched)).To(Succeed(), "unmarshal patched pod")
+
+			count := 0
+			for _, g := range patched.Spec.SchedulingGates {
+				if g.Name == utils.SchedulingGateName {
+					count++
+				}
+			}
+			Expect(count).To(BeNumerically("<=", 1),
+				"expected exactly 1 scheduling gate in patched pod, got %d — gates=%v",
+				count, patched.Spec.SchedulingGates)
+		})
+
+		// TestHandleAdmission_CELAppliedViaApplyCELInWebhook
+		It("should apply CEL architecture constraints and add the scheduling gate in the correct order", func() {
+			ctx := context.Background()
+			recorder := record.NewFakeRecorder(8)
+
+			raw := NewPod().WithName("my-pod").WithNamespace("test-wh").WithLabels("app", "myapp").WithContainersImages("nginx:latest").Build()
+			pod := newPod(raw, ctx, recorder)
+
+			ppc := buildTestPPCWithCELRule("cel-ppc", "default", 100,
+				utils.ArchitectureAmd64,
+				`self.metadata.name == "my-pod"`,
+				utils.ArchitecturePpc64le)
+
+			wh := &PodSchedulingGateMutatingWebHook{}
+			wh.applyCELInWebhook(ctx, pod, []v1beta1.PodPlacementConfig{ppc})
+			pod.ensureSchedulingGate()
+
+			Expect(pod.Spec.Affinity).NotTo(BeNil())
+			Expect(pod.Spec.Affinity.NodeAffinity).NotTo(BeNil())
+			Expect(pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution).NotTo(BeNil())
+			archFound := false
+			for _, term := range pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms {
+				for _, expr := range term.MatchExpressions {
+					if expr.Key == utils.ArchLabel && len(expr.Values) == 1 && expr.Values[0] == utils.ArchitecturePpc64le {
+						archFound = true
+					}
+				}
+			}
+			Expect(archFound).To(BeTrue(), "expected ppc64le architecture constraint, not found")
+			Expect(pod.HasSchedulingGate()).To(BeTrue(),
+				"expected scheduling gate to be present after ensureSchedulingGate")
+		})
+	})
+
+	Context("apiReader and ppcCacheSynced behavior", func() {
+
+		// TestHandle_CacheSynced_NoPPC_NoAPIReaderFallback
+		It("should NOT call apiReader when informer cache is synced and returns no PPCs", func() {
+			s := runtime.NewScheme()
+			Expect(clientgoscheme.AddToScheme(s)).To(Succeed())
+			Expect(v1beta1.AddToScheme(s)).To(Succeed())
+
+			fakeClient := fake.NewClientBuilder().WithScheme(s).Build()
+			pool, err := ants.NewMultiPool(1, 1, ants.LeastTasks, ants.WithNonblocking(true))
+			Expect(err).NotTo(HaveOccurred())
+
+			apiReaderCalled := false
+			var mockAPIReader mockReader
+			mockAPIReader.listFn = func() error {
+				apiReaderCalled = true
+				return nil
+			}
+
+			cacheSynced := func() bool { return true }
+			wh := NewPodSchedulingGateMutatingWebHook(fakeClient, &mockAPIReader, cacheSynced, nil, s, record.NewFakeRecorder(32), pool)
+
+			pod := NewPod().WithName("plain-pod").WithNamespace("test-wh").WithContainersImages("nginx:latest").Build()
+			_ = wh.Handle(context.Background(), buildHandleRequest(pod))
+
+			Expect(apiReaderCalled).To(BeFalse(),
+				"apiReader should NOT be called when informer cache is synced and returned no PPCs")
+		})
+
+		// TestHandle_CacheNotSynced_NoPPC_APIReaderFallbackAllowed
+		It("should call apiReader when informer cache is NOT yet synced", func() {
+			s := runtime.NewScheme()
+			Expect(clientgoscheme.AddToScheme(s)).To(Succeed())
+			Expect(v1beta1.AddToScheme(s)).To(Succeed())
+
+			fakeClient := fake.NewClientBuilder().WithScheme(s).Build()
+			pool, err := ants.NewMultiPool(1, 1, ants.LeastTasks, ants.WithNonblocking(true))
+			Expect(err).NotTo(HaveOccurred())
+
+			apiReaderCalled := false
+			var mockAPIReader mockReader
+			mockAPIReader.listFn = func() error {
+				apiReaderCalled = true
+				return nil
+			}
+
+			cacheSynced := func() bool { return false }
+			wh := NewPodSchedulingGateMutatingWebHook(fakeClient, &mockAPIReader, cacheSynced, nil, s, record.NewFakeRecorder(32), pool)
+
+			pod := NewPod().WithName("plain-pod").WithNamespace("test-wh").WithContainersImages("nginx:latest").Build()
+			_ = wh.Handle(context.Background(), buildHandleRequest(pod))
+
+			Expect(apiReaderCalled).To(BeTrue(),
+				"apiReader SHOULD be called when informer cache is not yet synced and returned no PPCs")
+		})
+
+		// TestHandle_NilCacheSynced_NoPPC_APIReaderFallbackAllowed
+		It("should call apiReader when ppcCacheSynced is nil (no informer wired)", func() {
+			s := runtime.NewScheme()
+			Expect(clientgoscheme.AddToScheme(s)).To(Succeed())
+			Expect(v1beta1.AddToScheme(s)).To(Succeed())
+
+			fakeClient := fake.NewClientBuilder().WithScheme(s).Build()
+			pool, err := ants.NewMultiPool(1, 1, ants.LeastTasks, ants.WithNonblocking(true))
+			Expect(err).NotTo(HaveOccurred())
+
+			apiReaderCalled := false
+			var mockAPIReader mockReader
+			mockAPIReader.listFn = func() error {
+				apiReaderCalled = true
+				return nil
+			}
+
+			wh := NewPodSchedulingGateMutatingWebHook(fakeClient, &mockAPIReader, nil, nil, s, record.NewFakeRecorder(32), pool)
+
+			pod := NewPod().WithName("plain-pod").WithNamespace("test-wh").WithContainersImages("nginx:latest").Build()
+			_ = wh.Handle(context.Background(), buildHandleRequest(pod))
+
+			Expect(apiReaderCalled).To(BeTrue(),
+				"apiReader SHOULD be called when ppcCacheSynced is nil (no informer wired)")
+		})
+
+		// TestHandle_ApiReaderNil_NoFallback
+		It("should not panic and return Allowed=true when apiReader is nil", func() {
+			pod := NewPod().WithName("plain-pod").WithNamespace("test-wh").WithContainersImages("nginx:latest").Build()
+			wh := newHandleWebhook()
+			resp := wh.Handle(context.Background(), buildHandleRequest(pod))
+			Expect(resp.Allowed).To(BeTrue(), "expected Allowed=true with nil apiReader, got: %v", resp.Result)
+		})
+	})
+
+	Context("applyCELInWebhook", func() {
+
+		// TestApplyCELInWebhook_AppliesArchitecturesBeforePersistence
+		Describe("applies architecture constraints from the matching PPC", func() {
+			var (
+				ctx      context.Context
+				recorder *record.FakeRecorder
+			)
+
+			BeforeEach(func() {
+				ctx = context.Background()
+				recorder = record.NewFakeRecorder(10)
+			})
+
+			DescribeTable("should apply (or skip) architectures based on PPC configuration",
+				func(
+					pod *corev1.Pod,
+					matchingPPCs []v1beta1.PodPlacementConfig,
+					expectedArchitectures []string,
+					expectModified bool,
+				) {
+					webhook := &PodSchedulingGateMutatingWebHook{}
+					podWrapper := newPod(pod, ctx, recorder)
+					webhook.applyCELInWebhook(ctx, podWrapper, matchingPPCs)
+
+					if expectModified {
+						Expect(podWrapper.Spec.Affinity).NotTo(BeNil(), "Expected node affinity to be set")
+						Expect(podWrapper.Spec.Affinity.NodeAffinity).NotTo(BeNil())
+						Expect(podWrapper.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution).NotTo(BeNil())
+
+						found := false
+						for _, term := range podWrapper.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms {
+							for _, expr := range term.MatchExpressions {
+								if expr.Key == utils.ArchLabel && expr.Operator == corev1.NodeSelectorOpIn {
+									found = true
+									Expect(expr.Values).To(HaveLen(len(expectedArchitectures)))
+									for i, arch := range expectedArchitectures {
+										Expect(expr.Values[i]).To(Equal(arch))
+									}
+								}
+							}
+						}
+						Expect(found).To(BeTrue(), "Architecture requirement not found in node affinity")
+					} else {
+						if podWrapper.Spec.Affinity != nil &&
+							podWrapper.Spec.Affinity.NodeAffinity != nil &&
+							podWrapper.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution != nil {
+							for _, term := range podWrapper.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms {
+								for _, expr := range term.MatchExpressions {
+									Expect(expr.Key).NotTo(Equal(utils.ArchLabel), "Unexpected architecture requirement found")
+								}
+							}
+						}
+					}
+				},
+				Entry("applies CEL architecture from highest priority PPC",
+					NewPod().WithName("test-pod").WithNamespace("default").Build(),
+					[]v1beta1.PodPlacementConfig{
+						*NewPodPlacementConfig().WithName("ppc-high-priority").WithNamespace("default").WithPriority(100).
+							WithCelArchitecturePlacement(true, []string{"amd64"}, []plugins.ArchitectureRule{
+								NewRule("test-rule", "self.metadata.name == 'test-pod'", "ppc64le"),
+							}).Build(),
+					},
+					[]string{"ppc64le"}, true,
+				),
+				Entry("no modification when no CEL plugin enabled",
+					NewPod().WithName("test-pod").WithNamespace("default").Build(),
+					[]v1beta1.PodPlacementConfig{
+						*NewPodPlacementConfig().WithName("ppc-no-cel").WithNamespace("default").WithPriority(100).
+							WithNodeAffinityScoring(true).Build(),
+					},
+					nil, false,
+				),
+				Entry("applies fallback when no rules match",
+					NewPod().WithName("other-pod").WithNamespace("default").Build(),
+					[]v1beta1.PodPlacementConfig{
+						*NewPodPlacementConfig().WithName("ppc-with-fallback").WithNamespace("default").WithPriority(100).
+							WithCelArchitecturePlacement(true, []string{"amd64", "arm64"}, []plugins.ArchitectureRule{
+								NewRule("test-rule", "self.metadata.name == 'test-pod'", "ppc64le"),
+							}).Build(),
+					},
+					[]string{"amd64", "arm64"}, true,
+				),
+			)
+		})
+
+		// TestApplyCELInWebhook_MalformedPPCDoesNotBlockLowerPriority
+		It("should not block lower-priority PPCs when the higher-priority PPC has malformed CEL", func() {
+			ctx := context.Background()
+			recorder := record.NewFakeRecorder(10)
+
+			pod := NewPod().WithName("test-pod").WithNamespace("default").Build()
+			matchingPPCs := []v1beta1.PodPlacementConfig{
+				*NewPodPlacementConfig().WithName("ppc-malformed-high-priority").WithNamespace("default").WithPriority(200).
+					WithCelArchitecturePlacement(true, []string{"amd64"}, []plugins.ArchitectureRule{
+						NewRule("malformed-rule", "self.metadata.name ==", "s390x"),
+					}).Build(),
+				*NewPodPlacementConfig().WithName("ppc-valid-low-priority").WithNamespace("default").WithPriority(100).
+					WithCelArchitecturePlacement(true, []string{"amd64"}, []plugins.ArchitectureRule{
+						NewRule("valid-rule", "self.metadata.name == 'test-pod'", "ppc64le"),
+					}).Build(),
+			}
+
+			webhook := &PodSchedulingGateMutatingWebHook{}
+			podWrapper := newPod(pod, ctx, recorder)
+			webhook.applyCELInWebhook(ctx, podWrapper, matchingPPCs)
+
+			Expect(podWrapper.Spec.Affinity).NotTo(BeNil(), "Expected node affinity to be set from lower-priority PPC")
+			Expect(podWrapper.Spec.Affinity.NodeAffinity).NotTo(BeNil())
+			Expect(podWrapper.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution).NotTo(BeNil())
+
+			found := false
+			for _, term := range podWrapper.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms {
+				for _, expr := range term.MatchExpressions {
+					if expr.Key == utils.ArchLabel && expr.Operator == corev1.NodeSelectorOpIn {
+						found = true
+						Expect(expr.Values).To(ConsistOf("ppc64le"))
+					}
+				}
+			}
+			Expect(found).To(BeTrue(), "Architecture requirement from lower-priority PPC not found")
+		})
+
+		// TestApplyCELInWebhook_RespectsPPCPriority
+		It("should sort PPCs by priority and apply only the highest-priority matching PPC", func() {
+			ctx := context.Background()
+			recorder := record.NewFakeRecorder(10)
+
+			pod := NewPod().WithName("test-pod").WithNamespace("default").Build()
+			matchingPPCs := []v1beta1.PodPlacementConfig{
+				*NewPodPlacementConfig().WithName("ppc-low-priority").WithNamespace("default").WithPriority(50).
+					WithCelArchitecturePlacement(true, []string{"arm64"}, nil).Build(),
+				*NewPodPlacementConfig().WithName("ppc-high-priority").WithNamespace("default").WithPriority(150).
+					WithCelArchitecturePlacement(true, []string{"ppc64le"}, nil).Build(),
+				*NewPodPlacementConfig().WithName("ppc-medium-priority").WithNamespace("default").WithPriority(100).
+					WithCelArchitecturePlacement(true, []string{"s390x"}, nil).Build(),
+			}
+
+			webhook := &PodSchedulingGateMutatingWebHook{}
+			podWrapper := newPod(pod, ctx, recorder)
+			webhook.applyCELInWebhook(ctx, podWrapper, matchingPPCs)
+
+			Expect(podWrapper.Spec.Affinity).NotTo(BeNil())
+			Expect(podWrapper.Spec.Affinity.NodeAffinity).NotTo(BeNil())
+			Expect(podWrapper.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution).NotTo(BeNil())
+
+			found := false
+			for _, term := range podWrapper.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms {
+				for _, expr := range term.MatchExpressions {
+					if expr.Key == utils.ArchLabel && expr.Operator == corev1.NodeSelectorOpIn {
+						found = true
+						Expect(expr.Values).To(ConsistOf("ppc64le"),
+							"Expected architecture [ppc64le] from highest priority PPC, got %v", expr.Values)
+					}
+				}
+			}
+			Expect(found).To(BeTrue(), "Architecture requirement from highest priority PPC not found")
+		})
+
+		// TestApplyCELInWebhook_RemovesNodeSelectorArchBeforeAdmission
+		It("should remove kubernetes.io/arch from nodeSelector and set NodeAffinity before admission", func() {
+			ctx := context.Background()
+			recorder := record.NewFakeRecorder(10)
+
+			pod := NewPod().WithName("test-pod-with-nodeselector").WithNamespace("default").
+				WithNodeSelectors(utils.ArchLabel, "amd64", "other-key", "other-value").Build()
+
+			matchingPPCs := []v1beta1.PodPlacementConfig{
+				*NewPodPlacementConfig().WithName("ppc-cel").WithNamespace("default").WithPriority(100).
+					WithCelArchitecturePlacement(true, []string{"ppc64le"}, nil).Build(),
+			}
+
+			webhook := &PodSchedulingGateMutatingWebHook{}
+			podWrapper := newPod(pod, ctx, recorder)
+			webhook.applyCELInWebhook(ctx, podWrapper, matchingPPCs)
+
+			Expect(podWrapper.Spec.NodeSelector).NotTo(HaveKey(utils.ArchLabel),
+				"kubernetes.io/arch should have been removed from nodeSelector by the webhook")
+			Expect(podWrapper.Spec.NodeSelector["other-key"]).To(Equal("other-value"),
+				"non-arch nodeSelector key must be preserved")
+
+			Expect(podWrapper.Spec.Affinity).NotTo(BeNil())
+			Expect(podWrapper.Spec.Affinity.NodeAffinity).NotTo(BeNil())
+			Expect(podWrapper.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution).NotTo(BeNil())
+			terms := podWrapper.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms
+			Expect(terms).NotTo(BeEmpty(), "Expected at least one NodeSelectorTerm after applyCELInWebhook")
+
+			found := false
+			for _, term := range terms {
+				for _, expr := range term.MatchExpressions {
+					if expr.Key == utils.ArchLabel && expr.Operator == corev1.NodeSelectorOpIn {
+						found = true
+						Expect(expr.Values).To(ConsistOf("ppc64le"))
+					}
+				}
+			}
+			Expect(found).To(BeTrue(), "Architecture requirement not found in NodeAffinity after applyCELInWebhook")
+		})
+
+		// TestApplyCELInWebhook_ControllerIdempotencyAfterWebhookMutation
+		It("should not change NodeSelectorTerms count when re-applying the same constraints (KEP-3838 idempotency)", func() {
+			ctx := context.Background()
+			recorder := record.NewFakeRecorder(10)
+
+			pod := NewPod().WithName("post-webhook-pod").WithNamespace("default").
+				WithNodeSelectorTermsMatchExpressions(
+					[]corev1.NodeSelectorRequirement{
+						{Key: "topology.kubernetes.io/zone", Operator: corev1.NodeSelectorOpIn, Values: []string{"us-east-1a"}},
+						{Key: utils.ArchLabel, Operator: corev1.NodeSelectorOpIn, Values: []string{"ppc64le"}},
+					},
+				).Build()
+
+			matchingPPCs := []v1beta1.PodPlacementConfig{
+				*NewPodPlacementConfig().WithName("ppc-cel").WithNamespace("default").WithPriority(100).
+					WithCelArchitecturePlacement(true, []string{"ppc64le"}, nil).Build(),
+			}
+
+			originalTermCount := len(pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms)
+
+			webhook := &PodSchedulingGateMutatingWebHook{}
+			podWrapper := newPod(pod, ctx, recorder)
+			webhook.applyCELInWebhook(ctx, podWrapper, matchingPPCs)
+
+			finalTermCount := len(podWrapper.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms)
+			Expect(finalTermCount).To(Equal(originalTermCount),
+				"NodeSelectorTerms count changed from %d to %d — "+
+					"this would cause Kubernetes to reject the controller update with HTTP 422 "+
+					"(KEP-3838 immutability constraint)", originalTermCount, finalTermCount)
+
+			zoneFound := false
+			for _, term := range podWrapper.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms {
+				for _, expr := range term.MatchExpressions {
+					if expr.Key == "topology.kubernetes.io/zone" {
+						zoneFound = true
+					}
+				}
+			}
+			Expect(zoneFound).To(BeTrue(), "non-architecture zone constraint was removed — must be preserved")
+
+			archFound := false
+			for _, term := range podWrapper.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms {
+				for _, expr := range term.MatchExpressions {
+					if expr.Key == utils.ArchLabel {
+						archFound = true
+						Expect(expr.Values).To(ConsistOf("ppc64le"))
+					}
+				}
+			}
+			Expect(archFound).To(BeTrue(), "Architecture constraint not found after controller re-application")
+		})
+
+		// TestApplyCELInWebhook_KEP3838_ArchOnlyTermPreserved
+		// Regression test for the root cause of the integration failure:
+		// a 2-term pod (arch-only term + zone term) must keep both terms after the
+		// webhook fires so the controller's subsequent Update does not send fewer
+		// terms than what was persisted, which would be rejected with HTTP 422
+		// ("no additions/deletions to non-empty NodeSelectorTerms list are allowed",
+		// KEP-3838 immutability requirement).
+		It("should preserve both NodeSelectorTerms when one term is arch-only (KEP-3838 webhook regression)", func() {
+			ctx := context.Background()
+			recorder := record.NewFakeRecorder(10)
+
+			// Pod with 2 terms: Term 1 = arch-only, Term 2 = zone-only.
+			// This mirrors the exact scenario from the failing integration test.
+			pod := NewPod().WithName("kep3838-webhook-pod").WithNamespace("default").
+				WithNodeSelectorTermsMatchExpressions(
+					// Term 1: arch-only — must NOT be dropped
+					[]corev1.NodeSelectorRequirement{
+						{Key: utils.ArchLabel, Operator: corev1.NodeSelectorOpIn, Values: []string{utils.ArchitectureAmd64}},
+					},
+					// Term 2: zone constraint — must be preserved
+					[]corev1.NodeSelectorRequirement{
+						{Key: "topology.kubernetes.io/zone", Operator: corev1.NodeSelectorOpIn, Values: []string{"us-east-1a"}},
+					},
+				).Build()
+
+			matchingPPCs := []v1beta1.PodPlacementConfig{
+				*NewPodPlacementConfig().WithName("kep3838-ppc").WithNamespace("default").WithPriority(100).
+					WithCelArchitecturePlacement(true, []string{utils.ArchitecturePpc64le}, []plugins.ArchitectureRule{
+						NewRule("always-true", `true`, utils.ArchitecturePpc64le),
+					}).Build(),
+			}
+
+			wh := &PodSchedulingGateMutatingWebHook{}
+			podWrapper := newPod(pod, ctx, recorder)
+			wh.applyCELInWebhook(ctx, podWrapper, matchingPPCs)
+
+			terms := podWrapper.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms
+			Expect(terms).To(HaveLen(2),
+				"webhook must NOT shrink NodeSelectorTerms (KEP-3838): expected 2 terms, got %d — "+
+					"this would cause a Kubernetes HTTP 422 on the controller Update", len(terms))
+
+			// Verify architecture was updated to ppc64le in BOTH terms
+			for i, term := range terms {
+				found := false
+				for _, expr := range term.MatchExpressions {
+					if expr.Key == utils.ArchLabel {
+						found = true
+						Expect(expr.Values).To(ConsistOf(utils.ArchitecturePpc64le),
+							"term[%d]: expected ppc64le architecture, got %v", i, expr.Values)
+					}
+				}
+				Expect(found).To(BeTrue(), "term[%d]: architecture constraint missing after webhook applied", i)
+			}
+
+			// Verify zone is preserved in term 1 (index 1 = original zone-only term)
+			zoneFound := false
+			for _, expr := range terms[1].MatchExpressions {
+				if expr.Key == "topology.kubernetes.io/zone" {
+					zoneFound = true
+					Expect(expr.Values).To(ConsistOf("us-east-1a"), "zone value was modified")
+				}
+			}
+			Expect(zoneFound).To(BeTrue(), "zone constraint was removed from the zone term — must be preserved")
+		})
+	})
+
+	Context("Plugin Disabled", func() {
+
+		It("should not modify pod affinity or nodeSelector when the CEL plugin is disabled (Enabled: false)", func() {
+			ctx := context.Background()
+			recorder := record.NewFakeRecorder(8)
+
+			original := NewPod().
+				WithName("test-pod").
+				WithNamespace("default").
+				WithContainersImages("nginx:latest").
+				Build()
+
+			ppcs := []v1beta1.PodPlacementConfig{
+				*NewPodPlacementConfig().
+					WithName("disabled-cel-ppc").
+					WithNamespace("default").
+					WithPriority(100).
+					WithCelArchitecturePlacement(false, []string{utils.ArchitecturePpc64le},
+						[]plugins.ArchitectureRule{
+							{Name: "always-true", Expression: `true`, Architectures: []string{utils.ArchitecturePpc64le}},
+						}).
+					Build(),
+			}
+
+			wh := &PodSchedulingGateMutatingWebHook{}
+			pod := newPod(original, ctx, recorder)
+			wh.applyCELInWebhook(ctx, pod, ppcs)
+
+			Expect(pod.Spec.Affinity).To(BeNil(),
+				"expected pod.Spec.Affinity to be nil when CEL plugin is disabled")
+			if pod.Spec.NodeSelector != nil {
+				Expect(pod.Spec.NodeSelector).NotTo(HaveKey(utils.ArchLabel),
+					"expected no arch nodeSelector when CEL plugin is disabled")
+			}
+		})
+
+		It("should not touch existing pod affinity when the CEL plugin is disabled", func() {
+			ctx := context.Background()
+			recorder := record.NewFakeRecorder(8)
+
+			existingTerm := corev1.NodeSelectorTerm{
+				MatchExpressions: []corev1.NodeSelectorRequirement{
+					{Key: "topology.kubernetes.io/zone", Operator: corev1.NodeSelectorOpIn, Values: []string{"us-east-1a"}},
+				},
+			}
+
+			original := NewPod().WithName("pod-with-affinity").WithNamespace("default").
+				WithAffinity(&corev1.Affinity{
+					NodeAffinity: &corev1.NodeAffinity{
+						RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
+							NodeSelectorTerms: []corev1.NodeSelectorTerm{existingTerm},
+						},
+					},
+				}).Build()
+
+			ppcs := []v1beta1.PodPlacementConfig{
+				*NewPodPlacementConfig().
+					WithName("disabled-ppc").
+					WithNamespace("default").
+					WithCelArchitecturePlacement(false, []string{utils.ArchitecturePpc64le}, nil).
+					Build(),
+			}
+
+			wh := &PodSchedulingGateMutatingWebHook{}
+			pod := newPod(original, ctx, recorder)
+			wh.applyCELInWebhook(ctx, pod, ppcs)
+
+			Expect(pod.Spec.Affinity).NotTo(BeNil(),
+				"pod affinity should not have been removed by a disabled CEL plugin")
+			Expect(pod.Spec.Affinity.NodeAffinity).NotTo(BeNil())
+			Expect(pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution).NotTo(BeNil())
+			terms := pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms
+			Expect(terms).To(HaveLen(1))
+			Expect(terms[0].MatchExpressions).To(HaveLen(1))
+			Expect(terms[0].MatchExpressions[0].Key).To(Equal("topology.kubernetes.io/zone"),
+				"existing affinity term was modified by disabled plugin")
+		})
+	})
+
+	Context("Scheduling Gate Idempotency", func() {
+
+		It("should not add a duplicate scheduling gate when it is already present", func() {
+			ctx := context.Background()
+			recorder := record.NewFakeRecorder(8)
+
+			raw := NewPod().
+				WithName("pre-gated").
+				WithNamespace("default").
+				WithSchedulingGates(utils.SchedulingGateName).
+				Build()
+			pod := newPod(raw, ctx, recorder)
+			pod.ensureSchedulingGate()
+
+			count := 0
+			for _, g := range pod.Spec.SchedulingGates {
+				if g.Name == utils.SchedulingGateName {
+					count++
+				}
+			}
+			Expect(count).To(Equal(1),
+				"expected exactly 1 instance of scheduling gate %q, got %d — gates=%v",
+				utils.SchedulingGateName, count, pod.Spec.SchedulingGates)
+		})
+
+		It("should add the scheduling gate when the pod does not have it", func() {
+			ctx := context.Background()
+			recorder := record.NewFakeRecorder(8)
+
+			raw := NewPod().
+				WithName("ungated").
+				WithNamespace("default").
+				Build()
+			pod := newPod(raw, ctx, recorder)
+			pod.ensureSchedulingGate()
+
+			found := false
+			for _, g := range pod.Spec.SchedulingGates {
+				if g.Name == utils.SchedulingGateName {
+					found = true
+				}
+			}
+			Expect(found).To(BeTrue(),
+				"expected scheduling gate %q to be added, got gates=%v",
+				utils.SchedulingGateName, pod.Spec.SchedulingGates)
+		})
+
+		It("should preserve pre-existing gates from other controllers when adding the MTO gate", func() {
+			ctx := context.Background()
+			recorder := record.NewFakeRecorder(8)
+
+			raw := NewPod().
+				WithName("multi-gated").
+				WithNamespace("default").
+				WithSchedulingGates("other-controller.example.com/my-gate").
+				Build()
+			pod := newPod(raw, ctx, recorder)
+			pod.ensureSchedulingGate()
+
+			Expect(pod.Spec.SchedulingGates).To(HaveLen(2),
+				"expected at least 2 gates after ensureSchedulingGate")
+
+			mtoGateFound := false
+			otherGateFound := false
+			for _, g := range pod.Spec.SchedulingGates {
+				switch g.Name {
+				case utils.SchedulingGateName:
+					mtoGateFound = true
+				case "other-controller.example.com/my-gate":
+					otherGateFound = true
+				}
+			}
+			Expect(mtoGateFound).To(BeTrue(),
+				"MTO gate not found after ensureSchedulingGate; gates=%v", pod.Spec.SchedulingGates)
+			Expect(otherGateFound).To(BeTrue(),
+				"pre-existing gate was removed by ensureSchedulingGate; gates=%v", pod.Spec.SchedulingGates)
+		})
+
+		It("should still add the scheduling gate even when the CEL plugin is disabled", func() {
+			ctx := context.Background()
+			recorder := record.NewFakeRecorder(8)
+
+			raw := NewPod().
+				WithName("disabled-gate-test").
+				WithNamespace("default").
+				WithContainersImages("nginx:latest").
+				Build()
+			pod := newPod(raw, ctx, recorder)
+
+			ppcs := []v1beta1.PodPlacementConfig{
+				*NewPodPlacementConfig().
+					WithName("disabled-ppc").
+					WithNamespace("default").
+					WithCelArchitecturePlacement(false, []string{utils.ArchitecturePpc64le}, nil).
+					Build(),
+			}
+
+			wh := &PodSchedulingGateMutatingWebHook{}
+			wh.applyCELInWebhook(ctx, pod, ppcs)
+
+			Expect(pod.Spec.Affinity).To(BeNil(),
+				"disabled CEL plugin must not set affinity; got: %+v", pod.Spec.Affinity)
+
+			pod.ensureSchedulingGate()
+			Expect(pod.HasSchedulingGate()).To(BeTrue(),
+				"scheduling gate should be present even when CEL plugin is disabled")
+		})
+	})
+})

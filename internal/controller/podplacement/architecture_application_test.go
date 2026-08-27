@@ -17,130 +17,122 @@ limitations under the License.
 package podplacement
 
 import (
-	"testing"
-
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 
 	. "github.com/openshift/multiarch-tuning-operator/pkg/testing/builder"
 	"github.com/openshift/multiarch-tuning-operator/pkg/utils"
 )
 
-func TestApplyArchitectureNodeAffinity(t *testing.T) {
-	tests := []struct {
-		name           string
-		pod            *corev1.Pod
-		architectures  []string
-		expectAffinity bool
-	}{
-		{
-			name:           "apply single architecture",
-			pod:            NewPod().WithName("test-pod").Build(),
-			architectures:  []string{"ppc64le"},
-			expectAffinity: true,
-		},
-		{
-			name:           "apply multiple architectures",
-			pod:            NewPod().WithName("test-pod").Build(),
-			architectures:  []string{"amd64", "ppc64le"},
-			expectAffinity: true,
-		},
-		{
-			name:           "empty architectures list",
-			pod:            NewPod().WithName("test-pod").Build(),
-			architectures:  []string{},
-			expectAffinity: false,
-		},
-		{
-			name: "apply to pod with existing affinity",
-			pod: NewPod().WithName("test-pod").WithAffinity(&corev1.Affinity{
-				PodAffinity: &corev1.PodAffinity{},
-			}).Build(),
-			architectures:  []string{"ppc64le"},
-			expectAffinity: true,
-		},
-	}
+var _ = Describe("ApplyArchitectureNodeAffinity", func() {
+	DescribeTable("should apply architecture node affinity correctly",
+		func(pod *corev1.Pod, architectures []string, expectAffinity bool) {
+			applyArchitectureNodeAffinity(pod, architectures)
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			applyArchitectureNodeAffinity(tt.pod, tt.architectures)
-
-			if tt.expectAffinity {
+			if expectAffinity {
 				// Verify affinity structure was created
-				if tt.pod.Spec.Affinity == nil {
-					t.Fatal("Expected affinity to be created")
-				}
-				if tt.pod.Spec.Affinity.NodeAffinity == nil {
-					t.Fatal("Expected node affinity to be created")
-				}
-				if tt.pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution == nil {
-					t.Fatal("Expected required node affinity to be created")
-				}
+				Expect(pod.Spec.Affinity).NotTo(BeNil(), "Expected affinity to be created")
+				Expect(pod.Spec.Affinity.NodeAffinity).NotTo(BeNil(), "Expected node affinity to be created")
+				Expect(pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution).NotTo(BeNil(),
+					"Expected required node affinity to be created")
 
 				// Verify architecture requirement was added
 				found := false
-				for _, term := range tt.pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms {
+				for _, term := range pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms {
 					for _, expr := range term.MatchExpressions {
 						if expr.Key == utils.ArchLabel && expr.Operator == corev1.NodeSelectorOpIn {
 							found = true
-							if len(expr.Values) != len(tt.architectures) {
-								t.Errorf("Expected %d architectures, got %d", len(tt.architectures), len(expr.Values))
-							}
-							for i, arch := range tt.architectures {
-								if expr.Values[i] != arch {
-									t.Errorf("Expected architecture %s at index %d, got %s", arch, i, expr.Values[i])
-								}
-							}
+							Expect(expr.Values).To(Equal(architectures))
 						}
 					}
 				}
-				if !found {
-					t.Error("Architecture requirement not found in node affinity")
-				}
+				Expect(found).To(BeTrue(), "Architecture requirement not found in node affinity")
 			} else {
 				// For empty architectures, affinity should not be modified
-				if tt.pod.Spec.Affinity != nil {
-					if tt.pod.Spec.Affinity.NodeAffinity != nil {
-						if tt.pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution != nil {
-							if len(tt.pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms) > 0 {
-								t.Error("Expected no node selector terms for empty architectures")
+				if pod.Spec.Affinity != nil && pod.Spec.Affinity.NodeAffinity != nil &&
+					pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution != nil {
+					Expect(pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms).
+						To(BeEmpty(), "Expected no node selector terms for empty architectures")
+				}
+			}
+		},
+		Entry("apply single architecture",
+			NewPod().WithName("test-pod").Build(),
+			[]string{"ppc64le"},
+			true,
+		),
+		Entry("apply multiple architectures",
+			NewPod().WithName("test-pod").Build(),
+			[]string{"amd64", "ppc64le"},
+			true,
+		),
+		Entry("empty architectures list",
+			NewPod().WithName("test-pod").Build(),
+			[]string{},
+			false,
+		),
+		Entry("apply to pod with existing affinity",
+			NewPod().WithName("test-pod").WithAffinity(&corev1.Affinity{
+				PodAffinity: &corev1.PodAffinity{},
+			}).Build(),
+			[]string{"ppc64le"},
+			true,
+		),
+	)
+})
+
+var _ = Describe("ApplyArchitectureConstraints", func() {
+	DescribeTable("should apply architecture constraints correctly",
+		func(pod *corev1.Pod, architectures []string, expectModified bool) {
+			modified := applyArchitectureConstraints(pod, architectures)
+
+			Expect(modified).To(Equal(expectModified))
+
+			if expectModified && len(architectures) > 0 {
+				// Verify old constraints were removed
+				if pod.Spec.NodeSelector != nil {
+					_, exists := pod.Spec.NodeSelector[utils.ArchLabel]
+					Expect(exists).To(BeFalse(), "Old architecture constraint still exists in nodeSelector")
+				}
+
+				// Verify new constraints were applied
+				Expect(pod.Spec.Affinity).NotTo(BeNil(), "Expected node affinity to be created")
+				Expect(pod.Spec.Affinity.NodeAffinity).NotTo(BeNil(), "Expected node affinity to be created")
+
+				found := false
+				if pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution != nil {
+					for _, term := range pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms {
+						for _, expr := range term.MatchExpressions {
+							if expr.Key == utils.ArchLabel {
+								found = true
+								Expect(expr.Values).To(HaveLen(len(architectures)))
 							}
 						}
 					}
 				}
+				Expect(found).To(BeTrue(), "New architecture constraint not found")
 			}
-		})
-	}
-}
-
-func TestApplyArchitectureConstraints(t *testing.T) {
-	tests := []struct {
-		name           string
-		pod            *corev1.Pod
-		architectures  []string
-		expectModified bool
-	}{
-		{
-			name:           "remove old and apply new",
-			pod:            NewPod().WithName("test-pod").WithNodeSelectors(utils.ArchLabel, "amd64").Build(),
-			architectures:  []string{"ppc64le"},
-			expectModified: true,
 		},
-		{
-			name:           "apply to clean pod",
-			pod:            NewPod().WithName("test-pod").Build(),
-			architectures:  []string{"ppc64le"},
-			expectModified: true,
-		},
-		{
-			name:           "empty architectures",
-			pod:            NewPod().WithName("test-pod").Build(),
-			architectures:  []string{},
-			expectModified: false,
-		},
-		{
-			name: "remove from both nodeSelector and nodeAffinity",
-			pod: NewPod().WithName("test-pod").WithNodeSelectors(utils.ArchLabel, "amd64").WithNodeSelectorTermsMatchExpressions(
+		Entry("remove old and apply new",
+			NewPod().WithName("test-pod").WithNodeSelectors(utils.ArchLabel, "amd64").Build(),
+			[]string{"ppc64le"},
+			true,
+		),
+		Entry("apply to clean pod",
+			NewPod().WithName("test-pod").Build(),
+			[]string{"ppc64le"},
+			true,
+		),
+		Entry("empty architectures",
+			NewPod().WithName("test-pod").Build(),
+			[]string{},
+			false,
+		),
+		Entry("remove from both nodeSelector and nodeAffinity",
+			NewPod().WithName("test-pod").WithNodeSelectors(utils.ArchLabel, "amd64").WithNodeSelectorTermsMatchExpressions(
 				[]corev1.NodeSelectorRequirement{
 					{
 						Key:      utils.ArchLabel,
@@ -149,76 +141,45 @@ func TestApplyArchitectureConstraints(t *testing.T) {
 					},
 				},
 			).Build(),
-			architectures:  []string{"ppc64le"},
-			expectModified: true,
-		},
-	}
+			[]string{"ppc64le"},
+			true,
+		),
+	)
+})
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			modified := applyArchitectureConstraints(tt.pod, tt.architectures)
-
-			if modified != tt.expectModified {
-				t.Errorf("Expected modified=%v, got %v", tt.expectModified, modified)
-			}
-
-			if tt.expectModified && len(tt.architectures) > 0 {
-				// Verify old constraints were removed
-				if tt.pod.Spec.NodeSelector != nil {
-					if _, exists := tt.pod.Spec.NodeSelector[utils.ArchLabel]; exists {
-						t.Error("Old architecture constraint still exists in nodeSelector")
-					}
-				}
-
-				// Verify new constraints were applied
-				if tt.pod.Spec.Affinity == nil || tt.pod.Spec.Affinity.NodeAffinity == nil {
-					t.Fatal("Expected node affinity to be created")
-				}
-
-				found := false
-				if tt.pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution != nil {
-					for _, term := range tt.pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms {
-						for _, expr := range term.MatchExpressions {
-							if expr.Key == utils.ArchLabel {
-								found = true
-								if len(expr.Values) != len(tt.architectures) {
-									t.Errorf("Expected %d architectures, got %d", len(tt.architectures), len(expr.Values))
-								}
-							}
-						}
-					}
-				}
-				if !found {
-					t.Error("New architecture constraint not found")
-				}
-			}
-		})
-	}
-}
-
-// TestApplyArchitectureConstraints_Idempotency verifies that applying the same
+// ApplyArchitectureConstraints_Idempotency verifies that applying the same
 // architecture constraints twice produces identical NodeSelectorTerms, ensuring
 // the reconciler can safely re-apply CEL constraints without triggering
 // Kubernetes immutable field errors.
-func TestApplyArchitectureConstraints_Idempotency(t *testing.T) {
-	tests := []struct {
-		name          string
-		pod           *corev1.Pod
-		architectures []string
-	}{
-		{
-			name:          "idempotent for single architecture",
-			pod:           NewPod().WithName("test-pod").WithNamespace("default").Build(),
-			architectures: []string{"ppc64le"},
+var _ = Describe("ApplyArchitectureConstraints_Idempotency", func() {
+	DescribeTable("should be idempotent",
+		func(pod *corev1.Pod, architectures []string) {
+			// Apply architecture constraints first time
+			applyArchitectureConstraints(pod, architectures)
+
+			// Capture the state after first application
+			firstTerms := captureNodeSelectorTerms(pod)
+
+			// Apply the same architecture constraints second time
+			applyArchitectureConstraints(pod, architectures)
+
+			// Capture the state after second application
+			secondTerms := captureNodeSelectorTerms(pod)
+
+			// Verify that the NodeSelectorTerms are identical
+			Expect(nodeSelectorsEqual(firstTerms, secondTerms)).To(BeTrue(),
+				"NodeSelectorTerms changed after second application.\nFirst: %+v\nSecond: %+v", firstTerms, secondTerms)
 		},
-		{
-			name:          "idempotent for multiple architectures",
-			pod:           NewPod().WithName("test-pod").WithNamespace("default").Build(),
-			architectures: []string{"amd64", "arm64"},
-		},
-		{
-			name: "idempotent with existing affinity",
-			pod: NewPod().WithName("test-pod").WithNamespace("default").WithNodeSelectorTermsMatchExpressions(
+		Entry("idempotent for single architecture",
+			NewPod().WithName("test-pod").WithNamespace("default").Build(),
+			[]string{"ppc64le"},
+		),
+		Entry("idempotent for multiple architectures",
+			NewPod().WithName("test-pod").WithNamespace("default").Build(),
+			[]string{"amd64", "arm64"},
+		),
+		Entry("idempotent with existing affinity",
+			NewPod().WithName("test-pod").WithNamespace("default").WithNodeSelectorTermsMatchExpressions(
 				[]corev1.NodeSelectorRequirement{
 					{
 						Key:      "node-role.kubernetes.io/worker",
@@ -226,66 +187,30 @@ func TestApplyArchitectureConstraints_Idempotency(t *testing.T) {
 					},
 				},
 			).Build(),
-			architectures: []string{"ppc64le"},
-		},
-	}
+			[]string{"ppc64le"},
+		),
+	)
+})
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Apply architecture constraints first time
-			applyArchitectureConstraints(tt.pod, tt.architectures)
-
-			// Capture the state after first application
-			firstTerms := captureNodeSelectorTerms(tt.pod)
-
-			// Apply the same architecture constraints second time
-			applyArchitectureConstraints(tt.pod, tt.architectures)
-
-			// Capture the state after second application
-			secondTerms := captureNodeSelectorTerms(tt.pod)
-
-			// Verify that the NodeSelectorTerms are identical
-			if !nodeSelectorsEqual(firstTerms, secondTerms) {
-				t.Errorf("NodeSelectorTerms changed after second application.\nFirst: %+v\nSecond: %+v", firstTerms, secondTerms)
-			}
-		})
-	}
-}
-
-// TestReconciler_CELReapplication_NoMutation verifies that when the reconciler
+// Reconciler_CELReapplication_NoMutation verifies that when the reconciler
 // re-applies CEL architecture placement after the webhook has already applied it,
 // the pod object remains unchanged and no Kubernetes API error occurs.
-func TestReconciler_CELReapplication_NoMutation(t *testing.T) {
-	tests := []struct {
-		name          string
-		architectures []string
-	}{
-		{
-			name:          "single architecture",
-			architectures: []string{"ppc64le"},
-		},
-		{
-			name:          "multiple architectures",
-			architectures: []string{"amd64", "arm64", "ppc64le"},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+var _ = Describe("Reconciler_CELReapplication_NoMutation", func() {
+	DescribeTable("should not mutate pod on reapplication",
+		func(architectures []string) {
 			pod := NewPod().WithName("test-pod").WithNamespace("default").Build()
 
 			// Simulate webhook applying CEL constraints
-			applyArchitectureConstraints(pod, tt.architectures)
+			applyArchitectureConstraints(pod, architectures)
 			webhookTerms := captureNodeSelectorTerms(pod)
 
 			// Simulate reconciler re-applying the same CEL constraints
-			applyArchitectureConstraints(pod, tt.architectures)
+			applyArchitectureConstraints(pod, architectures)
 			reconcilerTerms := captureNodeSelectorTerms(pod)
 
 			// Verify that the pod object is unchanged
-			if !nodeSelectorsEqual(webhookTerms, reconcilerTerms) {
-				t.Errorf("Pod object changed after reconciler re-application.\nWebhook: %+v\nReconciler: %+v", webhookTerms, reconcilerTerms)
-			}
+			Expect(nodeSelectorsEqual(webhookTerms, reconcilerTerms)).To(BeTrue(),
+				"Pod object changed after reconciler re-application.\nWebhook: %+v\nReconciler: %+v", webhookTerms, reconcilerTerms)
 
 			// Verify the architectures are still correct
 			found := false
@@ -293,23 +218,16 @@ func TestReconciler_CELReapplication_NoMutation(t *testing.T) {
 				for _, expr := range term.MatchExpressions {
 					if expr.Key == utils.ArchLabel && expr.Operator == corev1.NodeSelectorOpIn {
 						found = true
-						if len(expr.Values) != len(tt.architectures) {
-							t.Errorf("Expected %d architectures, got %d", len(tt.architectures), len(expr.Values))
-						}
-						for i, arch := range tt.architectures {
-							if expr.Values[i] != arch {
-								t.Errorf("Expected architecture %s at index %d, got %s", arch, i, expr.Values[i])
-							}
-						}
+						Expect(expr.Values).To(Equal(architectures))
 					}
 				}
 			}
-			if !found {
-				t.Error("Architecture requirement not found after reconciler re-application")
-			}
-		})
-	}
-}
+			Expect(found).To(BeTrue(), "Architecture requirement not found after reconciler re-application")
+		},
+		Entry("single architecture", []string{"ppc64le"}),
+		Entry("multiple architectures", []string{"amd64", "arm64", "ppc64le"}),
+	)
+})
 
 // captureNodeSelectorTerms creates a deep copy of NodeSelectorTerms for comparison
 func captureNodeSelectorTerms(pod *corev1.Pod) []corev1.NodeSelectorTerm {
@@ -384,30 +302,27 @@ func nodeSelectorsEqual(a, b []corev1.NodeSelectorTerm) bool {
 	return true
 }
 
-func TestApplyArchitectureNodeAffinityPreservesOtherAffinity(t *testing.T) {
-	pod := NewPod().WithName("test-pod").WithAffinity(&corev1.Affinity{
-		PodAffinity: &corev1.PodAffinity{
-			RequiredDuringSchedulingIgnoredDuringExecution: []corev1.PodAffinityTerm{
-				{
-					LabelSelector: &metav1.LabelSelector{
-						MatchLabels: map[string]string{
-							"app": "test",
+var _ = Describe("ApplyArchitectureNodeAffinityPreservesOtherAffinity", func() {
+	It("should preserve existing pod affinity while adding node affinity", func() {
+		pod := NewPod().WithName("test-pod").WithAffinity(&corev1.Affinity{
+			PodAffinity: &corev1.PodAffinity{
+				RequiredDuringSchedulingIgnoredDuringExecution: []corev1.PodAffinityTerm{
+					{
+						LabelSelector: &metav1.LabelSelector{
+							MatchLabels: map[string]string{
+								"app": "test",
+							},
 						},
 					},
 				},
 			},
-		},
-	}).Build()
+		}).Build()
 
-	applyArchitectureNodeAffinity(pod, []string{"ppc64le"})
+		applyArchitectureNodeAffinity(pod, []string{"ppc64le"})
 
-	// Verify pod affinity was preserved
-	if pod.Spec.Affinity.PodAffinity == nil {
-		t.Error("Pod affinity was removed but should be preserved")
-	}
-
-	// Verify node affinity was added
-	if pod.Spec.Affinity.NodeAffinity == nil {
-		t.Error("Node affinity was not added")
-	}
-}
+		// Verify pod affinity was preserved
+		Expect(pod.Spec.Affinity.PodAffinity).NotTo(BeNil(), "Pod affinity was removed but should be preserved")
+		// Verify node affinity was added
+		Expect(pod.Spec.Affinity.NodeAffinity).NotTo(BeNil(), "Node affinity was not added")
+	})
+})
