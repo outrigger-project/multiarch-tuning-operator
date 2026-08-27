@@ -1436,4 +1436,93 @@ var _ = Describe("CEL Evaluator", func() {
 				"pod affinity must not be set when CelArchitecturePlacement is nil")
 		})
 	})
+
+	Context("Multiple PPC Iteration", func() {
+		It("should skip disabled, empty-result, and malformed PPCs and apply the highest-priority matching one", func() {
+			ctx := context.Background()
+			recorder := record.NewFakeRecorder(8)
+
+			pod := NewPod().WithName("multi-ppc-pod").WithNamespace("default").Build()
+
+			ppcs := []v1beta1.PodPlacementConfig{
+				// PPC 1: highest priority but CEL disabled — skipped
+				*NewPodPlacementConfig().WithName("ppc-disabled").WithNamespace("default").WithPriority(250).
+					WithCelArchitecturePlacement(false, []string{utils.ArchitectureS390x},
+						[]plugins.ArchitectureRule{NewRule("always", "true", utils.ArchitectureS390x)}).Build(),
+				// PPC 2: high priority, non-matching rule, empty fallback — produces no architectures, skipped
+				*NewPodPlacementConfig().WithName("ppc-no-match").WithNamespace("default").WithPriority(200).
+					WithCelArchitecturePlacement(true, []string{},
+						[]plugins.ArchitectureRule{NewRule("no-match", "self.metadata.name == 'other'", utils.ArchitectureArm64)}).Build(),
+				// PPC 3: medium priority with malformed CEL — allRulesErrored, skipped
+				*NewPodPlacementConfig().WithName("ppc-malformed").WithNamespace("default").WithPriority(150).
+					WithCelArchitecturePlacement(true, []string{utils.ArchitectureAmd64},
+						[]plugins.ArchitectureRule{NewRule("bad", "self.metadata.name ==", utils.ArchitectureAmd64)}).Build(),
+				// PPC 4: lowest priority with matching rule — this should win
+				*NewPodPlacementConfig().WithName("ppc-match").WithNamespace("default").WithPriority(100).
+					WithCelArchitecturePlacement(true, []string{utils.ArchitectureAmd64},
+						[]plugins.ArchitectureRule{NewRule("match-all", "true", utils.ArchitecturePpc64le)}).Build(),
+			}
+
+			wh := &PodSchedulingGateMutatingWebHook{}
+			wrappedPod := newPod(pod, ctx, recorder)
+			wh.applyCELInWebhook(ctx, wrappedPod, ppcs)
+
+			archs := extractArchitectures(wrappedPod.PodObject())
+			Expect(archs).To(ConsistOf(utils.ArchitecturePpc64le),
+				"should apply ppc64le from the lowest-priority matching PPC after skipping disabled, non-matching, and malformed PPCs")
+		})
+
+		It("should use fallback from the first matching PPC when no rules match", func() {
+			ctx := context.Background()
+			recorder := record.NewFakeRecorder(8)
+
+			pod := NewPod().WithName("fallback-pod").WithNamespace("default").Build()
+
+			ppcs := []v1beta1.PodPlacementConfig{
+				// PPC 1: all rules malformed -- skip entirely
+				*NewPodPlacementConfig().WithName("ppc-all-bad").WithNamespace("default").WithPriority(200).
+					WithCelArchitecturePlacement(true, []string{utils.ArchitectureS390x},
+						[]plugins.ArchitectureRule{NewRule("bad1", "self.metadata ==", utils.ArchitectureS390x)}).Build(),
+				// PPC 2: valid rules but none match -- use this PPC's fallback
+				*NewPodPlacementConfig().WithName("ppc-fallback").WithNamespace("default").WithPriority(100).
+					WithCelArchitecturePlacement(true, []string{utils.ArchitectureArm64},
+						[]plugins.ArchitectureRule{NewRule("no-match", "self.metadata.name == 'nope'", utils.ArchitecturePpc64le)}).Build(),
+			}
+
+			wh := &PodSchedulingGateMutatingWebHook{}
+			wrappedPod := newPod(pod, ctx, recorder)
+			wh.applyCELInWebhook(ctx, wrappedPod, ppcs)
+
+			archs := extractArchitectures(wrappedPod.PodObject())
+			Expect(archs).To(ConsistOf(utils.ArchitectureArm64),
+				"should use arm64 fallback from the second PPC after first PPC is fully malformed")
+		})
+	})
+
+	Context("CEL no-match falls through to image-based detection", func() {
+		It("should not modify pod when all PPCs have malformed CEL rules (allowing image-based fallthrough)", func() {
+			ctx := context.Background()
+			recorder := record.NewFakeRecorder(8)
+
+			pod := NewPod().WithName("fallthrough-pod").WithNamespace("default").Build()
+
+			ppcs := []v1beta1.PodPlacementConfig{
+				*NewPodPlacementConfig().WithName("ppc-bad-1").WithNamespace("default").WithPriority(200).
+					WithCelArchitecturePlacement(true, []string{utils.ArchitectureAmd64},
+						[]plugins.ArchitectureRule{NewRule("bad-1", "self.metadata.name ==", utils.ArchitectureArm64)}).Build(),
+				*NewPodPlacementConfig().WithName("ppc-bad-2").WithNamespace("default").WithPriority(100).
+					WithCelArchitecturePlacement(true, []string{utils.ArchitecturePpc64le},
+						[]plugins.ArchitectureRule{NewRule("bad-2", "self.metadata ==", utils.ArchitectureS390x)}).Build(),
+			}
+
+			wh := &PodSchedulingGateMutatingWebHook{}
+			wrappedPod := newPod(pod, ctx, recorder)
+			wh.applyCELInWebhook(ctx, wrappedPod, ppcs)
+
+			// Pod should be completely unmodified -- no affinity, no nodeSelector
+			Expect(pod.Spec.Affinity).To(BeNil(),
+				"pod should have no affinity when all PPCs are malformed, allowing image-based detection to run")
+			Expect(pod.Spec.NodeSelector).To(BeNil())
+		})
+	})
 })

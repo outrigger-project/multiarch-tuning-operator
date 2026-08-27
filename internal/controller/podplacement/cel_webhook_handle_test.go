@@ -798,7 +798,7 @@ var _ = Describe("CEL Webhook", func() {
 			wrappedPod := newPod(pod, ctx, recorder)
 			wh.applyCELInWebhook(ctx, wrappedPod, ppcs)
 
-			archs := extractArchitectures(pod)
+			archs := extractArchitectures(wrappedPod.PodObject())
 			Expect(archs).To(ConsistOf(utils.ArchitecturePpc64le),
 				"CEL rule matching generateName should apply ppc64le")
 		})
@@ -1023,11 +1023,44 @@ var _ = Describe("CEL Webhook", func() {
 						WithNamespace("default").Build()
 					wrappedPod := newPod(pod, ctx, recorder)
 					wh.applyCELInWebhook(ctx, wrappedPod, ppcs)
-					archs := extractArchitectures(pod)
+					archs := extractArchitectures(wrappedPod.PodObject())
 					Expect(archs).To(ConsistOf(utils.ArchitecturePpc64le))
 				}(i)
 			}
 			wg.Wait()
+		})
+	})
+
+	Context("Equal Priority PPCs", func() {
+		It("should apply one of the equal-priority PPCs without panicking", func() {
+			ctx := context.Background()
+			recorder := record.NewFakeRecorder(8)
+
+			pod := NewPod().WithName("equal-prio-pod").WithNamespace("default").Build()
+
+			ppcs := []v1beta1.PodPlacementConfig{
+				*NewPodPlacementConfig().WithName("ppc-a").WithNamespace("default").WithPriority(100).
+					WithCelArchitecturePlacement(true, []string{utils.ArchitectureAmd64},
+						[]plugins.ArchitectureRule{NewRule("match-a", "true", utils.ArchitectureArm64)}).Build(),
+				*NewPodPlacementConfig().WithName("ppc-b").WithNamespace("default").WithPriority(100).
+					WithCelArchitecturePlacement(true, []string{utils.ArchitectureAmd64},
+						[]plugins.ArchitectureRule{NewRule("match-b", "true", utils.ArchitecturePpc64le)}).Build(),
+			}
+
+			wh := &PodSchedulingGateMutatingWebHook{}
+			wrappedPod := newPod(pod, ctx, recorder)
+
+			// Must not panic
+			Expect(func() {
+				wh.applyCELInWebhook(ctx, wrappedPod, ppcs)
+			}).NotTo(Panic())
+
+			// One of the two architectures should be applied
+			archs := extractArchitectures(wrappedPod.PodObject())
+			Expect(archs).To(SatisfyAny(
+				ConsistOf(utils.ArchitectureArm64),
+				ConsistOf(utils.ArchitecturePpc64le),
+			), "one of the equal-priority PPCs should apply")
 		})
 	})
 })

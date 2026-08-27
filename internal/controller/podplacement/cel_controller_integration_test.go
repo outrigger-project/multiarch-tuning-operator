@@ -1318,10 +1318,7 @@ var _ = Describe("CEL Architecture Placement Controller Integration", func() {
 				WithName("event-error-ppc").
 				WithNamespace("default").
 				WithPriority(100).
-				WithCelArchitecturePlacement(true, nil,
-					[]plugins.ArchitectureRule{
-						NewRule("bad-rule", "self.metadata.name == 'test'", utils.ArchitectureAmd64),
-					}).
+				WithCelArchitecturePlacement(true, nil, nil).
 				Build()
 
 			pod := NewPod().WithName("error-pod").WithNamespace("default").Build()

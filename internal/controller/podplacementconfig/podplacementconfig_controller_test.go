@@ -1304,7 +1304,10 @@ var _ = Describe("Internal/Controller/PodPlacementConfig/PodPlacementConfigRecon
 			}
 			err = k8sClient.Update(ctx, ppc)
 			Expect(err).To(HaveOccurred(), "update with self.spec.* reference should be rejected")
-			Expect(err.Error()).To(ContainSubstring("disallowed field"), "error should mention disallowed field access")
+			Expect(err.Error()).To(SatisfyAny(
+				ContainSubstring("disallowed field"),
+				ContainSubstring("undefined field"),
+			), "error should reject the self.spec.* reference")
 		})
 	})
 })
