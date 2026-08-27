@@ -17,6 +17,7 @@ limitations under the License.
 package podplacement
 
 import (
+	"context"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -24,6 +25,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/tools/record"
 	crclient "sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/openshift/multiarch-tuning-operator/api/common/plugins"
@@ -1235,6 +1237,111 @@ var _ = Describe("CEL Architecture Placement Controller Integration", func() {
 				g.Expect(len(archExpression.Values)).To(Equal(1),
 					"should have exactly one architecture value")
 			}).WithTimeout(timeout).WithPolling(interval).Should(Succeed())
+		})
+	})
+
+	Context("Event Publishing", func() {
+		It("should publish CELArchitecturePlacementApplied event when a CEL rule matches", func() {
+			recorder := record.NewFakeRecorder(8)
+			reconciler := &PodReconciler{Recorder: recorder}
+
+			ppc := *NewPodPlacementConfig().
+				WithName("event-match-ppc").
+				WithNamespace("default").
+				WithPriority(100).
+				WithCelArchitecturePlacement(true, []string{utils.ArchitectureAmd64},
+					[]plugins.ArchitectureRule{
+						NewRule("match-rule", "self.metadata.name == 'event-pod'", utils.ArchitecturePpc64le),
+					}).
+				Build()
+
+			pod := NewPod().WithName("event-pod").WithNamespace("default").Build()
+			wrappedPod := newPod(pod, context.Background(), recorder)
+
+			handled := reconciler.applyCELArchitecturePlacement(context.Background(), ppc, wrappedPod)
+			Expect(handled).To(BeTrue(), "applyCELArchitecturePlacement should return true when a rule matches")
+
+			var events []string
+			done := false
+			for !done {
+				select {
+				case e := <-recorder.Events:
+					events = append(events, e)
+				default:
+					done = true
+				}
+			}
+			Expect(events).To(HaveLen(1))
+			Expect(events[0]).To(ContainSubstring("CELArchitecturePlacementApplied"))
+			Expect(events[0]).To(ContainSubstring("match-rule"))
+		})
+
+		It("should publish CELArchitecturePlacementFallback event when no CEL rules match", func() {
+			recorder := record.NewFakeRecorder(8)
+			reconciler := &PodReconciler{Recorder: recorder}
+
+			ppc := *NewPodPlacementConfig().
+				WithName("event-fallback-ppc").
+				WithNamespace("default").
+				WithPriority(100).
+				WithCelArchitecturePlacement(true, []string{utils.ArchitectureAmd64},
+					[]plugins.ArchitectureRule{
+						NewRule("no-match-rule", "self.metadata.name == 'nonexistent'", utils.ArchitecturePpc64le),
+					}).
+				Build()
+
+			pod := NewPod().WithName("fallback-pod").WithNamespace("default").Build()
+			wrappedPod := newPod(pod, context.Background(), recorder)
+
+			handled := reconciler.applyCELArchitecturePlacement(context.Background(), ppc, wrappedPod)
+			Expect(handled).To(BeTrue(), "applyCELArchitecturePlacement should return true when fallback is applied")
+
+			var events []string
+			done := false
+			for !done {
+				select {
+				case e := <-recorder.Events:
+					events = append(events, e)
+				default:
+					done = true
+				}
+			}
+			Expect(events).To(HaveLen(1))
+			Expect(events[0]).To(ContainSubstring("CELArchitecturePlacementFallback"))
+		})
+
+		It("should publish CELEvaluationError event when CEL evaluation fails", func() {
+			recorder := record.NewFakeRecorder(8)
+			reconciler := &PodReconciler{Recorder: recorder}
+
+			ppc := *NewPodPlacementConfig().
+				WithName("event-error-ppc").
+				WithNamespace("default").
+				WithPriority(100).
+				WithCelArchitecturePlacement(true, nil,
+					[]plugins.ArchitectureRule{
+						NewRule("bad-rule", "self.metadata.name == 'test'", utils.ArchitectureAmd64),
+					}).
+				Build()
+
+			pod := NewPod().WithName("error-pod").WithNamespace("default").Build()
+			wrappedPod := newPod(pod, context.Background(), recorder)
+
+			handled := reconciler.applyCELArchitecturePlacement(context.Background(), ppc, wrappedPod)
+			Expect(handled).To(BeFalse(), "applyCELArchitecturePlacement should return false on evaluation error")
+
+			var events []string
+			done := false
+			for !done {
+				select {
+				case e := <-recorder.Events:
+					events = append(events, e)
+				default:
+					done = true
+				}
+			}
+			Expect(events).To(HaveLen(1))
+			Expect(events[0]).To(ContainSubstring("CELEvaluationError"))
 		})
 	})
 })

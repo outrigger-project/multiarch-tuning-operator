@@ -34,6 +34,8 @@ package podplacement
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"sync"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -774,6 +776,32 @@ var _ = Describe("CEL Webhook", func() {
 			}
 			Expect(zoneFound).To(BeTrue(), "zone constraint was removed from the zone term — must be preserved")
 		})
+
+		It("should match pods by generateName in CEL expressions", func() {
+			ctx := context.Background()
+			recorder := record.NewFakeRecorder(8)
+
+			pod := NewPod().WithGenerateName("myapp-").WithNamespace("default").Build()
+			ppcs := []v1beta1.PodPlacementConfig{
+				*NewPodPlacementConfig().
+					WithName("generatename-ppc").
+					WithNamespace("default").
+					WithPriority(100).
+					WithCelArchitecturePlacement(true, []string{utils.ArchitectureAmd64},
+						[]plugins.ArchitectureRule{
+							NewRule("match-generatename", "self.metadata.generateName.startsWith('myapp')", utils.ArchitecturePpc64le),
+						}).
+					Build(),
+			}
+
+			wh := &PodSchedulingGateMutatingWebHook{}
+			wrappedPod := newPod(pod, ctx, recorder)
+			wh.applyCELInWebhook(ctx, wrappedPod, ppcs)
+
+			archs := extractArchitectures(pod)
+			Expect(archs).To(ConsistOf(utils.ArchitecturePpc64le),
+				"CEL rule matching generateName should apply ppc64le")
+		})
 	})
 
 	Context("Plugin Disabled", func() {
@@ -961,6 +989,45 @@ var _ = Describe("CEL Webhook", func() {
 			pod.ensureSchedulingGate()
 			Expect(pod.HasSchedulingGate()).To(BeTrue(),
 				"scheduling gate should be present even when CEL plugin is disabled")
+		})
+	})
+
+	Context("Concurrent Admission Safety", func() {
+		It("should handle concurrent applyCELInWebhook calls without data races", func() {
+			ctx := context.Background()
+
+			ppcs := []v1beta1.PodPlacementConfig{
+				*NewPodPlacementConfig().
+					WithName("concurrent-ppc").
+					WithNamespace("default").
+					WithPriority(100).
+					WithCelArchitecturePlacement(true, []string{utils.ArchitectureAmd64},
+						[]plugins.ArchitectureRule{
+							NewRule("match-all", "true", utils.ArchitecturePpc64le),
+						}).
+					Build(),
+			}
+
+			wh := &PodSchedulingGateMutatingWebHook{}
+
+			const goroutines = 20
+			var wg sync.WaitGroup
+			wg.Add(goroutines)
+			for i := 0; i < goroutines; i++ {
+				go func(idx int) {
+					defer wg.Done()
+					defer GinkgoRecover()
+					recorder := record.NewFakeRecorder(8)
+					pod := NewPod().
+						WithName(fmt.Sprintf("concurrent-pod-%d", idx)).
+						WithNamespace("default").Build()
+					wrappedPod := newPod(pod, ctx, recorder)
+					wh.applyCELInWebhook(ctx, wrappedPod, ppcs)
+					archs := extractArchitectures(pod)
+					Expect(archs).To(ConsistOf(utils.ArchitecturePpc64le))
+				}(i)
+			}
+			wg.Wait()
 		})
 	})
 })

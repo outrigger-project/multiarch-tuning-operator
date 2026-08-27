@@ -18,7 +18,9 @@ package podplacement
 
 import (
 	"context"
+	"fmt"
 	"sync"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -1352,6 +1354,86 @@ var _ = Describe("CEL Evaluator", func() {
 
 			applyArchitectureNodeAffinity(pod, []string{"amd64"})
 			Expect(pod.Spec.Affinity).NotTo(BeNil(), "Affinity should have been created")
+		})
+	})
+
+	Context("Performance", func() {
+		It("should evaluate 1000 rules within acceptable latency", func() {
+			rules := make([]plugins.ArchitectureRule, 1000)
+			for i := 0; i < 1000; i++ {
+				rules[i] = NewRule(
+					fmt.Sprintf("rule-%d", i),
+					fmt.Sprintf("self.metadata.name == 'target-%d'", i),
+					utils.ArchitecturePpc64le,
+				)
+			}
+			fallback := []string{utils.ArchitectureAmd64}
+			pod := NewPod().WithName("no-match-pod").WithNamespace("default").Build()
+
+			start := time.Now()
+			result, err := evaluateCELArchitecturePlacement(rules, fallback, pod)
+			elapsed := time.Since(start)
+
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result.matched).To(BeFalse(), "no rule should match")
+			Expect(result.architectures).To(ConsistOf(utils.ArchitectureAmd64), "should use fallback")
+			Expect(elapsed).To(BeNumerically("<", 2*time.Second),
+				"1000 rules should evaluate in under 2 seconds, took %v", elapsed)
+		})
+	})
+
+	Context("Nil Plugin Guard", func() {
+		It("should return false without panicking when CelArchitecturePlacement is nil in the controller path", func() {
+			recorder := record.NewFakeRecorder(8)
+			reconciler := &PodReconciler{Recorder: recorder}
+
+			ppc := *NewPodPlacementConfig().
+				WithName("nil-cel-ppc").
+				WithNamespace("default").
+				WithPriority(100).
+				Build()
+			// Ensure Plugins is non-nil but CelArchitecturePlacement is nil
+			ppc.Spec.Plugins = &plugins.LocalPlugins{}
+
+			pod := NewPod().WithName("test-pod").WithNamespace("default").Build()
+			wrappedPod := newPod(pod, context.Background(), recorder)
+
+			Expect(func() {
+				handled := reconciler.applyCELArchitecturePlacement(context.Background(), ppc, wrappedPod)
+				Expect(handled).To(BeFalse(),
+					"controller path must return false when CelArchitecturePlacement is nil")
+			}).NotTo(Panic(), "controller path must not panic when CelArchitecturePlacement is nil")
+
+			// Verify pod was not modified
+			Expect(wrappedPod.Spec.Affinity).To(BeNil(),
+				"pod affinity must not be set when CelArchitecturePlacement is nil")
+		})
+
+		It("should not panic and leave pod unmodified when CelArchitecturePlacement is nil in the webhook path", func() {
+			ctx := context.Background()
+			recorder := record.NewFakeRecorder(8)
+
+			pod := NewPod().WithName("test-pod").WithNamespace("default").Build()
+
+			ppcObj := NewPodPlacementConfig().
+				WithName("nil-cel-wh-ppc").
+				WithNamespace("default").
+				WithPriority(100).
+				Build()
+			// Ensure Plugins is non-nil but CelArchitecturePlacement is nil
+			ppcObj.Spec.Plugins = &plugins.LocalPlugins{}
+
+			ppcs := []v1beta1.PodPlacementConfig{*ppcObj}
+			wh := &PodSchedulingGateMutatingWebHook{}
+			wrappedPod := newPod(pod, ctx, recorder)
+
+			Expect(func() {
+				wh.applyCELInWebhook(ctx, wrappedPod, ppcs)
+			}).NotTo(Panic(), "webhook path must not panic when CelArchitecturePlacement is nil")
+
+			// Verify pod was not modified
+			Expect(wrappedPod.Spec.Affinity).To(BeNil(),
+				"pod affinity must not be set when CelArchitecturePlacement is nil")
 		})
 	})
 })

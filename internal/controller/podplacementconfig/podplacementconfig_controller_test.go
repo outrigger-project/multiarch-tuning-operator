@@ -1162,4 +1162,149 @@ var _ = Describe("Internal/Controller/PodPlacementConfig/PodPlacementConfigRecon
 			})
 		})
 	})
+
+	When("Updating a PodPlacementConfig with CEL expression changes", func() {
+		It("should reject update from valid to invalid CEL expression", func() {
+			By("Create an ephemeral namespace")
+			ns := framework.NewEphemeralNamespace()
+			err := k8sClient.Create(ctx, ns)
+			Expect(err).NotTo(HaveOccurred())
+			defer func() {
+				_ = k8sClient.Delete(ctx, ns)
+			}()
+
+			By("Creating a PPC with a valid CEL rule")
+			err = k8sClient.Create(ctx,
+				builder.NewPodPlacementConfig().
+					WithName("test-cel-update-invalid").
+					WithNamespace(ns.Name).
+					WithCelArchitecturePlacement(
+						true,
+						[]string{"amd64"},
+						[]plugins.ArchitectureRule{
+							builder.NewRule("valid-rule", "has(self.metadata.labels.app)", "arm64"),
+						},
+					).
+					Build(),
+			)
+			Expect(err).NotTo(HaveOccurred(), "initial PPC with valid CEL should be accepted")
+
+			By("Fetching the created PPC")
+			ppc := &v1beta1.PodPlacementConfig{}
+			Eventually(func(g Gomega) {
+				err := k8sClient.Get(ctx, crclient.ObjectKey{
+					Name:      "test-cel-update-invalid",
+					Namespace: ns.Name,
+				}, ppc)
+				g.Expect(err).NotTo(HaveOccurred())
+			}).Should(Succeed(), "PPC should exist after creation")
+
+			By("Updating the PPC with an invalid CEL expression")
+			ppc.Spec.Plugins.CelArchitecturePlacement.Rules = []plugins.ArchitectureRule{
+				builder.NewRule("now-invalid-rule", "self.metadata.labels[", "arm64"),
+			}
+			err = k8sClient.Update(ctx, ppc)
+			Expect(err).To(HaveOccurred(), "update with invalid CEL expression should be rejected")
+			Expect(err.Error()).To(ContainSubstring("invalid CEL expression"), "error should mention invalid CEL expression")
+		})
+
+		It("should accept update from valid to different valid CEL expression", func() {
+			By("Create an ephemeral namespace")
+			ns := framework.NewEphemeralNamespace()
+			err := k8sClient.Create(ctx, ns)
+			Expect(err).NotTo(HaveOccurred())
+			defer func() {
+				_ = k8sClient.Delete(ctx, ns)
+			}()
+
+			By("Creating a PPC with a valid CEL rule")
+			err = k8sClient.Create(ctx,
+				builder.NewPodPlacementConfig().
+					WithName("test-cel-update-valid").
+					WithNamespace(ns.Name).
+					WithCelArchitecturePlacement(
+						true,
+						[]string{"amd64"},
+						[]plugins.ArchitectureRule{
+							builder.NewRule("original-rule", "has(self.metadata.labels.app)", "arm64"),
+						},
+					).
+					Build(),
+			)
+			Expect(err).NotTo(HaveOccurred(), "initial PPC with valid CEL should be accepted")
+
+			By("Fetching the created PPC")
+			ppc := &v1beta1.PodPlacementConfig{}
+			Eventually(func(g Gomega) {
+				err := k8sClient.Get(ctx, crclient.ObjectKey{
+					Name:      "test-cel-update-valid",
+					Namespace: ns.Name,
+				}, ppc)
+				g.Expect(err).NotTo(HaveOccurred())
+			}).Should(Succeed(), "PPC should exist after creation")
+
+			By("Updating the PPC with a different valid CEL expression")
+			ppc.Spec.Plugins.CelArchitecturePlacement.Rules = []plugins.ArchitectureRule{
+				builder.NewRule("updated-rule", "self.metadata.namespace == 'production'", "ppc64le"),
+			}
+			err = k8sClient.Update(ctx, ppc)
+			Expect(err).NotTo(HaveOccurred(), "update with valid CEL expression should be accepted")
+
+			By("Verifying the update was persisted")
+			updatedPPC := &v1beta1.PodPlacementConfig{}
+			Eventually(func(g Gomega) {
+				err := k8sClient.Get(ctx, crclient.ObjectKey{
+					Name:      "test-cel-update-valid",
+					Namespace: ns.Name,
+				}, updatedPPC)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(updatedPPC.Spec.Plugins.CelArchitecturePlacement.Rules).To(HaveLen(1))
+				g.Expect(updatedPPC.Spec.Plugins.CelArchitecturePlacement.Rules[0].Name).To(Equal("updated-rule"))
+			}).Should(Succeed(), "updated PPC should reflect new rule")
+		})
+
+		It("should reject update with disallowed self.spec.* reference", func() {
+			By("Create an ephemeral namespace")
+			ns := framework.NewEphemeralNamespace()
+			err := k8sClient.Create(ctx, ns)
+			Expect(err).NotTo(HaveOccurred())
+			defer func() {
+				_ = k8sClient.Delete(ctx, ns)
+			}()
+
+			By("Creating a PPC with a valid CEL rule")
+			err = k8sClient.Create(ctx,
+				builder.NewPodPlacementConfig().
+					WithName("test-cel-update-spec").
+					WithNamespace(ns.Name).
+					WithCelArchitecturePlacement(
+						true,
+						[]string{"amd64"},
+						[]plugins.ArchitectureRule{
+							builder.NewRule("valid-rule", "has(self.metadata.labels.app)", "arm64"),
+						},
+					).
+					Build(),
+			)
+			Expect(err).NotTo(HaveOccurred(), "initial PPC with valid CEL should be accepted")
+
+			By("Fetching the created PPC")
+			ppc := &v1beta1.PodPlacementConfig{}
+			Eventually(func(g Gomega) {
+				err := k8sClient.Get(ctx, crclient.ObjectKey{
+					Name:      "test-cel-update-spec",
+					Namespace: ns.Name,
+				}, ppc)
+				g.Expect(err).NotTo(HaveOccurred())
+			}).Should(Succeed(), "PPC should exist after creation")
+
+			By("Updating the PPC with a rule referencing self.spec.nodeName")
+			ppc.Spec.Plugins.CelArchitecturePlacement.Rules = []plugins.ArchitectureRule{
+				builder.NewRule("spec-access-rule", "self.spec.nodeName == 'worker-1'", "arm64"),
+			}
+			err = k8sClient.Update(ctx, ppc)
+			Expect(err).To(HaveOccurred(), "update with self.spec.* reference should be rejected")
+			Expect(err.Error()).To(ContainSubstring("disallowed field"), "error should mention disallowed field access")
+		})
+	})
 })
