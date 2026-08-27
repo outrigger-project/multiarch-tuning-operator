@@ -59,22 +59,13 @@ var _ = Describe("CEL Architecture Placement Controller Integration", func() {
 						"app": "test",
 					},
 				}).
-				WithPlugins().
+				WithCelArchitecturePlacement(true, []string{utils.ArchitectureAmd64},
+					[]plugins.ArchitectureRule{
+						NewRule("match-database",
+							`has(self.metadata.labels.component) && self.metadata.labels.component == "database"`,
+							utils.ArchitecturePpc64le),
+					}).
 				Build()
-
-			ppc.Spec.Plugins.CelArchitecturePlacement = &plugins.CelArchitecturePlacement{
-				BasePlugin: plugins.BasePlugin{
-					Enabled: true,
-				},
-				FallbackArchitectures: []string{utils.ArchitectureAmd64},
-				Rules: []plugins.ArchitectureRule{
-					{
-						Name:          "match-database",
-						Expression:    `has(self.metadata.labels.component) && self.metadata.labels.component == "database"`,
-						Architectures: []string{utils.ArchitecturePpc64le},
-					},
-				},
-			}
 
 			Expect(k8sClient.Create(ctx, ppc)).To(Succeed())
 
@@ -126,22 +117,11 @@ var _ = Describe("CEL Architecture Placement Controller Integration", func() {
 						"app": "preserve-test",
 					},
 				}).
-				WithPlugins().
+				WithCelArchitecturePlacement(true, []string{utils.ArchitectureArm64},
+					[]plugins.ArchitectureRule{
+						NewRule("match-all", `true`, utils.ArchitectureAmd64),
+					}).
 				Build()
-
-			ppc.Spec.Plugins.CelArchitecturePlacement = &plugins.CelArchitecturePlacement{
-				BasePlugin: plugins.BasePlugin{
-					Enabled: true,
-				},
-				FallbackArchitectures: []string{utils.ArchitectureArm64},
-				Rules: []plugins.ArchitectureRule{
-					{
-						Name:          "match-all",
-						Expression:    `true`,
-						Architectures: []string{utils.ArchitectureAmd64},
-					},
-				},
-			}
 
 			Expect(k8sClient.Create(ctx, ppc)).To(Succeed())
 
@@ -217,22 +197,13 @@ var _ = Describe("CEL Architecture Placement Controller Integration", func() {
 						"app": "fallback-test",
 					},
 				}).
-				WithPlugins().
+				WithCelArchitecturePlacement(true, []string{utils.ArchitecturePpc64le, utils.ArchitectureAmd64},
+					[]plugins.ArchitectureRule{
+						NewRule("match-nothing",
+							`"never-matches" in self.metadata.labels && self.metadata.labels["never-matches"] == "true"`,
+							utils.ArchitectureArm64),
+					}).
 				Build()
-
-			ppc.Spec.Plugins.CelArchitecturePlacement = &plugins.CelArchitecturePlacement{
-				BasePlugin: plugins.BasePlugin{
-					Enabled: true,
-				},
-				FallbackArchitectures: []string{utils.ArchitecturePpc64le, utils.ArchitectureAmd64},
-				Rules: []plugins.ArchitectureRule{
-					{
-						Name:          "match-nothing",
-						Expression:    `"never-matches" in self.metadata.labels && self.metadata.labels["never-matches"] == "true"`,
-						Architectures: []string{utils.ArchitectureArm64},
-					},
-				},
-			}
 
 			Expect(k8sClient.Create(ctx, ppc)).To(Succeed())
 
@@ -284,22 +255,11 @@ var _ = Describe("CEL Architecture Placement Controller Integration", func() {
 						"app": "precedence-test",
 					},
 				}).
-				WithPlugins().
+				WithCelArchitecturePlacement(true, []string{utils.ArchitectureS390x},
+					[]plugins.ArchitectureRule{
+						NewRule("force-s390x", `true`, utils.ArchitectureS390x), // Always matches
+					}).
 				Build()
-
-			ppc.Spec.Plugins.CelArchitecturePlacement = &plugins.CelArchitecturePlacement{
-				BasePlugin: plugins.BasePlugin{
-					Enabled: true,
-				},
-				FallbackArchitectures: []string{utils.ArchitectureS390x},
-				Rules: []plugins.ArchitectureRule{
-					{
-						Name:          "force-s390x",
-						Expression:    `true`, // Always matches
-						Architectures: []string{utils.ArchitectureS390x},
-					},
-				},
-			}
 
 			Expect(k8sClient.Create(ctx, ppc)).To(Succeed())
 
@@ -349,19 +309,12 @@ var _ = Describe("CEL Architecture Placement Controller Integration", func() {
 						"app": "coexist-test",
 					},
 				}).
-				WithPlugins().
 				WithNodeAffinityScoring(true).
 				WithNodeAffinityScoringTerm(utils.ArchitectureAmd64, 100).
 				WithNodeAffinityScoringTerm(utils.ArchitectureArm64, 50).
+				WithCelArchitecturePlacement(true, []string{utils.ArchitectureAmd64, utils.ArchitectureArm64},
+					[]plugins.ArchitectureRule{}).
 				Build()
-
-			ppc.Spec.Plugins.CelArchitecturePlacement = &plugins.CelArchitecturePlacement{
-				BasePlugin: plugins.BasePlugin{
-					Enabled: true,
-				},
-				FallbackArchitectures: []string{utils.ArchitectureAmd64, utils.ArchitectureArm64},
-				Rules:                 []plugins.ArchitectureRule{},
-			}
 
 			Expect(k8sClient.Create(ctx, ppc)).To(Succeed())
 
@@ -410,22 +363,11 @@ var _ = Describe("CEL Architecture Placement Controller Integration", func() {
 						"app": "priority-test",
 					},
 				}).
-				WithPlugins().
+				WithCelArchitecturePlacement(true, []string{utils.ArchitectureArm64},
+					[]plugins.ArchitectureRule{
+						NewRule("low-priority-rule", `true`, utils.ArchitectureArm64),
+					}).
 				Build()
-
-			ppcLow.Spec.Plugins.CelArchitecturePlacement = &plugins.CelArchitecturePlacement{
-				BasePlugin: plugins.BasePlugin{
-					Enabled: true,
-				},
-				FallbackArchitectures: []string{utils.ArchitectureArm64},
-				Rules: []plugins.ArchitectureRule{
-					{
-						Name:          "low-priority-rule",
-						Expression:    `true`,
-						Architectures: []string{utils.ArchitectureArm64},
-					},
-				},
-			}
 
 			Expect(k8sClient.Create(ctx, ppcLow)).To(Succeed())
 
@@ -439,22 +381,11 @@ var _ = Describe("CEL Architecture Placement Controller Integration", func() {
 						"app": "priority-test",
 					},
 				}).
-				WithPlugins().
+				WithCelArchitecturePlacement(true, []string{utils.ArchitecturePpc64le},
+					[]plugins.ArchitectureRule{
+						NewRule("high-priority-rule", `true`, utils.ArchitecturePpc64le),
+					}).
 				Build()
-
-			ppcHigh.Spec.Plugins.CelArchitecturePlacement = &plugins.CelArchitecturePlacement{
-				BasePlugin: plugins.BasePlugin{
-					Enabled: true,
-				},
-				FallbackArchitectures: []string{utils.ArchitecturePpc64le},
-				Rules: []plugins.ArchitectureRule{
-					{
-						Name:          "high-priority-rule",
-						Expression:    `true`,
-						Architectures: []string{utils.ArchitecturePpc64le},
-					},
-				},
-			}
 
 			Expect(k8sClient.Create(ctx, ppcHigh)).To(Succeed())
 
@@ -515,22 +446,11 @@ var _ = Describe("CEL Architecture Placement Controller Integration", func() {
 						"app": "stability-test",
 					},
 				}).
-				WithPlugins().
+				WithCelArchitecturePlacement(true, []string{utils.ArchitectureAmd64},
+					[]plugins.ArchitectureRule{
+						NewRule("stable-rule", `true`, utils.ArchitectureAmd64),
+					}).
 				Build()
-
-			ppc.Spec.Plugins.CelArchitecturePlacement = &plugins.CelArchitecturePlacement{
-				BasePlugin: plugins.BasePlugin{
-					Enabled: true,
-				},
-				FallbackArchitectures: []string{utils.ArchitectureAmd64},
-				Rules: []plugins.ArchitectureRule{
-					{
-						Name:          "stable-rule",
-						Expression:    `true`,
-						Architectures: []string{utils.ArchitectureAmd64},
-					},
-				},
-			}
 
 			Expect(k8sClient.Create(ctx, ppc)).To(Succeed())
 

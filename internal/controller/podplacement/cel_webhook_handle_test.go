@@ -53,6 +53,7 @@ import (
 
 	"github.com/openshift/multiarch-tuning-operator/api/common/plugins"
 	"github.com/openshift/multiarch-tuning-operator/api/v1beta1"
+	. "github.com/openshift/multiarch-tuning-operator/pkg/testing/builder"
 	"github.com/openshift/multiarch-tuning-operator/pkg/utils"
 )
 
@@ -91,10 +92,7 @@ var _ = Describe("Webhook CEL Handle admission", func() {
 
 	// TestHandleAdmission_ResponseAllowed
 	It("should return Allowed=true for a plain pod", func() {
-		pod := &corev1.Pod{
-			ObjectMeta: metav1.ObjectMeta{Name: "plain-pod", Namespace: "test-wh"},
-			Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "c", Image: "nginx:latest"}}},
-		}
+		pod := NewPod().WithName("plain-pod").WithNamespace("test-wh").WithContainersImages("nginx:latest").Build()
 		wh := newHandleWebhook()
 		resp := wh.Handle(context.Background(), buildHandleRequest(pod))
 		Expect(resp.Allowed).To(BeTrue(), "expected Allowed=true, got: %v", resp.Result)
@@ -102,10 +100,7 @@ var _ = Describe("Webhook CEL Handle admission", func() {
 
 	// TestHandleAdmission_SchedulingGatePatchPresent
 	It("should include a patch that adds /spec/schedulingGates", func() {
-		pod := &corev1.Pod{
-			ObjectMeta: metav1.ObjectMeta{Name: "plain-pod", Namespace: "test-wh"},
-			Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "c", Image: "nginx:latest"}}},
-		}
+		pod := NewPod().WithName("plain-pod").WithNamespace("test-wh").WithContainersImages("nginx:latest").Build()
 		wh := newHandleWebhook()
 		resp := wh.Handle(context.Background(), buildHandleRequest(pod))
 		Expect(resp.Allowed).To(BeTrue(), "expected Allowed=true, got: %v", resp.Result)
@@ -122,10 +117,7 @@ var _ = Describe("Webhook CEL Handle admission", func() {
 
 	// TestHandleAdmission_SchedulingGateLabelPatchPresent
 	It("should include the scheduling gate label in the patch", func() {
-		pod := &corev1.Pod{
-			ObjectMeta: metav1.ObjectMeta{Name: "plain-pod", Namespace: "test-wh"},
-			Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "c", Image: "nginx:latest"}}},
-		}
+		pod := NewPod().WithName("plain-pod").WithNamespace("test-wh").WithContainersImages("nginx:latest").Build()
 		wh := newHandleWebhook()
 		resp := wh.Handle(context.Background(), buildHandleRequest(pod))
 		Expect(resp.Allowed).To(BeTrue(), "expected Allowed=true, got: %v", resp.Result)
@@ -153,13 +145,7 @@ var _ = Describe("Webhook CEL Handle admission", func() {
 
 	// TestHandleAdmission_PodWithNodeName_GateNotAdded
 	It("should not add the scheduling gate to pods already bound to a node (NodeName set)", func() {
-		pod := &corev1.Pod{
-			ObjectMeta: metav1.ObjectMeta{Name: "bound-pod", Namespace: "test-wh"},
-			Spec: corev1.PodSpec{
-				NodeName:   "worker-1",
-				Containers: []corev1.Container{{Name: "c", Image: "nginx:latest"}},
-			},
-		}
+		pod := NewPod().WithName("bound-pod").WithNamespace("test-wh").WithNodeName("worker-1").WithContainersImages("nginx:latest").Build()
 		wh := newHandleWebhook()
 		resp := wh.Handle(context.Background(), buildHandleRequest(pod))
 		Expect(resp.Allowed).To(BeTrue(), "expected Allowed=true for already-bound pod")
@@ -185,13 +171,7 @@ var _ = Describe("Webhook CEL Handle admission", func() {
 
 	// TestHandleAdmission_AlreadyGatedPod_NoDuplicateGate
 	It("should not add a duplicate scheduling gate when the pod already carries it", func() {
-		pod := &corev1.Pod{
-			ObjectMeta: metav1.ObjectMeta{Name: "pre-gated", Namespace: "test-wh"},
-			Spec: corev1.PodSpec{
-				SchedulingGates: []corev1.PodSchedulingGate{{Name: utils.SchedulingGateName}},
-				Containers:      []corev1.Container{{Name: "c", Image: "nginx:latest"}},
-			},
-		}
+		pod := NewPod().WithName("pre-gated").WithNamespace("test-wh").WithSchedulingGates(utils.SchedulingGateName).WithContainersImages("nginx:latest").Build()
 		wh := newHandleWebhook()
 		resp := wh.Handle(context.Background(), buildHandleRequest(pod))
 		Expect(resp.Allowed).To(BeTrue(), "expected Allowed=true")
@@ -229,14 +209,7 @@ var _ = Describe("Webhook CEL Handle admission", func() {
 		ctx := context.Background()
 		recorder := record.NewFakeRecorder(8)
 
-		raw := &corev1.Pod{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      "my-pod",
-				Namespace: "test-wh",
-				Labels:    map[string]string{"app": "myapp"},
-			},
-			Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "c", Image: "nginx:latest"}}},
-		}
+		raw := NewPod().WithName("my-pod").WithNamespace("test-wh").WithLabels("app", "myapp").WithContainersImages("nginx:latest").Build()
 		pod := newPod(raw, ctx, recorder)
 
 		ppc := buildTestPPCWithCELRule("cel-ppc", "default", 100,
@@ -287,10 +260,7 @@ var _ = Describe("Webhook CEL apiReader/ppcCacheSynced behavior", func() {
 		cacheSynced := func() bool { return true }
 		wh := NewPodSchedulingGateMutatingWebHook(fakeClient, &mockAPIReader, cacheSynced, nil, s, record.NewFakeRecorder(32), pool)
 
-		pod := &corev1.Pod{
-			ObjectMeta: metav1.ObjectMeta{Name: "plain-pod", Namespace: "test-wh"},
-			Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "c", Image: "nginx:latest"}}},
-		}
+		pod := NewPod().WithName("plain-pod").WithNamespace("test-wh").WithContainersImages("nginx:latest").Build()
 		_ = wh.Handle(context.Background(), buildHandleRequest(pod))
 
 		Expect(apiReaderCalled).To(BeFalse(),
@@ -317,10 +287,7 @@ var _ = Describe("Webhook CEL apiReader/ppcCacheSynced behavior", func() {
 		cacheSynced := func() bool { return false }
 		wh := NewPodSchedulingGateMutatingWebHook(fakeClient, &mockAPIReader, cacheSynced, nil, s, record.NewFakeRecorder(32), pool)
 
-		pod := &corev1.Pod{
-			ObjectMeta: metav1.ObjectMeta{Name: "plain-pod", Namespace: "test-wh"},
-			Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "c", Image: "nginx:latest"}}},
-		}
+		pod := NewPod().WithName("plain-pod").WithNamespace("test-wh").WithContainersImages("nginx:latest").Build()
 		_ = wh.Handle(context.Background(), buildHandleRequest(pod))
 
 		Expect(apiReaderCalled).To(BeTrue(),
@@ -346,10 +313,7 @@ var _ = Describe("Webhook CEL apiReader/ppcCacheSynced behavior", func() {
 
 		wh := NewPodSchedulingGateMutatingWebHook(fakeClient, &mockAPIReader, nil, nil, s, record.NewFakeRecorder(32), pool)
 
-		pod := &corev1.Pod{
-			ObjectMeta: metav1.ObjectMeta{Name: "plain-pod", Namespace: "test-wh"},
-			Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "c", Image: "nginx:latest"}}},
-		}
+		pod := NewPod().WithName("plain-pod").WithNamespace("test-wh").WithContainersImages("nginx:latest").Build()
 		_ = wh.Handle(context.Background(), buildHandleRequest(pod))
 
 		Expect(apiReaderCalled).To(BeTrue(),
@@ -358,10 +322,7 @@ var _ = Describe("Webhook CEL apiReader/ppcCacheSynced behavior", func() {
 
 	// TestHandle_ApiReaderNil_NoFallback
 	It("should not panic and return Allowed=true when apiReader is nil", func() {
-		pod := &corev1.Pod{
-			ObjectMeta: metav1.ObjectMeta{Name: "plain-pod", Namespace: "test-wh"},
-			Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "c", Image: "nginx:latest"}}},
-		}
+		pod := NewPod().WithName("plain-pod").WithNamespace("test-wh").WithContainersImages("nginx:latest").Build()
 		wh := newHandleWebhook()
 		resp := wh.Handle(context.Background(), buildHandleRequest(pod))
 		Expect(resp.Allowed).To(BeTrue(), "expected Allowed=true with nil apiReader, got: %v", resp.Result)
@@ -474,21 +435,10 @@ func setNestedValue(obj map[string]interface{}, parts []string, value interface{
 // buildTestPPCWithCELRule builds a minimal PodPlacementConfig with a single
 // CEL rule.
 func buildTestPPCWithCELRule(name, ns string, priority uint8, fallback, expression, arch string) v1beta1.PodPlacementConfig {
-	return v1beta1.PodPlacementConfig{
-		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns},
-		Spec: v1beta1.PodPlacementConfigSpec{
-			Priority: priority,
-			Plugins: &plugins.LocalPlugins{
-				CelArchitecturePlacement: &plugins.CelArchitecturePlacement{
-					BasePlugin:            plugins.BasePlugin{Enabled: true},
-					FallbackArchitectures: []string{fallback},
-					Rules: []plugins.ArchitectureRule{
-						{Name: "rule", Expression: expression, Architectures: []string{arch}},
-					},
-				},
-			},
-		},
-	}
+	return *NewPodPlacementConfig().WithName(name).WithNamespace(ns).WithPriority(priority).
+		WithCelArchitecturePlacement(true, []string{fallback}, []plugins.ArchitectureRule{
+			NewRule("rule", expression, arch),
+		}).Build()
 }
 
 // mockReader implements client.Reader for use as a spy in tests.

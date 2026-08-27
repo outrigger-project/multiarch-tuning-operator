@@ -21,9 +21,9 @@ import (
 	. "github.com/onsi/gomega"
 
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/openshift/multiarch-tuning-operator/api/common/plugins"
+	. "github.com/openshift/multiarch-tuning-operator/pkg/testing/builder"
 	"github.com/openshift/multiarch-tuning-operator/pkg/utils"
 )
 
@@ -32,21 +32,10 @@ var _ = Describe("CEL Architecture Placement and NodeAffinityScoring Coexistence
 		It("should apply CEL architecture constraints AND NodeAffinityScoring preferences", func() {
 			// Create an in-memory pod (never persisted to the API server).
 			// Name and Namespace are irrelevant for these pure in-memory assertions.
-			pod := &corev1.Pod{
-				ObjectMeta: metav1.ObjectMeta{
-					Labels: map[string]string{
-						"app": "test",
-					},
-				},
-				Spec: corev1.PodSpec{
-					Containers: []corev1.Container{
-						{
-							Name:  "test-container",
-							Image: "test:latest",
-						},
-					},
-				},
-			}
+			pod := NewPod().
+				WithLabels("app", "test").
+				WithContainersImages("test:latest").
+				Build()
 
 			// Apply CEL architecture placement (sets required affinity)
 			architectures := []string{"amd64", "arm64"}
@@ -118,31 +107,18 @@ var _ = Describe("CEL Architecture Placement and NodeAffinityScoring Coexistence
 		It("should preserve CEL required affinity when NodeAffinityScoring adds preferred affinity", func() {
 			// Create an in-memory pod (never persisted to the API server).
 			// Name and Namespace are irrelevant for these pure in-memory assertions.
-			pod := &corev1.Pod{
-				ObjectMeta: metav1.ObjectMeta{},
-				Spec: corev1.PodSpec{
-					Affinity: &corev1.Affinity{
-						NodeAffinity: &corev1.NodeAffinity{
-							RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
-								NodeSelectorTerms: []corev1.NodeSelectorTerm{
-									{
-										MatchExpressions: []corev1.NodeSelectorRequirement{
-											{
-												Key:      utils.ArchLabel,
-												Operator: corev1.NodeSelectorOpIn,
-												Values:   []string{"ppc64le"},
-											},
-										},
-									},
-								},
-							},
+			pod := NewPod().
+				WithNodeSelectorTermsMatchExpressions(
+					[]corev1.NodeSelectorRequirement{
+						{
+							Key:      utils.ArchLabel,
+							Operator: corev1.NodeSelectorOpIn,
+							Values:   []string{"ppc64le"},
 						},
 					},
-					Containers: []corev1.Container{
-						{Name: "test", Image: "test:latest"},
-					},
-				},
-			}
+				).
+				WithContainersImages("test:latest").
+				Build()
 
 			// Store original required affinity
 			originalRequired := pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms[0].MatchExpressions[0].Values

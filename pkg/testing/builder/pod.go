@@ -211,6 +211,11 @@ func (p *PodBuilder) WithContainerStatuses(statuses ...v1.ContainerStatus) *PodB
 	return p
 }
 
+func (p *PodBuilder) WithFinalizers(finalizers ...string) *PodBuilder {
+	p.pod.Finalizers = finalizers
+	return p
+}
+
 func (p *PodBuilder) Build() *v1.Pod {
 	return p.pod
 }

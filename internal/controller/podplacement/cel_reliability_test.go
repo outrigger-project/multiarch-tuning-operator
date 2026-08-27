@@ -20,10 +20,8 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
 	"github.com/openshift/multiarch-tuning-operator/api/common/plugins"
+	. "github.com/openshift/multiarch-tuning-operator/pkg/testing/builder"
 	"github.com/openshift/multiarch-tuning-operator/pkg/utils"
 )
 
@@ -31,15 +29,11 @@ var _ = Describe("CEL Reliability", func() {
 
 	// TestIdempotentRepeatedReconcile
 	It("should produce stable pod state when repeatedly applying the same architectures (idempotent)", func() {
-		pod := &corev1.Pod{
-			ObjectMeta: metav1.ObjectMeta{Name: "test-pod"},
-			Spec: corev1.PodSpec{
-				NodeSelector: map[string]string{
-					utils.ArchLabel: "amd64",
-					"other-label":   "value",
-				},
-			},
-		}
+		pod := NewPod().WithName("test-pod").
+			WithNodeSelectors(
+				utils.ArchLabel, "amd64",
+				"other-label", "value",
+			).Build()
 		architectures := []string{"ppc64le", "arm64"}
 		for i := 0; i < 5; i++ {
 			applyArchitectureConstraints(pod, architectures)
@@ -64,7 +58,7 @@ var _ = Describe("CEL Reliability", func() {
 
 	// TestArchitectureConstraintsReplacedInPlaceOnRepeatedApply
 	It("should replace architecture constraints in-place on repeated apply", func() {
-		pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "test-pod"}}
+		pod := NewPod().WithName("test-pod").Build()
 
 		applyArchitectureConstraints(pod, []string{"amd64"})
 		Expect(pod.Spec.Affinity).NotTo(BeNil())
@@ -86,16 +80,12 @@ var _ = Describe("CEL Reliability", func() {
 
 	// TestNodeSelectorCleanupStableAcrossMultipleReconciles
 	It("should keep nodeSelector cleanup stable across multiple reconciles", func() {
-		pod := &corev1.Pod{
-			ObjectMeta: metav1.ObjectMeta{Name: "test-pod"},
-			Spec: corev1.PodSpec{
-				NodeSelector: map[string]string{
-					utils.ArchLabel: "amd64",
-					"zone":          "us-east-1",
-					"tier":          "frontend",
-				},
-			},
-		}
+		pod := NewPod().WithName("test-pod").
+			WithNodeSelectors(
+				utils.ArchLabel, "amd64",
+				"zone", "us-east-1",
+				"tier", "frontend",
+			).Build()
 
 		for i := 0; i < 5; i++ {
 			removed := removeArchitectureFromNodeSelector(pod)
@@ -114,7 +104,7 @@ var _ = Describe("CEL Reliability", func() {
 	It("should keep fallback application stable across repeated runs", func() {
 		rules := []plugins.ArchitectureRule{}
 		fallback := []string{"amd64", "ppc64le"}
-		pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "test-pod"}}
+		pod := NewPod().WithName("test-pod").Build()
 
 		for i := 0; i < 5; i++ {
 			result, err := evaluateCELArchitecturePlacement(rules, fallback, pod)
@@ -126,10 +116,7 @@ var _ = Describe("CEL Reliability", func() {
 
 	// TestNilAffinityHandling
 	It("should handle nil affinity structures safely", func() {
-		pod := &corev1.Pod{
-			ObjectMeta: metav1.ObjectMeta{Name: "test-pod"},
-			Spec:       corev1.PodSpec{Affinity: nil},
-		}
+		pod := NewPod().WithName("test-pod").Build()
 		removed := removeArchitectureFromNodeAffinity(pod)
 		Expect(removed).To(BeFalse(), "Should not report removal when affinity is nil")
 

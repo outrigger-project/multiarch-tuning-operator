@@ -7,6 +7,16 @@ import (
 	"github.com/openshift/multiarch-tuning-operator/api/common"
 )
 
+// newRule is a local shorthand for constructing ArchitectureRule literals in tests.
+// It mirrors builder.NewRule but avoids the import cycle (plugins -> builder -> plugins).
+func newRule(name, expression string, archs ...string) ArchitectureRule {
+	return ArchitectureRule{
+		Name:          name,
+		Expression:    expression,
+		Architectures: archs,
+	}
+}
+
 func TestBasePlugin_IsEnabled(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -88,11 +98,7 @@ func TestCelArchitecturePlacement_ValidateArchitectures(t *testing.T) {
 			name:                  "valid rule architectures",
 			fallbackArchitectures: []string{"amd64"},
 			rules: []ArchitectureRule{
-				{
-					Name:          "test-rule",
-					Expression:    "true",
-					Architectures: []string{"ppc64le", "arm64"},
-				},
+				newRule("test-rule", "true", "ppc64le", "arm64"),
 			},
 			expectError: false,
 		},
@@ -100,11 +106,7 @@ func TestCelArchitecturePlacement_ValidateArchitectures(t *testing.T) {
 			name:                  "invalid rule architecture",
 			fallbackArchitectures: []string{"amd64"},
 			rules: []ArchitectureRule{
-				{
-					Name:          "test-rule",
-					Expression:    "true",
-					Architectures: []string{"invalid-arch"},
-				},
+				newRule("test-rule", "true", "invalid-arch"),
 			},
 			expectError:   true,
 			errorContains: "invalid architecture in rule test-rule: invalid-arch",
@@ -113,16 +115,8 @@ func TestCelArchitecturePlacement_ValidateArchitectures(t *testing.T) {
 			name:                  "multiple rules with valid architectures",
 			fallbackArchitectures: []string{"amd64"},
 			rules: []ArchitectureRule{
-				{
-					Name:          "rule1",
-					Expression:    "true",
-					Architectures: []string{"ppc64le"},
-				},
-				{
-					Name:          "rule2",
-					Expression:    "true",
-					Architectures: []string{"arm64", "s390x"},
-				},
+				newRule("rule1", "true", "ppc64le"),
+				newRule("rule2", "true", "arm64", "s390x"),
 			},
 			expectError: false,
 		},
@@ -130,16 +124,8 @@ func TestCelArchitecturePlacement_ValidateArchitectures(t *testing.T) {
 			name:                  "multiple rules with one invalid",
 			fallbackArchitectures: []string{"amd64"},
 			rules: []ArchitectureRule{
-				{
-					Name:          "rule1",
-					Expression:    "true",
-					Architectures: []string{"ppc64le"},
-				},
-				{
-					Name:          "rule2",
-					Expression:    "true",
-					Architectures: []string{"bad-arch"},
-				},
+				newRule("rule1", "true", "ppc64le"),
+				newRule("rule2", "true", "bad-arch"),
 			},
 			expectError:   true,
 			errorContains: "invalid architecture in rule rule2: bad-arch",
@@ -148,11 +134,7 @@ func TestCelArchitecturePlacement_ValidateArchitectures(t *testing.T) {
 			name:                  "all supported architectures",
 			fallbackArchitectures: []string{"amd64", "arm64", "ppc64le", "s390x"},
 			rules: []ArchitectureRule{
-				{
-					Name:          "all-archs",
-					Expression:    "true",
-					Architectures: []string{"amd64", "arm64", "ppc64le", "s390x"},
-				},
+				newRule("all-archs", "true", "amd64", "arm64", "ppc64le", "s390x"),
 			},
 			expectError: false,
 		},
@@ -244,22 +226,14 @@ func TestCelArchitecturePlacement_ValidateCELExpressions(t *testing.T) {
 		{
 			name: "valid boolean expression succeeds",
 			rules: []ArchitectureRule{
-				{
-					Name:          "rule1",
-					Expression:    "self.metadata.name == 'test'",
-					Architectures: []string{"amd64"},
-				},
+				newRule("rule1", "self.metadata.name == 'test'", "amd64"),
 			},
 			expectError: false,
 		},
 		{
 			name: "invalid CEL syntax is rejected",
 			rules: []ArchitectureRule{
-				{
-					Name:          "bad-rule",
-					Expression:    "self.metadata.name ==",
-					Architectures: []string{"amd64"},
-				},
+				newRule("bad-rule", "self.metadata.name ==", "amd64"),
 			},
 			expectError:   true,
 			errorContains: []string{`"bad-rule"`, "Syntax error"},
@@ -267,11 +241,7 @@ func TestCelArchitecturePlacement_ValidateCELExpressions(t *testing.T) {
 		{
 			name: "non-boolean expression is rejected",
 			rules: []ArchitectureRule{
-				{
-					Name:          "non-bool",
-					Expression:    "self.metadata.name",
-					Architectures: []string{"amd64"},
-				},
+				newRule("non-bool", "self.metadata.name", "amd64"),
 			},
 			expectError:   true,
 			errorContains: []string{`"non-bool"`, "must return a boolean"},
@@ -279,16 +249,8 @@ func TestCelArchitecturePlacement_ValidateCELExpressions(t *testing.T) {
 		{
 			name: "multiple rules validated; second rule invalid",
 			rules: []ArchitectureRule{
-				{
-					Name:          "ok-rule",
-					Expression:    "self.metadata.name == 'test'",
-					Architectures: []string{"amd64"},
-				},
-				{
-					Name:          "bad-rule",
-					Expression:    "self.metadata.name ==",
-					Architectures: []string{"ppc64le"},
-				},
+				newRule("ok-rule", "self.metadata.name == 'test'", "amd64"),
+				newRule("bad-rule", "self.metadata.name ==", "ppc64le"),
 			},
 			expectError:   true,
 			errorContains: []string{`"bad-rule"`, "Syntax error"},
@@ -297,11 +259,7 @@ func TestCelArchitecturePlacement_ValidateCELExpressions(t *testing.T) {
 		{
 			name: "self.spec reference is rejected",
 			rules: []ArchitectureRule{
-				{
-					Name:          "spec-rule",
-					Expression:    "self.spec.nodeName == 'worker-1'",
-					Architectures: []string{"amd64"},
-				},
+				newRule("spec-rule", "self.spec.nodeName == 'worker-1'", "amd64"),
 			},
 			expectError:      true,
 			errorContains:    []string{`"spec-rule"`, "field", "spec"},
@@ -310,11 +268,7 @@ func TestCelArchitecturePlacement_ValidateCELExpressions(t *testing.T) {
 		{
 			name: "self.status reference is rejected",
 			rules: []ArchitectureRule{
-				{
-					Name:          "status-rule",
-					Expression:    "self.status.phase == 'Running'",
-					Architectures: []string{"amd64"},
-				},
+				newRule("status-rule", "self.status.phase == 'Running'", "amd64"),
 			},
 			expectError:      true,
 			errorContains:    []string{`"status-rule"`, "field", "status"},
@@ -323,11 +277,7 @@ func TestCelArchitecturePlacement_ValidateCELExpressions(t *testing.T) {
 		{
 			name: "self.spec.containers reference is rejected",
 			rules: []ArchitectureRule{
-				{
-					Name:          "containers-rule",
-					Expression:    "size(self.spec.containers) > 0",
-					Architectures: []string{"amd64"},
-				},
+				newRule("containers-rule", "size(self.spec.containers) > 0", "amd64"),
 			},
 			expectError:      true,
 			errorContains:    []string{`"containers-rule"`, "field", "spec"},
@@ -336,44 +286,28 @@ func TestCelArchitecturePlacement_ValidateCELExpressions(t *testing.T) {
 		{
 			name: "self.metadata reference is permitted (assertMetadataOnly)",
 			rules: []ArchitectureRule{
-				{
-					Name:          "labels-rule",
-					Expression:    "has(self.metadata.labels.app) && self.metadata.labels.app == 'web'",
-					Architectures: []string{"amd64"},
-				},
+				newRule("labels-rule", "has(self.metadata.labels.app) && self.metadata.labels.app == 'web'", "amd64"),
 			},
 			expectError: false,
 		},
 		{
 			name: "self.metadata.namespace is permitted (assertMetadataOnly)",
 			rules: []ArchitectureRule{
-				{
-					Name:          "namespace-rule",
-					Expression:    "self.metadata.namespace == 'production'",
-					Architectures: []string{"amd64"},
-				},
+				newRule("namespace-rule", "self.metadata.namespace == 'production'", "amd64"),
 			},
 			expectError: false,
 		},
 		{
 			name: "self.metadata.annotations is permitted (assertMetadataOnly)",
 			rules: []ArchitectureRule{
-				{
-					Name:          "annotations-rule",
-					Expression:    "'config.company.io/tier' in self.metadata.annotations && self.metadata.annotations['config.company.io/tier'] == 'gpu'",
-					Architectures: []string{"amd64"},
-				},
+				newRule("annotations-rule", "'config.company.io/tier' in self.metadata.annotations && self.metadata.annotations['config.company.io/tier'] == 'gpu'", "amd64"),
 			},
 			expectError: false,
 		},
 		{
 			name: "has(self.spec.nodeName) is rejected",
 			rules: []ArchitectureRule{
-				{
-					Name:          "has-spec-rule",
-					Expression:    "has(self.spec.nodeName)",
-					Architectures: []string{"amd64"},
-				},
+				newRule("has-spec-rule", "has(self.spec.nodeName)", "amd64"),
 			},
 			expectError:      true,
 			errorContains:    []string{`"has-spec-rule"`, "field", "spec"},
@@ -382,16 +316,8 @@ func TestCelArchitecturePlacement_ValidateCELExpressions(t *testing.T) {
 		{
 			name: "multiple rules; first valid, second spec reference rejected",
 			rules: []ArchitectureRule{
-				{
-					Name:          "valid-rule",
-					Expression:    "self.metadata.name == 'test'",
-					Architectures: []string{"amd64"},
-				},
-				{
-					Name:          "spec-rule",
-					Expression:    "self.spec.serviceAccountName == 'default'",
-					Architectures: []string{"ppc64le"},
-				},
+				newRule("valid-rule", "self.metadata.name == 'test'", "amd64"),
+				newRule("spec-rule", "self.spec.serviceAccountName == 'default'", "ppc64le"),
 			},
 			expectError:      true,
 			errorContains:    []string{`"spec-rule"`, "field", "spec"},
@@ -401,11 +327,7 @@ func TestCelArchitecturePlacement_ValidateCELExpressions(t *testing.T) {
 		{
 			name: "comprehension over self.spec.containers is rejected",
 			rules: []ArchitectureRule{
-				{
-					Name:          "exists-rule",
-					Expression:    `self.spec.containers.exists(c, c.name == "nginx")`,
-					Architectures: []string{"amd64"},
-				},
+				newRule("exists-rule", `self.spec.containers.exists(c, c.name == "nginx")`, "amd64"),
 			},
 			expectError:      true,
 			errorContains:    []string{`"exists-rule"`, "field", "spec"},
@@ -415,11 +337,7 @@ func TestCelArchitecturePlacement_ValidateCELExpressions(t *testing.T) {
 		{
 			name: "constant expression true is permitted",
 			rules: []ArchitectureRule{
-				{
-					Name:          "const-rule",
-					Expression:    "true",
-					Architectures: []string{"amd64"},
-				},
+				newRule("const-rule", "true", "amd64"),
 			},
 			expectError: false,
 		},
@@ -429,11 +347,7 @@ func TestCelArchitecturePlacement_ValidateCELExpressions(t *testing.T) {
 		{
 			name: "self.metadata.labells typo is rejected by typed schema",
 			rules: []ArchitectureRule{
-				{
-					Name:          "typo-rule",
-					Expression:    "self.metadata.labells.app == 'web'",
-					Architectures: []string{"amd64"},
-				},
+				newRule("typo-rule", "self.metadata.labells.app == 'web'", "amd64"),
 			},
 			expectError:   true,
 			errorContains: []string{`"typo-rule"`},
@@ -442,44 +356,28 @@ func TestCelArchitecturePlacement_ValidateCELExpressions(t *testing.T) {
 		{
 			name: "self.metadata.name is permitted (valid field)",
 			rules: []ArchitectureRule{
-				{
-					Name:          "name-rule",
-					Expression:    "self.metadata.name == 'my-pod'",
-					Architectures: []string{"amd64"},
-				},
+				newRule("name-rule", "self.metadata.name == 'my-pod'", "amd64"),
 			},
 			expectError: false,
 		},
 		{
 			name: "self.metadata.namespace is permitted (valid field)",
 			rules: []ArchitectureRule{
-				{
-					Name:          "namespace-rule",
-					Expression:    "self.metadata.namespace == 'default'",
-					Architectures: []string{"amd64"},
-				},
+				newRule("namespace-rule", "self.metadata.namespace == 'default'", "amd64"),
 			},
 			expectError: false,
 		},
 		{
 			name: "self.metadata.labels is permitted (valid field)",
 			rules: []ArchitectureRule{
-				{
-					Name:          "labels-rule",
-					Expression:    "has(self.metadata.labels.app) && self.metadata.labels.app == 'web'",
-					Architectures: []string{"amd64"},
-				},
+				newRule("labels-rule", "has(self.metadata.labels.app) && self.metadata.labels.app == 'web'", "amd64"),
 			},
 			expectError: false,
 		},
 		{
 			name: "self.metadata.annotations is permitted (valid field)",
 			rules: []ArchitectureRule{
-				{
-					Name:          "annotations-rule",
-					Expression:    "'env' in self.metadata.annotations",
-					Architectures: []string{"amd64"},
-				},
+				newRule("annotations-rule", "'env' in self.metadata.annotations", "amd64"),
 			},
 			expectError: false,
 		},
@@ -579,7 +477,7 @@ func TestArchitectureRule_ExpressionLengthBoundary(t *testing.T) {
 			plugin := &CelArchitecturePlacement{
 				FallbackArchitectures: []string{"amd64"},
 				Rules: []ArchitectureRule{
-					{Name: "length-test", Expression: tt.expression, Architectures: []string{"amd64"}},
+					newRule("length-test", tt.expression, "amd64"),
 				},
 			}
 			err := plugin.ValidateCELExpressions()

@@ -20,8 +20,8 @@ import (
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	. "github.com/openshift/multiarch-tuning-operator/pkg/testing/builder"
 	"github.com/openshift/multiarch-tuning-operator/pkg/utils"
 )
 
@@ -32,35 +32,18 @@ func TestRemoveArchitectureFromNodeSelector(t *testing.T) {
 		expectedRemove bool
 	}{
 		{
-			name: "remove arch from nodeSelector",
-			pod: &corev1.Pod{
-				Spec: corev1.PodSpec{
-					NodeSelector: map[string]string{
-						utils.ArchLabel: "amd64",
-						"other-label":   "value",
-					},
-				},
-			},
+			name:           "remove arch from nodeSelector",
+			pod:            NewPod().WithNodeSelectors(utils.ArchLabel, "amd64", "other-label", "value").Build(),
 			expectedRemove: true,
 		},
 		{
-			name: "no arch in nodeSelector",
-			pod: &corev1.Pod{
-				Spec: corev1.PodSpec{
-					NodeSelector: map[string]string{
-						"other-label": "value",
-					},
-				},
-			},
+			name:           "no arch in nodeSelector",
+			pod:            NewPod().WithNodeSelectors("other-label", "value").Build(),
 			expectedRemove: false,
 		},
 		{
-			name: "nil nodeSelector",
-			pod: &corev1.Pod{
-				Spec: corev1.PodSpec{
-					NodeSelector: nil,
-				},
-			},
+			name:           "nil nodeSelector",
+			pod:            NewPod().Build(),
 			expectedRemove: false,
 		},
 	}
@@ -90,108 +73,67 @@ func TestRemoveArchitectureFromNodeAffinity(t *testing.T) {
 	}{
 		{
 			name: "remove arch from nodeAffinity",
-			pod: &corev1.Pod{
-				Spec: corev1.PodSpec{
-					Affinity: &corev1.Affinity{
-						NodeAffinity: &corev1.NodeAffinity{
-							RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
-								NodeSelectorTerms: []corev1.NodeSelectorTerm{
-									{
-										MatchExpressions: []corev1.NodeSelectorRequirement{
-											{
-												Key:      utils.ArchLabel,
-												Operator: corev1.NodeSelectorOpIn,
-												Values:   []string{"amd64"},
-											},
-										},
-									},
-								},
-							},
-						},
+			pod: NewPod().WithNodeSelectorTermsMatchExpressions(
+				[]corev1.NodeSelectorRequirement{
+					{
+						Key:      utils.ArchLabel,
+						Operator: corev1.NodeSelectorOpIn,
+						Values:   []string{"amd64"},
 					},
 				},
-			},
+			).Build(),
 			expectedRemove: true,
 			checkNil:       true,
 		},
 		{
 			name: "remove arch but keep other expressions",
-			pod: &corev1.Pod{
-				Spec: corev1.PodSpec{
-					Affinity: &corev1.Affinity{
-						NodeAffinity: &corev1.NodeAffinity{
-							RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
-								NodeSelectorTerms: []corev1.NodeSelectorTerm{
-									{
-										MatchExpressions: []corev1.NodeSelectorRequirement{
-											{
-												Key:      utils.ArchLabel,
-												Operator: corev1.NodeSelectorOpIn,
-												Values:   []string{"amd64"},
-											},
-											{
-												Key:      "other-label",
-												Operator: corev1.NodeSelectorOpIn,
-												Values:   []string{"value"},
-											},
-										},
-									},
-								},
-							},
-						},
+			pod: NewPod().WithNodeSelectorTermsMatchExpressions(
+				[]corev1.NodeSelectorRequirement{
+					{
+						Key:      utils.ArchLabel,
+						Operator: corev1.NodeSelectorOpIn,
+						Values:   []string{"amd64"},
+					},
+					{
+						Key:      "other-label",
+						Operator: corev1.NodeSelectorOpIn,
+						Values:   []string{"value"},
 					},
 				},
-			},
+			).Build(),
 			expectedRemove: true,
 			checkNil:       false,
 		},
 		{
 			name: "preserve preferred affinity",
-			pod: &corev1.Pod{
-				Spec: corev1.PodSpec{
-					Affinity: &corev1.Affinity{
-						NodeAffinity: &corev1.NodeAffinity{
-							RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
-								NodeSelectorTerms: []corev1.NodeSelectorTerm{
-									{
-										MatchExpressions: []corev1.NodeSelectorRequirement{
-											{
-												Key:      utils.ArchLabel,
-												Operator: corev1.NodeSelectorOpIn,
-												Values:   []string{"amd64"},
-											},
-										},
-									},
-								},
-							},
-							PreferredDuringSchedulingIgnoredDuringExecution: []corev1.PreferredSchedulingTerm{
-								{
-									Weight: 50,
-									Preference: corev1.NodeSelectorTerm{
-										MatchExpressions: []corev1.NodeSelectorRequirement{
-											{
-												Key:      utils.ArchLabel,
-												Operator: corev1.NodeSelectorOpIn,
-												Values:   []string{"ppc64le"},
-											},
-										},
-									},
-								},
+			pod: NewPod().WithNodeSelectorTermsMatchExpressions(
+				[]corev1.NodeSelectorRequirement{
+					{
+						Key:      utils.ArchLabel,
+						Operator: corev1.NodeSelectorOpIn,
+						Values:   []string{"amd64"},
+					},
+				},
+			).WithPreferredDuringSchedulingIgnoredDuringExecution(
+				&corev1.PreferredSchedulingTerm{
+					Weight: 50,
+					Preference: corev1.NodeSelectorTerm{
+						MatchExpressions: []corev1.NodeSelectorRequirement{
+							{
+								Key:      utils.ArchLabel,
+								Operator: corev1.NodeSelectorOpIn,
+								Values:   []string{"ppc64le"},
 							},
 						},
 					},
 				},
-			},
+			).Build(),
 			expectedRemove: true,
 			checkNil:       false,
 		},
 		{
-			name: "nil affinity",
-			pod: &corev1.Pod{
-				Spec: corev1.PodSpec{
-					Affinity: nil,
-				},
-			},
+			name:           "nil affinity",
+			pod:            NewPod().Build(),
 			expectedRemove: false,
 			checkNil:       false,
 		},
@@ -248,77 +190,38 @@ func TestRemoveAllArchitectureConstraints(t *testing.T) {
 	}{
 		{
 			name: "remove from both nodeSelector and nodeAffinity",
-			pod: &corev1.Pod{
-				Spec: corev1.PodSpec{
-					NodeSelector: map[string]string{
-						utils.ArchLabel: "amd64",
-					},
-					Affinity: &corev1.Affinity{
-						NodeAffinity: &corev1.NodeAffinity{
-							RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
-								NodeSelectorTerms: []corev1.NodeSelectorTerm{
-									{
-										MatchExpressions: []corev1.NodeSelectorRequirement{
-											{
-												Key:      utils.ArchLabel,
-												Operator: corev1.NodeSelectorOpIn,
-												Values:   []string{"amd64"},
-											},
-										},
-									},
-								},
-							},
-						},
+			pod: NewPod().WithNodeSelectors(utils.ArchLabel, "amd64").WithNodeSelectorTermsMatchExpressions(
+				[]corev1.NodeSelectorRequirement{
+					{
+						Key:      utils.ArchLabel,
+						Operator: corev1.NodeSelectorOpIn,
+						Values:   []string{"amd64"},
 					},
 				},
-			},
+			).Build(),
 			expectedRemove: true,
 		},
 		{
-			name: "remove from nodeSelector only",
-			pod: &corev1.Pod{
-				Spec: corev1.PodSpec{
-					NodeSelector: map[string]string{
-						utils.ArchLabel: "amd64",
-					},
-				},
-			},
+			name:           "remove from nodeSelector only",
+			pod:            NewPod().WithNodeSelectors(utils.ArchLabel, "amd64").Build(),
 			expectedRemove: true,
 		},
 		{
 			name: "remove from nodeAffinity only",
-			pod: &corev1.Pod{
-				Spec: corev1.PodSpec{
-					Affinity: &corev1.Affinity{
-						NodeAffinity: &corev1.NodeAffinity{
-							RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
-								NodeSelectorTerms: []corev1.NodeSelectorTerm{
-									{
-										MatchExpressions: []corev1.NodeSelectorRequirement{
-											{
-												Key:      utils.ArchLabel,
-												Operator: corev1.NodeSelectorOpIn,
-												Values:   []string{"amd64"},
-											},
-										},
-									},
-								},
-							},
-						},
+			pod: NewPod().WithNodeSelectorTermsMatchExpressions(
+				[]corev1.NodeSelectorRequirement{
+					{
+						Key:      utils.ArchLabel,
+						Operator: corev1.NodeSelectorOpIn,
+						Values:   []string{"amd64"},
 					},
 				},
-			},
+			).Build(),
 			expectedRemove: true,
 		},
 		{
-			name: "no architecture constraints",
-			pod: &corev1.Pod{
-				Spec: corev1.PodSpec{
-					NodeSelector: map[string]string{
-						"other-label": "value",
-					},
-				},
-			},
+			name:           "no architecture constraints",
+			pod:            NewPod().WithNodeSelectors("other-label", "value").Build(),
 			expectedRemove: false,
 		},
 	}
@@ -353,30 +256,15 @@ func TestRemoveAllArchitectureConstraints(t *testing.T) {
 }
 
 func TestRemoveArchitectureFromNodeAffinityEmptyTermCleanup(t *testing.T) {
-	pod := &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: "test-pod",
-		},
-		Spec: corev1.PodSpec{
-			Affinity: &corev1.Affinity{
-				NodeAffinity: &corev1.NodeAffinity{
-					RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
-						NodeSelectorTerms: []corev1.NodeSelectorTerm{
-							{
-								MatchExpressions: []corev1.NodeSelectorRequirement{
-									{
-										Key:      utils.ArchLabel,
-										Operator: corev1.NodeSelectorOpIn,
-										Values:   []string{"amd64"},
-									},
-								},
-							},
-						},
-					},
-				},
+	pod := NewPod().WithName("test-pod").WithNodeSelectorTermsMatchExpressions(
+		[]corev1.NodeSelectorRequirement{
+			{
+				Key:      utils.ArchLabel,
+				Operator: corev1.NodeSelectorOpIn,
+				Values:   []string{"amd64"},
 			},
 		},
-	}
+	).Build()
 
 	removed := removeArchitectureFromNodeAffinity(pod)
 	if !removed {

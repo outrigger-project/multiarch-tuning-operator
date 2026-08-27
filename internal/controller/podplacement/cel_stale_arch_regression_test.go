@@ -21,8 +21,8 @@ import (
 	. "github.com/onsi/gomega"
 
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	. "github.com/openshift/multiarch-tuning-operator/pkg/testing/builder"
 	"github.com/openshift/multiarch-tuning-operator/pkg/utils"
 )
 
@@ -30,46 +30,39 @@ var _ = Describe("CEL Stale Architecture Regression", func() {
 
 	// TestApplyArchitectureConstraintsRemovesStaleArchitectureValues
 	It("should remove stale architecture values and apply only the new CEL-selected architecture (CPD field symptom regression)", func() {
-		pod := &corev1.Pod{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      "ibm-lh-lakehouse-ces-0",
-				Namespace: "cpd-instance",
-			},
-			Spec: corev1.PodSpec{
-				Affinity: &corev1.Affinity{
-					NodeAffinity: &corev1.NodeAffinity{
-						RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
-							NodeSelectorTerms: []corev1.NodeSelectorTerm{
-								{
-									// Simulates the stale architecture-only term observed in the field.
-									MatchExpressions: []corev1.NodeSelectorRequirement{
-										{
-											Key:      utils.ArchLabel,
-											Operator: corev1.NodeSelectorOpIn,
-											Values: []string{
-												utils.ArchitectureAmd64,
-												utils.ArchitecturePpc64le,
-												utils.ArchitectureS390x,
-											},
+		pod := NewPod().WithName("ibm-lh-lakehouse-ces-0").WithNamespace("cpd-instance").
+			WithAffinity(&corev1.Affinity{
+				NodeAffinity: &corev1.NodeAffinity{
+					RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
+						NodeSelectorTerms: []corev1.NodeSelectorTerm{
+							{
+								// Simulates the stale architecture-only term observed in the field.
+								MatchExpressions: []corev1.NodeSelectorRequirement{
+									{
+										Key:      utils.ArchLabel,
+										Operator: corev1.NodeSelectorOpIn,
+										Values: []string{
+											utils.ArchitectureAmd64,
+											utils.ArchitecturePpc64le,
+											utils.ArchitectureS390x,
 										},
 									},
 								},
-								{
-									// Simulates unrelated scheduling intent that must be preserved.
-									MatchExpressions: []corev1.NodeSelectorRequirement{
-										{
-											Key:      "topology.kubernetes.io/zone",
-											Operator: corev1.NodeSelectorOpIn,
-											Values:   []string{"us-east-1a"},
-										},
+							},
+							{
+								// Simulates unrelated scheduling intent that must be preserved.
+								MatchExpressions: []corev1.NodeSelectorRequirement{
+									{
+										Key:      "topology.kubernetes.io/zone",
+										Operator: corev1.NodeSelectorOpIn,
+										Values:   []string{"us-east-1a"},
 									},
 								},
 							},
 						},
 					},
 				},
-			},
-		}
+			}).Build()
 
 		changed := applyArchitectureConstraints(pod, []string{utils.ArchitecturePpc64le})
 		Expect(changed).To(BeTrue(), "expected architecture constraints application to report a change")
@@ -113,43 +106,34 @@ var _ = Describe("CEL Stale Architecture Regression", func() {
 
 	// TestApplyArchitectureConstraintsReplacesBroadFallbackWithMatchedRule
 	It("should replace broad fallback architecture values with CEL-matched rule architecture", func() {
-		pod := &corev1.Pod{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      "lhconsole-api-v3-76575f8566-bbnvb",
-				Namespace: "cpd-instance",
-			},
-			Spec: corev1.PodSpec{
-				NodeSelector: map[string]string{
-					utils.ArchLabel: utils.ArchitectureAmd64,
-				},
-				Affinity: &corev1.Affinity{
-					NodeAffinity: &corev1.NodeAffinity{
-						RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
-							NodeSelectorTerms: []corev1.NodeSelectorTerm{
-								{
-									MatchExpressions: []corev1.NodeSelectorRequirement{
-										{
-											Key:      utils.ArchLabel,
-											Operator: corev1.NodeSelectorOpIn,
-											Values: []string{
-												utils.ArchitectureAmd64,
-												utils.ArchitecturePpc64le,
-												utils.ArchitectureS390x,
-											},
+		pod := NewPod().WithName("lhconsole-api-v3-76575f8566-bbnvb").WithNamespace("cpd-instance").
+			WithNodeSelectors(utils.ArchLabel, utils.ArchitectureAmd64).
+			WithAffinity(&corev1.Affinity{
+				NodeAffinity: &corev1.NodeAffinity{
+					RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
+						NodeSelectorTerms: []corev1.NodeSelectorTerm{
+							{
+								MatchExpressions: []corev1.NodeSelectorRequirement{
+									{
+										Key:      utils.ArchLabel,
+										Operator: corev1.NodeSelectorOpIn,
+										Values: []string{
+											utils.ArchitectureAmd64,
+											utils.ArchitecturePpc64le,
+											utils.ArchitectureS390x,
 										},
-										{
-											Key:      "kubernetes.io/os",
-											Operator: corev1.NodeSelectorOpIn,
-											Values:   []string{"linux"},
-										},
+									},
+									{
+										Key:      "kubernetes.io/os",
+										Operator: corev1.NodeSelectorOpIn,
+										Values:   []string{"linux"},
 									},
 								},
 							},
 						},
 					},
 				},
-			},
-		}
+			}).Build()
 
 		removed := removeAllArchitectureConstraints(pod)
 		Expect(removed).To(BeTrue(), "expected stale architecture constraints to be removed")

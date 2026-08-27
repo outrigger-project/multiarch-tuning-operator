@@ -50,6 +50,8 @@ var _ = Describe("CEL Plugin - PPC64LE Default and WKC Prefix Tests", func() {
 	Context("Default PPC64LE Behavior", func() {
 		It("should default all pods to ppc64le without any special CEL rules", func() {
 			By("Creating a PodPlacementConfig with ppc64le as fallback architecture and no rules")
+			// Configure CEL plugin with ppc64le as fallback and NO rules.
+			// This means ALL pods matching the label selector will default to ppc64le.
 			ppc := NewPodPlacementConfig().
 				WithGenerateName("default-ppc64le-").
 				WithNamespace(ns.Name).
@@ -58,18 +60,9 @@ var _ = Describe("CEL Plugin - PPC64LE Default and WKC Prefix Tests", func() {
 						"managed": "true",
 					},
 				}).
-				WithPlugins().
+				WithCelArchitecturePlacement(true, []string{utils.ArchitecturePpc64le},
+					[]plugins.ArchitectureRule{}).
 				Build()
-
-			// Configure CEL plugin with ppc64le as fallback and NO rules
-			// This means ALL pods matching the label selector will default to ppc64le
-			ppc.Spec.Plugins.CelArchitecturePlacement = &plugins.CelArchitecturePlacement{
-				BasePlugin: plugins.BasePlugin{
-					Enabled: true,
-				},
-				FallbackArchitectures: []string{utils.ArchitecturePpc64le},
-				Rules:                 []plugins.ArchitectureRule{}, // No rules - all pods use fallback
-			}
 
 			Expect(k8sClient.Create(ctx, ppc)).To(Succeed())
 
@@ -135,16 +128,9 @@ var _ = Describe("CEL Plugin - PPC64LE Default and WKC Prefix Tests", func() {
 						"managed": "true",
 					},
 				}).
-				WithPlugins().
+				WithCelArchitecturePlacement(true, []string{utils.ArchitecturePpc64le},
+					[]plugins.ArchitectureRule{}).
 				Build()
-
-			ppc.Spec.Plugins.CelArchitecturePlacement = &plugins.CelArchitecturePlacement{
-				BasePlugin: plugins.BasePlugin{
-					Enabled: true,
-				},
-				FallbackArchitectures: []string{utils.ArchitecturePpc64le},
-				Rules:                 []plugins.ArchitectureRule{},
-			}
 
 			Expect(k8sClient.Create(ctx, ppc)).To(Succeed())
 
@@ -184,6 +170,11 @@ var _ = Describe("CEL Plugin - PPC64LE Default and WKC Prefix Tests", func() {
 	Context("WKC Prefix Matching via Metadata Inspection", func() {
 		It("should pin pods with 'wkc-' prefix to specific architecture by inspecting metadata.name", func() {
 			By("Creating a PodPlacementConfig with CEL rule to match wkc- prefix")
+			// Configure CEL plugin with rule to match wkc- prefix in pod name.
+			// NOTE: pod names are meaningful here -- the CEL expression evaluates
+			// self.metadata.name at admission time, so the exact name matters.
+			// Each pod is isolated within the ephemeral namespace, so name
+			// uniqueness across parallel workers is guaranteed by namespace isolation.
 			ppc := NewPodPlacementConfig().
 				WithGenerateName("wkc-prefix-").
 				WithNamespace(ns.Name).
@@ -192,28 +183,14 @@ var _ = Describe("CEL Plugin - PPC64LE Default and WKC Prefix Tests", func() {
 						"managed": "true",
 					},
 				}).
-				WithPlugins().
+				WithCelArchitecturePlacement(true,
+					[]string{utils.ArchitecturePpc64le}, // Default to ppc64le
+					[]plugins.ArchitectureRule{
+						NewRule("wkc-prefix-rule",
+							`self.metadata.name.startsWith("wkc-")`, // CEL expression to check if pod name starts with "wkc-"
+							utils.ArchitectureAmd64),                // Pin wkc- pods to amd64
+					}).
 				Build()
-
-			// Configure CEL plugin with rule to match wkc- prefix in pod name.
-			// NOTE: pod names are meaningful here — the CEL expression evaluates
-			// self.metadata.name at admission time, so the exact name matters.
-			// Each pod is isolated within the ephemeral namespace, so name
-			// uniqueness across parallel workers is guaranteed by namespace isolation.
-			ppc.Spec.Plugins.CelArchitecturePlacement = &plugins.CelArchitecturePlacement{
-				BasePlugin: plugins.BasePlugin{
-					Enabled: true,
-				},
-				FallbackArchitectures: []string{utils.ArchitecturePpc64le}, // Default to ppc64le
-				Rules: []plugins.ArchitectureRule{
-					{
-						Name: "wkc-prefix-rule",
-						// CEL expression to check if pod name starts with "wkc-"
-						Expression:    `self.metadata.name.startsWith("wkc-")`,
-						Architectures: []string{utils.ArchitectureAmd64}, // Pin wkc- pods to amd64
-					},
-				},
-			}
 
 			Expect(k8sClient.Create(ctx, ppc)).To(Succeed())
 
@@ -304,6 +281,7 @@ var _ = Describe("CEL Plugin - PPC64LE Default and WKC Prefix Tests", func() {
 
 		It("should support multiple metadata-based rules with priority ordering", func() {
 			By("Creating a PodPlacementConfig with multiple prefix rules")
+			// Configure CEL plugin with multiple rules - first match wins
 			ppc := NewPodPlacementConfig().
 				WithGenerateName("multi-prefix-").
 				WithNamespace(ns.Name).
@@ -312,33 +290,13 @@ var _ = Describe("CEL Plugin - PPC64LE Default and WKC Prefix Tests", func() {
 						"managed": "true",
 					},
 				}).
-				WithPlugins().
+				WithCelArchitecturePlacement(true, []string{utils.ArchitecturePpc64le},
+					[]plugins.ArchitectureRule{
+						NewRule("wkc-prefix-rule", `self.metadata.name.startsWith("wkc-")`, utils.ArchitectureAmd64),
+						NewRule("db-prefix-rule", `self.metadata.name.startsWith("db-")`, utils.ArchitectureArm64),
+						NewRule("cache-prefix-rule", `self.metadata.name.startsWith("cache-")`, utils.ArchitectureS390x),
+					}).
 				Build()
-
-			// Configure CEL plugin with multiple rules - first match wins
-			ppc.Spec.Plugins.CelArchitecturePlacement = &plugins.CelArchitecturePlacement{
-				BasePlugin: plugins.BasePlugin{
-					Enabled: true,
-				},
-				FallbackArchitectures: []string{utils.ArchitecturePpc64le},
-				Rules: []plugins.ArchitectureRule{
-					{
-						Name:          "wkc-prefix-rule",
-						Expression:    `self.metadata.name.startsWith("wkc-")`,
-						Architectures: []string{utils.ArchitectureAmd64},
-					},
-					{
-						Name:          "db-prefix-rule",
-						Expression:    `self.metadata.name.startsWith("db-")`,
-						Architectures: []string{utils.ArchitectureArm64},
-					},
-					{
-						Name:          "cache-prefix-rule",
-						Expression:    `self.metadata.name.startsWith("cache-")`,
-						Architectures: []string{utils.ArchitectureS390x},
-					},
-				},
-			}
 
 			Expect(k8sClient.Create(ctx, ppc)).To(Succeed())
 
@@ -383,6 +341,8 @@ var _ = Describe("CEL Plugin - PPC64LE Default and WKC Prefix Tests", func() {
 
 		It("should inspect metadata labels in addition to name", func() {
 			By("Creating a PodPlacementConfig with label-based CEL rule")
+			// Configure CEL plugin to match based on metadata labels.
+			// 'key' in self.metadata.labels is the supported CEL membership-test syntax.
 			ppc := NewPodPlacementConfig().
 				WithGenerateName("wkc-label-").
 				WithNamespace(ns.Name).
@@ -391,25 +351,13 @@ var _ = Describe("CEL Plugin - PPC64LE Default and WKC Prefix Tests", func() {
 						"managed": "true",
 					},
 				}).
-				WithPlugins().
+				WithCelArchitecturePlacement(true, []string{utils.ArchitecturePpc64le},
+					[]plugins.ArchitectureRule{
+						NewRule("wkc-component-label-rule",
+							`"wkc-component" in self.metadata.labels && self.metadata.labels["wkc-component"] == "true"`,
+							utils.ArchitectureAmd64),
+					}).
 				Build()
-
-			// Configure CEL plugin to match based on metadata labels
-			ppc.Spec.Plugins.CelArchitecturePlacement = &plugins.CelArchitecturePlacement{
-				BasePlugin: plugins.BasePlugin{
-					Enabled: true,
-				},
-				FallbackArchitectures: []string{utils.ArchitecturePpc64le},
-				Rules: []plugins.ArchitectureRule{
-					{
-						Name: "wkc-component-label-rule",
-						// Match pods with label "wkc-component=true".
-						// 'key' in self.metadata.labels is the supported CEL membership-test syntax.
-						Expression:    `"wkc-component" in self.metadata.labels && self.metadata.labels["wkc-component"] == "true"`,
-						Architectures: []string{utils.ArchitectureAmd64},
-					},
-				},
-			}
 
 			Expect(k8sClient.Create(ctx, ppc)).To(Succeed())
 

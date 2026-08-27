@@ -28,6 +28,7 @@ import (
 
 	"github.com/openshift/multiarch-tuning-operator/api/common"
 	multiarchv1beta1 "github.com/openshift/multiarch-tuning-operator/api/v1beta1"
+	. "github.com/openshift/multiarch-tuning-operator/pkg/testing/builder"
 	"github.com/openshift/multiarch-tuning-operator/pkg/utils"
 )
 
@@ -246,11 +247,7 @@ func TestGetCacheWithAPIFallback(t *testing.T) {
 	})
 
 	t.Run("falls back for ClusterPodPlacementConfig singleton cache miss", func(t *testing.T) {
-		obj := &multiarchv1beta1.ClusterPodPlacementConfig{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: common.SingletonResourceObjectName,
-			},
-		}
+		obj := NewClusterPodPlacementConfig().WithName(common.SingletonResourceObjectName).Build()
 		var cacheKey client.ObjectKey
 		err := getCacheWithAPIFallback(ctx,
 			getStub{gotKey: &cacheKey},

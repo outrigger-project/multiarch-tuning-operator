@@ -23,11 +23,11 @@ import (
 	. "github.com/onsi/gomega"
 
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/tools/record"
 
 	"github.com/openshift/multiarch-tuning-operator/api/common/plugins"
 	"github.com/openshift/multiarch-tuning-operator/api/v1beta1"
+	. "github.com/openshift/multiarch-tuning-operator/pkg/testing/builder"
 	"github.com/openshift/multiarch-tuning-operator/pkg/utils"
 )
 
@@ -87,61 +87,30 @@ var _ = Describe("Webhook CEL applyCELInWebhook", func() {
 				}
 			},
 			Entry("applies CEL architecture from highest priority PPC",
-				&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "test-pod", Namespace: "default"}},
+				NewPod().WithName("test-pod").WithNamespace("default").Build(),
 				[]v1beta1.PodPlacementConfig{
-					{
-						ObjectMeta: metav1.ObjectMeta{Name: "ppc-high-priority", Namespace: "default"},
-						Spec: v1beta1.PodPlacementConfigSpec{
-							Priority: 100,
-							Plugins: &plugins.LocalPlugins{
-								CelArchitecturePlacement: &plugins.CelArchitecturePlacement{
-									BasePlugin:            plugins.BasePlugin{Enabled: true},
-									FallbackArchitectures: []string{"amd64"},
-									Rules: []plugins.ArchitectureRule{
-										{Name: "test-rule", Expression: "self.metadata.name == 'test-pod'", Architectures: []string{"ppc64le"}},
-									},
-								},
-							},
-						},
-					},
+					*NewPodPlacementConfig().WithName("ppc-high-priority").WithNamespace("default").WithPriority(100).
+						WithCelArchitecturePlacement(true, []string{"amd64"}, []plugins.ArchitectureRule{
+							NewRule("test-rule", "self.metadata.name == 'test-pod'", "ppc64le"),
+						}).Build(),
 				},
 				[]string{"ppc64le"}, true,
 			),
 			Entry("no modification when no CEL plugin enabled",
-				&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "test-pod", Namespace: "default"}},
+				NewPod().WithName("test-pod").WithNamespace("default").Build(),
 				[]v1beta1.PodPlacementConfig{
-					{
-						ObjectMeta: metav1.ObjectMeta{Name: "ppc-no-cel", Namespace: "default"},
-						Spec: v1beta1.PodPlacementConfigSpec{
-							Priority: 100,
-							Plugins: &plugins.LocalPlugins{
-								NodeAffinityScoring: &plugins.NodeAffinityScoring{
-									BasePlugin: plugins.BasePlugin{Enabled: true},
-								},
-							},
-						},
-					},
+					*NewPodPlacementConfig().WithName("ppc-no-cel").WithNamespace("default").WithPriority(100).
+						WithNodeAffinityScoring(true).Build(),
 				},
 				nil, false,
 			),
 			Entry("applies fallback when no rules match",
-				&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "other-pod", Namespace: "default"}},
+				NewPod().WithName("other-pod").WithNamespace("default").Build(),
 				[]v1beta1.PodPlacementConfig{
-					{
-						ObjectMeta: metav1.ObjectMeta{Name: "ppc-with-fallback", Namespace: "default"},
-						Spec: v1beta1.PodPlacementConfigSpec{
-							Priority: 100,
-							Plugins: &plugins.LocalPlugins{
-								CelArchitecturePlacement: &plugins.CelArchitecturePlacement{
-									BasePlugin:            plugins.BasePlugin{Enabled: true},
-									FallbackArchitectures: []string{"amd64", "arm64"},
-									Rules: []plugins.ArchitectureRule{
-										{Name: "test-rule", Expression: "self.metadata.name == 'test-pod'", Architectures: []string{"ppc64le"}},
-									},
-								},
-							},
-						},
-					},
+					*NewPodPlacementConfig().WithName("ppc-with-fallback").WithNamespace("default").WithPriority(100).
+						WithCelArchitecturePlacement(true, []string{"amd64", "arm64"}, []plugins.ArchitectureRule{
+							NewRule("test-rule", "self.metadata.name == 'test-pod'", "ppc64le"),
+						}).Build(),
 				},
 				[]string{"amd64", "arm64"}, true,
 			),
@@ -153,32 +122,16 @@ var _ = Describe("Webhook CEL applyCELInWebhook", func() {
 		ctx := context.Background()
 		recorder := record.NewFakeRecorder(10)
 
-		pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "test-pod", Namespace: "default"}}
+		pod := NewPod().WithName("test-pod").WithNamespace("default").Build()
 		matchingPPCs := []v1beta1.PodPlacementConfig{
-			{
-				ObjectMeta: metav1.ObjectMeta{Name: "ppc-malformed-high-priority", Namespace: "default"},
-				Spec: v1beta1.PodPlacementConfigSpec{
-					Priority: 200,
-					Plugins: &plugins.LocalPlugins{
-						CelArchitecturePlacement: &plugins.CelArchitecturePlacement{
-							BasePlugin: plugins.BasePlugin{Enabled: true}, FallbackArchitectures: []string{"amd64"},
-							Rules: []plugins.ArchitectureRule{{Name: "malformed-rule", Expression: "self.metadata.name ==", Architectures: []string{"s390x"}}},
-						},
-					},
-				},
-			},
-			{
-				ObjectMeta: metav1.ObjectMeta{Name: "ppc-valid-low-priority", Namespace: "default"},
-				Spec: v1beta1.PodPlacementConfigSpec{
-					Priority: 100,
-					Plugins: &plugins.LocalPlugins{
-						CelArchitecturePlacement: &plugins.CelArchitecturePlacement{
-							BasePlugin: plugins.BasePlugin{Enabled: true}, FallbackArchitectures: []string{"amd64"},
-							Rules: []plugins.ArchitectureRule{{Name: "valid-rule", Expression: "self.metadata.name == 'test-pod'", Architectures: []string{"ppc64le"}}},
-						},
-					},
-				},
-			},
+			*NewPodPlacementConfig().WithName("ppc-malformed-high-priority").WithNamespace("default").WithPriority(200).
+				WithCelArchitecturePlacement(true, []string{"amd64"}, []plugins.ArchitectureRule{
+					NewRule("malformed-rule", "self.metadata.name ==", "s390x"),
+				}).Build(),
+			*NewPodPlacementConfig().WithName("ppc-valid-low-priority").WithNamespace("default").WithPriority(100).
+				WithCelArchitecturePlacement(true, []string{"amd64"}, []plugins.ArchitectureRule{
+					NewRule("valid-rule", "self.metadata.name == 'test-pod'", "ppc64le"),
+				}).Build(),
 		}
 
 		webhook := &PodSchedulingGateMutatingWebHook{}
@@ -206,41 +159,14 @@ var _ = Describe("Webhook CEL applyCELInWebhook", func() {
 		ctx := context.Background()
 		recorder := record.NewFakeRecorder(10)
 
-		pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "test-pod", Namespace: "default"}}
+		pod := NewPod().WithName("test-pod").WithNamespace("default").Build()
 		matchingPPCs := []v1beta1.PodPlacementConfig{
-			{
-				ObjectMeta: metav1.ObjectMeta{Name: "ppc-low-priority", Namespace: "default"},
-				Spec: v1beta1.PodPlacementConfigSpec{
-					Priority: 50,
-					Plugins: &plugins.LocalPlugins{
-						CelArchitecturePlacement: &plugins.CelArchitecturePlacement{
-							BasePlugin: plugins.BasePlugin{Enabled: true}, FallbackArchitectures: []string{"arm64"},
-						},
-					},
-				},
-			},
-			{
-				ObjectMeta: metav1.ObjectMeta{Name: "ppc-high-priority", Namespace: "default"},
-				Spec: v1beta1.PodPlacementConfigSpec{
-					Priority: 150,
-					Plugins: &plugins.LocalPlugins{
-						CelArchitecturePlacement: &plugins.CelArchitecturePlacement{
-							BasePlugin: plugins.BasePlugin{Enabled: true}, FallbackArchitectures: []string{"ppc64le"},
-						},
-					},
-				},
-			},
-			{
-				ObjectMeta: metav1.ObjectMeta{Name: "ppc-medium-priority", Namespace: "default"},
-				Spec: v1beta1.PodPlacementConfigSpec{
-					Priority: 100,
-					Plugins: &plugins.LocalPlugins{
-						CelArchitecturePlacement: &plugins.CelArchitecturePlacement{
-							BasePlugin: plugins.BasePlugin{Enabled: true}, FallbackArchitectures: []string{"s390x"},
-						},
-					},
-				},
-			},
+			*NewPodPlacementConfig().WithName("ppc-low-priority").WithNamespace("default").WithPriority(50).
+				WithCelArchitecturePlacement(true, []string{"arm64"}, nil).Build(),
+			*NewPodPlacementConfig().WithName("ppc-high-priority").WithNamespace("default").WithPriority(150).
+				WithCelArchitecturePlacement(true, []string{"ppc64le"}, nil).Build(),
+			*NewPodPlacementConfig().WithName("ppc-medium-priority").WithNamespace("default").WithPriority(100).
+				WithCelArchitecturePlacement(true, []string{"s390x"}, nil).Build(),
 		}
 
 		webhook := &PodSchedulingGateMutatingWebHook{}
@@ -269,28 +195,12 @@ var _ = Describe("Webhook CEL applyCELInWebhook", func() {
 		ctx := context.Background()
 		recorder := record.NewFakeRecorder(10)
 
-		pod := &corev1.Pod{
-			ObjectMeta: metav1.ObjectMeta{Name: "test-pod-with-nodeselector", Namespace: "default"},
-			Spec: corev1.PodSpec{
-				NodeSelector: map[string]string{
-					utils.ArchLabel: "amd64",
-					"other-key":     "other-value",
-				},
-			},
-		}
+		pod := NewPod().WithName("test-pod-with-nodeselector").WithNamespace("default").
+			WithNodeSelectors(utils.ArchLabel, "amd64", "other-key", "other-value").Build()
 
 		matchingPPCs := []v1beta1.PodPlacementConfig{
-			{
-				ObjectMeta: metav1.ObjectMeta{Name: "ppc-cel", Namespace: "default"},
-				Spec: v1beta1.PodPlacementConfigSpec{
-					Priority: 100,
-					Plugins: &plugins.LocalPlugins{
-						CelArchitecturePlacement: &plugins.CelArchitecturePlacement{
-							BasePlugin: plugins.BasePlugin{Enabled: true}, FallbackArchitectures: []string{"ppc64le"},
-						},
-					},
-				},
-			},
+			*NewPodPlacementConfig().WithName("ppc-cel").WithNamespace("default").WithPriority(100).
+				WithCelArchitecturePlacement(true, []string{"ppc64le"}, nil).Build(),
 		}
 
 		webhook := &PodSchedulingGateMutatingWebHook{}
@@ -325,38 +235,17 @@ var _ = Describe("Webhook CEL applyCELInWebhook", func() {
 		ctx := context.Background()
 		recorder := record.NewFakeRecorder(10)
 
-		pod := &corev1.Pod{
-			ObjectMeta: metav1.ObjectMeta{Name: "post-webhook-pod", Namespace: "default"},
-			Spec: corev1.PodSpec{
-				Affinity: &corev1.Affinity{
-					NodeAffinity: &corev1.NodeAffinity{
-						RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
-							NodeSelectorTerms: []corev1.NodeSelectorTerm{
-								{
-									MatchExpressions: []corev1.NodeSelectorRequirement{
-										{Key: "topology.kubernetes.io/zone", Operator: corev1.NodeSelectorOpIn, Values: []string{"us-east-1a"}},
-										{Key: utils.ArchLabel, Operator: corev1.NodeSelectorOpIn, Values: []string{"ppc64le"}},
-									},
-								},
-							},
-						},
-					},
+		pod := NewPod().WithName("post-webhook-pod").WithNamespace("default").
+			WithNodeSelectorTermsMatchExpressions(
+				[]corev1.NodeSelectorRequirement{
+					{Key: "topology.kubernetes.io/zone", Operator: corev1.NodeSelectorOpIn, Values: []string{"us-east-1a"}},
+					{Key: utils.ArchLabel, Operator: corev1.NodeSelectorOpIn, Values: []string{"ppc64le"}},
 				},
-			},
-		}
+			).Build()
 
 		matchingPPCs := []v1beta1.PodPlacementConfig{
-			{
-				ObjectMeta: metav1.ObjectMeta{Name: "ppc-cel", Namespace: "default"},
-				Spec: v1beta1.PodPlacementConfigSpec{
-					Priority: 100,
-					Plugins: &plugins.LocalPlugins{
-						CelArchitecturePlacement: &plugins.CelArchitecturePlacement{
-							BasePlugin: plugins.BasePlugin{Enabled: true}, FallbackArchitectures: []string{"ppc64le"},
-						},
-					},
-				},
-			},
+			*NewPodPlacementConfig().WithName("ppc-cel").WithNamespace("default").WithPriority(100).
+				WithCelArchitecturePlacement(true, []string{"ppc64le"}, nil).Build(),
 		}
 
 		originalTermCount := len(pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms)
@@ -406,48 +295,23 @@ var _ = Describe("Webhook CEL applyCELInWebhook", func() {
 
 		// Pod with 2 terms: Term 1 = arch-only, Term 2 = zone-only.
 		// This mirrors the exact scenario from the failing integration test.
-		pod := &corev1.Pod{
-			ObjectMeta: metav1.ObjectMeta{Name: "kep3838-webhook-pod", Namespace: "default"},
-			Spec: corev1.PodSpec{
-				Affinity: &corev1.Affinity{
-					NodeAffinity: &corev1.NodeAffinity{
-						RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
-							NodeSelectorTerms: []corev1.NodeSelectorTerm{
-								{
-									// Term 1: arch-only — must NOT be dropped
-									MatchExpressions: []corev1.NodeSelectorRequirement{
-										{Key: utils.ArchLabel, Operator: corev1.NodeSelectorOpIn, Values: []string{utils.ArchitectureAmd64}},
-									},
-								},
-								{
-									// Term 2: zone constraint — must be preserved
-									MatchExpressions: []corev1.NodeSelectorRequirement{
-										{Key: "topology.kubernetes.io/zone", Operator: corev1.NodeSelectorOpIn, Values: []string{"us-east-1a"}},
-									},
-								},
-							},
-						},
-					},
+		pod := NewPod().WithName("kep3838-webhook-pod").WithNamespace("default").
+			WithNodeSelectorTermsMatchExpressions(
+				// Term 1: arch-only — must NOT be dropped
+				[]corev1.NodeSelectorRequirement{
+					{Key: utils.ArchLabel, Operator: corev1.NodeSelectorOpIn, Values: []string{utils.ArchitectureAmd64}},
 				},
-			},
-		}
+				// Term 2: zone constraint — must be preserved
+				[]corev1.NodeSelectorRequirement{
+					{Key: "topology.kubernetes.io/zone", Operator: corev1.NodeSelectorOpIn, Values: []string{"us-east-1a"}},
+				},
+			).Build()
 
 		matchingPPCs := []v1beta1.PodPlacementConfig{
-			{
-				ObjectMeta: metav1.ObjectMeta{Name: "kep3838-ppc", Namespace: "default"},
-				Spec: v1beta1.PodPlacementConfigSpec{
-					Priority: 100,
-					Plugins: &plugins.LocalPlugins{
-						CelArchitecturePlacement: &plugins.CelArchitecturePlacement{
-							BasePlugin:            plugins.BasePlugin{Enabled: true},
-							FallbackArchitectures: []string{utils.ArchitecturePpc64le},
-							Rules: []plugins.ArchitectureRule{
-								{Name: "always-true", Expression: `true`, Architectures: []string{utils.ArchitecturePpc64le}},
-							},
-						},
-					},
-				},
-			},
+			*NewPodPlacementConfig().WithName("kep3838-ppc").WithNamespace("default").WithPriority(100).
+				WithCelArchitecturePlacement(true, []string{utils.ArchitecturePpc64le}, []plugins.ArchitectureRule{
+					NewRule("always-true", `true`, utils.ArchitecturePpc64le),
+				}).Build(),
 		}
 
 		wh := &PodSchedulingGateMutatingWebHook{}

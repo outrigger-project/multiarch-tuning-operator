@@ -50,6 +50,8 @@ var _ = Describe("CEL Plugin - No Fallback/Image-Detection Merge After Match", f
 	Context("Early Return After CEL Match", func() {
 		It("should contain ONLY matched rule architectures without merging fallback or image-detected architectures", func() {
 			By("Creating a PodPlacementConfig with CEL rule matching to ppc64le only")
+			// Configure CEL plugin with a rule that matches and specifies ONLY ppc64le.
+			// Fallback has multiple architectures to verify they are NOT merged.
 			ppc := NewPodPlacementConfig().
 				WithGenerateName("cel-no-merge-").
 				WithNamespace(ns.Name).
@@ -58,31 +60,19 @@ var _ = Describe("CEL Plugin - No Fallback/Image-Detection Merge After Match", f
 						"app": "test",
 					},
 				}).
-				WithPlugins().
-				Build()
-
-			// Configure CEL plugin with a rule that matches and specifies ONLY ppc64le
-			// Fallback has multiple architectures to verify they are NOT merged
-			ppc.Spec.Plugins.CelArchitecturePlacement = &plugins.CelArchitecturePlacement{
-				BasePlugin: plugins.BasePlugin{
-					Enabled: true,
-				},
-				// Fallback has many architectures - these should NOT be applied when rule matches
-				FallbackArchitectures: []string{
-					utils.ArchitectureAmd64,
-					utils.ArchitectureArm64,
-					utils.ArchitecturePpc64le,
-					utils.ArchitectureS390x,
-				},
-				Rules: []plugins.ArchitectureRule{
-					{
-						Name:       "match-database-ppc64le-only",
-						Expression: `has(self.metadata.labels.component) && self.metadata.labels.component == "database"`,
-						// Rule specifies ONLY ppc64le
-						Architectures: []string{utils.ArchitecturePpc64le},
+				WithCelArchitecturePlacement(true,
+					[]string{
+						utils.ArchitectureAmd64,
+						utils.ArchitectureArm64,
+						utils.ArchitecturePpc64le,
+						utils.ArchitectureS390x,
 					},
-				},
-			}
+					[]plugins.ArchitectureRule{
+						NewRule("match-database-ppc64le-only",
+							`has(self.metadata.labels.component) && self.metadata.labels.component == "database"`,
+							utils.ArchitecturePpc64le),
+					}).
+				Build()
 
 			Expect(k8sClient.Create(ctx, ppc)).To(Succeed())
 
@@ -149,24 +139,11 @@ var _ = Describe("CEL Plugin - No Fallback/Image-Detection Merge After Match", f
 						"app": "skip-image-test",
 					},
 				}).
-				WithPlugins().
+				WithCelArchitecturePlacement(true, []string{utils.ArchitectureAmd64},
+					[]plugins.ArchitectureRule{
+						NewRule("force-arm64", `true`, utils.ArchitectureArm64), // Always matches
+					}).
 				Build()
-
-			ppc.Spec.Plugins.CelArchitecturePlacement = &plugins.CelArchitecturePlacement{
-				BasePlugin: plugins.BasePlugin{
-					Enabled: true,
-				},
-				FallbackArchitectures: []string{utils.ArchitectureAmd64},
-				Rules: []plugins.ArchitectureRule{
-					{
-						Name:       "force-arm64",
-						Expression: `true`, // Always matches
-						Architectures: []string{
-							utils.ArchitectureArm64,
-						},
-					},
-				},
-			}
 
 			Expect(k8sClient.Create(ctx, ppc)).To(Succeed())
 
@@ -227,24 +204,11 @@ var _ = Describe("CEL Plugin - No Fallback/Image-Detection Merge After Match", f
 						"app": "no-cppc-fallback",
 					},
 				}).
-				WithPlugins().
+				WithCelArchitecturePlacement(true, []string{utils.ArchitectureAmd64},
+					[]plugins.ArchitectureRule{
+						NewRule("match-s390x", `true`, utils.ArchitectureS390x),
+					}).
 				Build()
-
-			ppc.Spec.Plugins.CelArchitecturePlacement = &plugins.CelArchitecturePlacement{
-				BasePlugin: plugins.BasePlugin{
-					Enabled: true,
-				},
-				FallbackArchitectures: []string{utils.ArchitectureAmd64},
-				Rules: []plugins.ArchitectureRule{
-					{
-						Name:       "match-s390x",
-						Expression: `true`,
-						Architectures: []string{
-							utils.ArchitectureS390x,
-						},
-					},
-				},
-			}
 
 			Expect(k8sClient.Create(ctx, ppc)).To(Succeed())
 

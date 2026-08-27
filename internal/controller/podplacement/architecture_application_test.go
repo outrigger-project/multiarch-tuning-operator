@@ -22,6 +22,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	. "github.com/openshift/multiarch-tuning-operator/pkg/testing/builder"
 	"github.com/openshift/multiarch-tuning-operator/pkg/utils"
 )
 
@@ -33,47 +34,28 @@ func TestApplyArchitectureNodeAffinity(t *testing.T) {
 		expectAffinity bool
 	}{
 		{
-			name: "apply single architecture",
-			pod: &corev1.Pod{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "test-pod",
-				},
-			},
+			name:           "apply single architecture",
+			pod:            NewPod().WithName("test-pod").Build(),
 			architectures:  []string{"ppc64le"},
 			expectAffinity: true,
 		},
 		{
-			name: "apply multiple architectures",
-			pod: &corev1.Pod{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "test-pod",
-				},
-			},
+			name:           "apply multiple architectures",
+			pod:            NewPod().WithName("test-pod").Build(),
 			architectures:  []string{"amd64", "ppc64le"},
 			expectAffinity: true,
 		},
 		{
-			name: "empty architectures list",
-			pod: &corev1.Pod{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "test-pod",
-				},
-			},
+			name:           "empty architectures list",
+			pod:            NewPod().WithName("test-pod").Build(),
 			architectures:  []string{},
 			expectAffinity: false,
 		},
 		{
 			name: "apply to pod with existing affinity",
-			pod: &corev1.Pod{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "test-pod",
-				},
-				Spec: corev1.PodSpec{
-					Affinity: &corev1.Affinity{
-						PodAffinity: &corev1.PodAffinity{},
-					},
-				},
-			},
+			pod: NewPod().WithName("test-pod").WithAffinity(&corev1.Affinity{
+				PodAffinity: &corev1.PodAffinity{},
+			}).Build(),
 			architectures:  []string{"ppc64le"},
 			expectAffinity: true,
 		},
@@ -139,69 +121,34 @@ func TestApplyArchitectureConstraints(t *testing.T) {
 		expectModified bool
 	}{
 		{
-			name: "remove old and apply new",
-			pod: &corev1.Pod{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "test-pod",
-				},
-				Spec: corev1.PodSpec{
-					NodeSelector: map[string]string{
-						utils.ArchLabel: "amd64",
-					},
-				},
-			},
+			name:           "remove old and apply new",
+			pod:            NewPod().WithName("test-pod").WithNodeSelectors(utils.ArchLabel, "amd64").Build(),
 			architectures:  []string{"ppc64le"},
 			expectModified: true,
 		},
 		{
-			name: "apply to clean pod",
-			pod: &corev1.Pod{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "test-pod",
-				},
-			},
+			name:           "apply to clean pod",
+			pod:            NewPod().WithName("test-pod").Build(),
 			architectures:  []string{"ppc64le"},
 			expectModified: true,
 		},
 		{
-			name: "empty architectures",
-			pod: &corev1.Pod{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "test-pod",
-				},
-			},
+			name:           "empty architectures",
+			pod:            NewPod().WithName("test-pod").Build(),
 			architectures:  []string{},
 			expectModified: false,
 		},
 		{
 			name: "remove from both nodeSelector and nodeAffinity",
-			pod: &corev1.Pod{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "test-pod",
-				},
-				Spec: corev1.PodSpec{
-					NodeSelector: map[string]string{
-						utils.ArchLabel: "amd64",
-					},
-					Affinity: &corev1.Affinity{
-						NodeAffinity: &corev1.NodeAffinity{
-							RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
-								NodeSelectorTerms: []corev1.NodeSelectorTerm{
-									{
-										MatchExpressions: []corev1.NodeSelectorRequirement{
-											{
-												Key:      utils.ArchLabel,
-												Operator: corev1.NodeSelectorOpIn,
-												Values:   []string{"amd64"},
-											},
-										},
-									},
-								},
-							},
-						},
+			pod: NewPod().WithName("test-pod").WithNodeSelectors(utils.ArchLabel, "amd64").WithNodeSelectorTermsMatchExpressions(
+				[]corev1.NodeSelectorRequirement{
+					{
+						Key:      utils.ArchLabel,
+						Operator: corev1.NodeSelectorOpIn,
+						Values:   []string{"amd64"},
 					},
 				},
-			},
+			).Build(),
 			architectures:  []string{"ppc64le"},
 			expectModified: true,
 		},
@@ -260,51 +207,25 @@ func TestApplyArchitectureConstraints_Idempotency(t *testing.T) {
 		architectures []string
 	}{
 		{
-			name: "idempotent for single architecture",
-			pod: &corev1.Pod{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-pod",
-					Namespace: "default",
-				},
-			},
+			name:          "idempotent for single architecture",
+			pod:           NewPod().WithName("test-pod").WithNamespace("default").Build(),
 			architectures: []string{"ppc64le"},
 		},
 		{
-			name: "idempotent for multiple architectures",
-			pod: &corev1.Pod{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-pod",
-					Namespace: "default",
-				},
-			},
+			name:          "idempotent for multiple architectures",
+			pod:           NewPod().WithName("test-pod").WithNamespace("default").Build(),
 			architectures: []string{"amd64", "arm64"},
 		},
 		{
 			name: "idempotent with existing affinity",
-			pod: &corev1.Pod{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-pod",
-					Namespace: "default",
-				},
-				Spec: corev1.PodSpec{
-					Affinity: &corev1.Affinity{
-						NodeAffinity: &corev1.NodeAffinity{
-							RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
-								NodeSelectorTerms: []corev1.NodeSelectorTerm{
-									{
-										MatchExpressions: []corev1.NodeSelectorRequirement{
-											{
-												Key:      "node-role.kubernetes.io/worker",
-												Operator: corev1.NodeSelectorOpExists,
-											},
-										},
-									},
-								},
-							},
-						},
+			pod: NewPod().WithName("test-pod").WithNamespace("default").WithNodeSelectorTermsMatchExpressions(
+				[]corev1.NodeSelectorRequirement{
+					{
+						Key:      "node-role.kubernetes.io/worker",
+						Operator: corev1.NodeSelectorOpExists,
 					},
 				},
-			},
+			).Build(),
 			architectures: []string{"ppc64le"},
 		},
 	}
@@ -351,12 +272,7 @@ func TestReconciler_CELReapplication_NoMutation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			pod := &corev1.Pod{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-pod",
-					Namespace: "default",
-				},
-			}
+			pod := NewPod().WithName("test-pod").WithNamespace("default").Build()
 
 			// Simulate webhook applying CEL constraints
 			applyArchitectureConstraints(pod, tt.architectures)
@@ -469,26 +385,19 @@ func nodeSelectorsEqual(a, b []corev1.NodeSelectorTerm) bool {
 }
 
 func TestApplyArchitectureNodeAffinityPreservesOtherAffinity(t *testing.T) {
-	pod := &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: "test-pod",
-		},
-		Spec: corev1.PodSpec{
-			Affinity: &corev1.Affinity{
-				PodAffinity: &corev1.PodAffinity{
-					RequiredDuringSchedulingIgnoredDuringExecution: []corev1.PodAffinityTerm{
-						{
-							LabelSelector: &metav1.LabelSelector{
-								MatchLabels: map[string]string{
-									"app": "test",
-								},
-							},
+	pod := NewPod().WithName("test-pod").WithAffinity(&corev1.Affinity{
+		PodAffinity: &corev1.PodAffinity{
+			RequiredDuringSchedulingIgnoredDuringExecution: []corev1.PodAffinityTerm{
+				{
+					LabelSelector: &metav1.LabelSelector{
+						MatchLabels: map[string]string{
+							"app": "test",
 						},
 					},
 				},
 			},
 		},
-	}
+	}).Build()
 
 	applyArchitectureNodeAffinity(pod, []string{"ppc64le"})
 

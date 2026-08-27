@@ -24,11 +24,11 @@ import (
 	. "github.com/onsi/gomega"
 
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/tools/record"
 
 	"github.com/openshift/multiarch-tuning-operator/api/common/plugins"
 	"github.com/openshift/multiarch-tuning-operator/api/v1beta1"
+	. "github.com/openshift/multiarch-tuning-operator/pkg/testing/builder"
 	"github.com/openshift/multiarch-tuning-operator/pkg/utils"
 )
 
@@ -109,19 +109,19 @@ var _ = Describe("CEL Evaluator", func() {
 			},
 			Entry("match by name",
 				"self.metadata.name == 'nginx-pod'",
-				&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "nginx-pod"}},
+				NewPod().WithName("nginx-pod").Build(),
 				true, false),
 			Entry("no match by name",
 				"self.metadata.name == 'nginx-pod'",
-				&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "redis-pod"}},
+				NewPod().WithName("redis-pod").Build(),
 				false, false),
 			Entry("match by label",
 				"has(self.metadata.labels.app) && self.metadata.labels.app == 'web'",
-				&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "web"}}},
+				NewPod().WithLabels("app", "web").Build(),
 				true, false),
 			Entry("name starts with",
 				"self.metadata.name.startsWith('redis-')",
-				&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "redis-master"}},
+				NewPod().WithName("redis-master").Build(),
 				true, false),
 		)
 
@@ -138,43 +138,43 @@ var _ = Describe("CEL Evaluator", func() {
 				"self.metadata.name == 'test'", nil, false,
 				"Should handle nil pod gracefully"),
 			Entry("empty expression",
-				"", &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "test"}}, true,
+				"", NewPod().WithName("test").Build(), true,
 				"Should reject empty expression"),
 			Entry("malformed CEL syntax",
-				"self.metadata.name ==", &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "test"}}, true,
+				"self.metadata.name ==", NewPod().WithName("test").Build(), true,
 				"Should reject malformed syntax"),
 			Entry("undefined field access on DynType evaluator returns false, not error",
-				"self.metadata.nonexistent == 'value'", &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "test"}}, false,
+				"self.metadata.nonexistent == 'value'", NewPod().WithName("test").Build(), false,
 				"DynType runtime evaluator: unknown metadata field access does not error"),
 			Entry("type mismatch errors at runtime",
-				"self.metadata.name + 123", &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "test"}}, true,
+				"self.metadata.name + 123", NewPod().WithName("test").Build(), true,
 				"Should detect type mismatches at runtime"),
 			Entry("missing label key",
-				"has(self.metadata.labels.nonexistent)", &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "test"}}, false,
+				"has(self.metadata.labels.nonexistent)", NewPod().WithName("test").Build(), false,
 				"Should handle missing label keys with has()"),
 			Entry("nil labels map",
-				"has(self.metadata.labels.app)", &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "test", Labels: nil}}, false,
+				"has(self.metadata.labels.app)", NewPod().WithName("test").Build(), false,
 				"Should handle nil labels map"),
 			Entry("empty labels map",
-				"has(self.metadata.labels.app)", &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "test", Labels: map[string]string{}}}, false,
+				"has(self.metadata.labels.app)", NewPod().WithName("test").WithLabels().Build(), false,
 				"Should handle empty labels map"),
 			Entry("nil annotations map",
-				"has(self.metadata.annotations.key)", &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "test", Annotations: nil}}, false,
+				"has(self.metadata.annotations.key)", NewPod().WithName("test").Build(), false,
 				"Should handle nil annotations map"),
 			Entry("special characters in name",
-				"self.metadata.name == 'test-pod_123.example'", &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "test-pod_123.example"}}, false,
+				"self.metadata.name == 'test-pod_123.example'", NewPod().WithName("test-pod_123.example").Build(), false,
 				"Should handle special characters in names"),
 			Entry("unicode in labels",
 				"has(self.metadata.labels.app) && self.metadata.labels.app == 'тест'",
-				&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "test", Labels: map[string]string{"app": "тест"}}},
+				NewPod().WithName("test").WithLabels("app", "тест").Build(),
 				false, "Should handle unicode in label values"),
 			Entry("very long expression",
 				"self.metadata.name == 'test' && self.metadata.name == 'test' && self.metadata.name == 'test' && self.metadata.name == 'test' && self.metadata.name == 'test'",
-				&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "test"}}, false,
+				NewPod().WithName("test").Build(), false,
 				"Should handle long expressions"),
 			Entry("complex boolean logic",
 				"(self.metadata.name == 'test' || self.metadata.name == 'prod') && (has(self.metadata.labels.app) || has(self.metadata.labels.tier))",
-				&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "test", Labels: map[string]string{"app": "web"}}},
+				NewPod().WithName("test").WithLabels("app", "web").Build(),
 				false, "Should handle complex boolean logic"),
 		)
 
@@ -186,7 +186,7 @@ var _ = Describe("CEL Evaluator", func() {
 				wg.Add(1)
 				go func() {
 					defer wg.Done()
-					pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "test-pod"}}
+					pod := NewPod().WithName("test-pod").Build()
 					_, err := evaluator.evaluate(expression, pod)
 					if err != nil {
 						errs <- err
@@ -215,21 +215,13 @@ var _ = Describe("CEL Evaluator", func() {
 
 			BeforeEach(func() {
 				rules = []plugins.ArchitectureRule{
-					{
-						Name:          "postgres-rule",
-						Expression:    "self.metadata.name.startsWith('postgres-')",
-						Architectures: []string{"ppc64le"},
-					},
-					{
-						Name:          "redis-rule",
-						Expression:    "self.metadata.name.startsWith('redis-')",
-						Architectures: []string{"amd64", "ppc64le"},
-					},
+					NewRule("postgres-rule", "self.metadata.name.startsWith('postgres-')", "ppc64le"),
+					NewRule("redis-rule", "self.metadata.name.startsWith('redis-')", "amd64", "ppc64le"),
 				}
 			})
 
 			It("should match first rule for postgres-db", func() {
-				pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "postgres-db"}}
+				pod := NewPod().WithName("postgres-db").Build()
 				rr := evaluator.evaluateRules(rules, pod)
 				Expect(rr.matched).To(BeTrue())
 				Expect(rr.architectures).To(ConsistOf("ppc64le"))
@@ -237,7 +229,7 @@ var _ = Describe("CEL Evaluator", func() {
 			})
 
 			It("should match second rule for redis-cache", func() {
-				pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "redis-cache"}}
+				pod := NewPod().WithName("redis-cache").Build()
 				rr := evaluator.evaluateRules(rules, pod)
 				Expect(rr.matched).To(BeTrue())
 				Expect(rr.architectures).To(ConsistOf("amd64", "ppc64le"))
@@ -245,7 +237,7 @@ var _ = Describe("CEL Evaluator", func() {
 			})
 
 			It("should not match for nginx-web", func() {
-				pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "nginx-web"}}
+				pod := NewPod().WithName("nginx-web").Build()
 				rr := evaluator.evaluateRules(rules, pod)
 				Expect(rr.matched).To(BeFalse())
 			})
@@ -253,10 +245,10 @@ var _ = Describe("CEL Evaluator", func() {
 
 		It("should return allErrored=true when all rules are malformed", func() {
 			malformedRules := []plugins.ArchitectureRule{
-				{Name: "bad1", Expression: "self.metadata.name ==", Architectures: []string{"amd64"}},
-				{Name: "bad2", Expression: "invalid syntax !!!!", Architectures: []string{"ppc64le"}},
+				NewRule("bad1", "self.metadata.name ==", "amd64"),
+				NewRule("bad2", "invalid syntax !!!!", "ppc64le"),
 			}
-			pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "test-pod"}}
+			pod := NewPod().WithName("test-pod").Build()
 			rr := evaluator.evaluateRules(malformedRules, pod)
 			Expect(rr.allErrored).To(BeTrue(),
 				"expected allErrored=true when all rules are malformed")
@@ -265,10 +257,10 @@ var _ = Describe("CEL Evaluator", func() {
 
 		It("should return allErrored=false when some rules are valid (even if they don't match)", func() {
 			rules := []plugins.ArchitectureRule{
-				{Name: "bad", Expression: "self.metadata.name ==", Architectures: []string{"amd64"}},
-				{Name: "valid-nomatch", Expression: "self.metadata.name == 'other'", Architectures: []string{"ppc64le"}},
+				NewRule("bad", "self.metadata.name ==", "amd64"),
+				NewRule("valid-nomatch", "self.metadata.name == 'other'", "ppc64le"),
 			}
-			pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "test-pod"}}
+			pod := NewPod().WithName("test-pod").Build()
 			rr := evaluator.evaluateRules(rules, pod)
 			Expect(rr.allErrored).To(BeFalse(),
 				"expected allErrored=false when at least one valid rule exists")
@@ -277,10 +269,10 @@ var _ = Describe("CEL Evaluator", func() {
 
 		It("should evaluate subsequent rules when first is malformed and second is valid and matches", func() {
 			rules := []plugins.ArchitectureRule{
-				{Name: "bad", Expression: "self.metadata.name ==", Architectures: []string{"amd64"}},
-				{Name: "good", Expression: "self.metadata.name == 'test-pod'", Architectures: []string{"ppc64le"}},
+				NewRule("bad", "self.metadata.name ==", "amd64"),
+				NewRule("good", "self.metadata.name == 'test-pod'", "ppc64le"),
 			}
-			pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "test-pod"}}
+			pod := NewPod().WithName("test-pod").Build()
 			rr := evaluator.evaluateRules(rules, pod)
 			Expect(rr.allErrored).To(BeFalse())
 			Expect(rr.matched).To(BeTrue())
@@ -306,19 +298,19 @@ var _ = Describe("CEL Evaluator", func() {
 				}
 			},
 			Entry("rule matches",
-				[]plugins.ArchitectureRule{{Name: "test-rule", Expression: "self.metadata.name == 'test-pod'", Architectures: []string{"ppc64le"}}},
+				[]plugins.ArchitectureRule{NewRule("test-rule", "self.metadata.name == 'test-pod'", "ppc64le")},
 				[]string{"amd64"},
-				&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "test-pod"}},
+				NewPod().WithName("test-pod").Build(),
 				false, []string{"ppc64le"}, true),
 			Entry("no rule matches, use fallback",
-				[]plugins.ArchitectureRule{{Name: "test-rule", Expression: "self.metadata.name == 'other-pod'", Architectures: []string{"ppc64le"}}},
+				[]plugins.ArchitectureRule{NewRule("test-rule", "self.metadata.name == 'other-pod'", "ppc64le")},
 				[]string{"amd64"},
-				&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "test-pod"}},
+				NewPod().WithName("test-pod").Build(),
 				false, []string{"amd64"}, false),
 			Entry("no rules, use fallback",
 				[]plugins.ArchitectureRule{},
 				[]string{"amd64", "ppc64le"},
-				&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "test-pod"}},
+				NewPod().WithName("test-pod").Build(),
 				false, []string{"amd64", "ppc64le"}, false),
 		)
 
@@ -339,56 +331,56 @@ var _ = Describe("CEL Evaluator", func() {
 				}
 			},
 			Entry("nil rules and nil fallback",
-				nil, nil, &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "test"}},
+				nil, nil, NewPod().WithName("test").Build(),
 				true, nil, false, "Should reject nil rules and fallback"),
 			Entry("empty rules with fallback",
 				[]plugins.ArchitectureRule{}, []string{"amd64"},
-				&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "test"}},
+				NewPod().WithName("test").Build(),
 				false, []string{"amd64"}, false, "Should use fallback with empty rules"),
 			Entry("all rules fail to match",
 				[]plugins.ArchitectureRule{
-					{Name: "rule1", Expression: "self.metadata.name == 'nomatch1'", Architectures: []string{"ppc64le"}},
-					{Name: "rule2", Expression: "self.metadata.name == 'nomatch2'", Architectures: []string{"s390x"}},
+					NewRule("rule1", "self.metadata.name == 'nomatch1'", "ppc64le"),
+					NewRule("rule2", "self.metadata.name == 'nomatch2'", "s390x"),
 				},
 				[]string{"amd64"},
-				&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "test"}},
+				NewPod().WithName("test").Build(),
 				false, []string{"amd64"}, false, "Should use fallback when no rules match"),
 			Entry("first rule has invalid expression",
 				[]plugins.ArchitectureRule{
-					{Name: "invalid", Expression: "invalid syntax", Architectures: []string{"ppc64le"}},
-					{Name: "valid", Expression: "self.metadata.name == 'test'", Architectures: []string{"amd64"}},
+					NewRule("invalid", "invalid syntax", "ppc64le"),
+					NewRule("valid", "self.metadata.name == 'test'", "amd64"),
 				},
 				[]string{"s390x"},
-				&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "test"}},
+				NewPod().WithName("test").Build(),
 				false, []string{"amd64"}, true, "Should skip invalid rule and continue to next"),
 			Entry("rule with empty architectures list",
-				[]plugins.ArchitectureRule{{Name: "empty-arch", Expression: "self.metadata.name == 'test'", Architectures: []string{}}},
+				[]plugins.ArchitectureRule{NewRule("empty-arch", "self.metadata.name == 'test'")},
 				[]string{"amd64"},
-				&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "test"}},
+				NewPod().WithName("test").Build(),
 				false, []string{}, true, "Should handle empty architectures list"),
 			Entry("multiple architectures in single rule",
-				[]plugins.ArchitectureRule{{Name: "multi-arch", Expression: "self.metadata.name == 'test'", Architectures: []string{"amd64", "arm64", "ppc64le", "s390x"}}},
+				[]plugins.ArchitectureRule{NewRule("multi-arch", "self.metadata.name == 'test'", "amd64", "arm64", "ppc64le", "s390x")},
 				[]string{"amd64"},
-				&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "test"}},
+				NewPod().WithName("test").Build(),
 				false, []string{"amd64", "arm64", "ppc64le", "s390x"}, true, "Should handle multiple architectures"),
 			Entry("pod with no metadata",
-				[]plugins.ArchitectureRule{{Name: "rule1", Expression: "self.metadata.name == 'test'", Architectures: []string{"amd64"}}},
+				[]plugins.ArchitectureRule{NewRule("rule1", "self.metadata.name == 'test'", "amd64")},
 				[]string{"ppc64le"},
-				&corev1.Pod{},
+				NewPod().Build(),
 				false, []string{"ppc64le"}, false, "Should handle pod with no metadata"),
 			Entry("pod with empty name",
-				[]plugins.ArchitectureRule{{Name: "rule1", Expression: "self.metadata.name == ''", Architectures: []string{"amd64"}}},
+				[]plugins.ArchitectureRule{NewRule("rule1", "self.metadata.name == ''", "amd64")},
 				[]string{"ppc64le"},
-				&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: ""}},
+				NewPod().WithName("").Build(),
 				false, []string{"amd64"}, true, "Should handle pod with empty name"),
 		)
 
 		It("should treat all-errored rules as non-matching and return fallback with allRulesErrored=true", func() {
 			rules := []plugins.ArchitectureRule{
-				{Name: "bad", Expression: "self.metadata.name ==", Architectures: []string{"amd64"}},
+				NewRule("bad", "self.metadata.name ==", "amd64"),
 			}
 			fallback := []string{"amd64"}
-			pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "test-pod"}}
+			pod := NewPod().WithName("test-pod").Build()
 			result, err := evaluateCELArchitecturePlacement(rules, fallback, pod)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(result).NotTo(BeNil())
@@ -401,7 +393,7 @@ var _ = Describe("CEL Evaluator", func() {
 			result, err := evaluateCELArchitecturePlacement(
 				[]plugins.ArchitectureRule{},
 				[]string{"amd64"},
-				&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "test"}},
+				NewPod().WithName("test").Build(),
 			)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(result.matched).To(BeFalse())
@@ -443,21 +435,19 @@ var _ = Describe("CEL Evaluator", func() {
 			var err error
 			evaluator, err = newCELEvaluator()
 			Expect(err).NotTo(HaveOccurred())
-			pod = &corev1.Pod{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-pod",
-					Namespace: "test-ns",
-					Labels: map[string]string{
-						"app":                         "web",
-						"tier":                        "frontend",
-						"app.kubernetes.io/component": "database",
-						"app.kubernetes.io/part-of":   "wordpress",
-					},
-					Annotations: map[string]string{
-						"description": "test annotation",
-					},
-				},
-			}
+			pod = NewPod().
+				WithName("test-pod").
+				WithNamespace("test-ns").
+				WithLabels(
+					"app", "web",
+					"tier", "frontend",
+					"app.kubernetes.io/component", "database",
+					"app.kubernetes.io/part-of", "wordpress",
+				).
+				WithAnnotations(map[string]string{
+					"description": "test annotation",
+				}).
+				Build()
 		})
 
 		DescribeTable("should handle map access correctly",
@@ -505,12 +495,12 @@ var _ = Describe("CEL Evaluator", func() {
 				"self['spec'] == 'anything'", false, false,
 				"DynType: self['spec'] bracket access on absent key evaluates to false, not error"),
 			// self.spec does not exist in podToMap; chained bracket access on a missing
-			// intermediate key also produces "no such key" → false at runtime.
+			// intermediate key also produces "no such key" -> false at runtime.
 			Entry("chained bracket access through absent spec field evaluates to false",
 				"self.spec['nodeName'] == 'node-1'", false, false,
 				"DynType: self.spec['nodeName'] on absent spec key evaluates to false, not error"),
 			// self.metadata.labels exists, but the label key 'spec' is absent.
-			// Bracket access on an existing map with a missing key produces "no such key" → false.
+			// Bracket access on an existing map with a missing key produces "no such key" -> false.
 			Entry("bracket access on labels map for absent key evaluates to false",
 				"self.metadata.labels['spec'] == 'value'", false, false,
 				"DynType: self.metadata.labels['spec'] for absent label key evaluates to false, not error"),
@@ -528,13 +518,13 @@ var _ = Describe("CEL Evaluator", func() {
 			},
 			Entry("bare self['spec'] is non-boolean",
 				"self['spec']",
-				"bare bracket access on self returns dyn, not bool — must be rejected"),
+				"bare bracket access on self returns dyn, not bool -- must be rejected"),
 			Entry("bare self.spec['nodeName'] is non-boolean",
 				"self.spec['nodeName']",
-				"bare bracket access through absent field returns dyn, not bool — must be rejected"),
+				"bare bracket access through absent field returns dyn, not bool -- must be rejected"),
 			Entry("bare self.metadata.labels['spec'] is non-boolean",
 				"self.metadata.labels['spec']",
-				"bare bracket label access returns dyn, not bool — must be rejected"),
+				"bare bracket label access returns dyn, not bool -- must be rejected"),
 		)
 	})
 
@@ -555,51 +545,51 @@ var _ = Describe("CEL Evaluator", func() {
 			},
 			Entry("operator namespace - openshift-operators",
 				"self.metadata.namespace == 'openshift-operators'",
-				&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "operator-pod", Namespace: "openshift-operators"}},
+				NewPod().WithName("operator-pod").WithNamespace("openshift-operators").Build(),
 				true, "Should match pods in openshift-operators namespace"),
 			Entry("well-known label - app component",
 				"has(self.metadata.labels.app) && self.metadata.labels.app == 'database'",
-				&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "db-pod", Labels: map[string]string{"app": "database"}}},
+				NewPod().WithName("db-pod").WithLabels("app", "database").Build(),
 				true, "Should match app label"),
 			Entry("well-known label - component",
 				"has(self.metadata.labels.component) && self.metadata.labels.component == 'postgresql'",
-				&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "postgres-pod", Labels: map[string]string{"component": "postgresql"}}},
+				NewPod().WithName("postgres-pod").WithLabels("component", "postgresql").Build(),
 				true, "Should match component label"),
 			Entry("combined labels - app and component",
 				"has(self.metadata.labels.app) && self.metadata.labels.app == 'database' && has(self.metadata.labels.component) && self.metadata.labels.component == 'postgresql'",
-				&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "postgres-db", Labels: map[string]string{"app": "database", "component": "postgresql"}}},
+				NewPod().WithName("postgres-db").WithLabels("app", "database", "component", "postgresql").Build(),
 				true, "Should match multiple labels combined"),
 			Entry("tier and environment labels",
 				"has(self.metadata.labels.tier) && self.metadata.labels.tier == 'frontend' && has(self.metadata.labels.environment) && self.metadata.labels.environment == 'production'",
-				&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "frontend-prod", Labels: map[string]string{"tier": "frontend", "environment": "production"}}},
+				NewPod().WithName("frontend-prod").WithLabels("tier", "frontend", "environment", "production").Build(),
 				true, "Should match tier and environment labels"),
 			Entry("priority label - critical",
 				"has(self.metadata.labels.priority) && self.metadata.labels.priority == 'critical'",
-				&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "critical-service", Labels: map[string]string{"priority": "critical"}}},
+				NewPod().WithName("critical-service").WithLabels("priority", "critical").Build(),
 				true, "Should match priority label"),
 			Entry("OR condition - backend with gold SLA",
 				"has(self.metadata.labels.priority) && self.metadata.labels.priority == 'critical' || (has(self.metadata.labels.tier) && self.metadata.labels.tier == 'backend' && has(self.metadata.labels.sla) && self.metadata.labels.sla == 'gold')",
-				&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "backend-gold", Labels: map[string]string{"tier": "backend", "sla": "gold"}}},
+				NewPod().WithName("backend-gold").WithLabels("tier", "backend", "sla", "gold").Build(),
 				true, "Should match OR condition with multiple labels"),
 			Entry("name prefix - redis pods",
 				"self.metadata.name.startsWith('redis-')",
-				&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "redis-master-0"}},
+				NewPod().WithName("redis-master-0").Build(),
 				true, "Should match name prefix for StatefulSet pods"),
 			Entry("name contains pattern",
 				"self.metadata.name.contains('database')",
-				&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "my-database-pod-123"}},
+				NewPod().WithName("my-database-pod-123").Build(),
 				true, "Should match name containing pattern"),
 			Entry("namespace prefix match",
 				"self.metadata.namespace.startsWith('prod-')",
-				&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "app-pod", Namespace: "prod-apps"}},
+				NewPod().WithName("app-pod").WithNamespace("prod-apps").Build(),
 				true, "Should match namespace prefix"),
 			Entry("label exists check only",
 				"has(self.metadata.labels.migrationReady)",
-				&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "migrating-pod", Labels: map[string]string{"migrationReady": "true"}}},
+				NewPod().WithName("migrating-pod").WithLabels("migrationReady", "true").Build(),
 				true, "Should check if label exists"),
 			Entry("label does not exist",
 				"!has(self.metadata.labels.legacy)",
-				&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "modern-pod", Labels: map[string]string{}}},
+				NewPod().WithName("modern-pod").WithLabels().Build(),
 				true, "Should match when label does not exist"),
 		)
 	})
@@ -629,13 +619,13 @@ var _ = Describe("CEL Evaluator", func() {
 					"labels": map[string]interface{}{}, "annotations": map[string]interface{}{},
 				}),
 			Entry("pod with generateName",
-				&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "", GenerateName: "worker-", Namespace: "default"}},
+				NewPod().WithGenerateName("worker-").WithNamespace("default").Build(),
 				map[string]interface{}{
 					"name": "", "generateName": "worker-", "namespace": "default",
 					"labels": map[string]interface{}{}, "annotations": map[string]interface{}{},
 				}),
 			Entry("pod with name and no generateName",
-				&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "my-pod", Namespace: "ns"}},
+				NewPod().WithName("my-pod").WithNamespace("ns").Build(),
 				map[string]interface{}{
 					"name": "my-pod", "generateName": "", "namespace": "ns",
 					"labels": map[string]interface{}{}, "annotations": map[string]interface{}{},
@@ -660,15 +650,15 @@ var _ = Describe("CEL Evaluator", func() {
 			},
 			Entry("match by generateName prefix",
 				"self.metadata.generateName.startsWith('worker-')",
-				&corev1.Pod{ObjectMeta: metav1.ObjectMeta{GenerateName: "worker-"}},
+				NewPod().WithGenerateName("worker-").Build(),
 				true),
 			Entry("no match when generateName differs",
 				"self.metadata.generateName.startsWith('worker-')",
-				&corev1.Pod{ObjectMeta: metav1.ObjectMeta{GenerateName: "redis-"}},
+				NewPod().WithGenerateName("redis-").Build(),
 				false),
 			Entry("empty generateName does not match prefix",
 				"self.metadata.generateName.startsWith('worker-')",
-				&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "explicit-name"}},
+				NewPod().WithName("explicit-name").Build(),
 				false),
 		)
 	})
@@ -676,11 +666,11 @@ var _ = Describe("CEL Evaluator", func() {
 	Describe("first-match-wins and priority ordering", func() {
 		It("should evaluate rules strictly in order and stop at first match", func() {
 			rules := []plugins.ArchitectureRule{
-				{Name: "first-rule", Expression: "self.metadata.name.startsWith('test-')", Architectures: []string{"ppc64le"}},
-				{Name: "second-rule-also-matches", Expression: "self.metadata.name.startsWith('test-')", Architectures: []string{"amd64"}},
-				{Name: "third-rule", Expression: "self.metadata.name == 'test-pod'", Architectures: []string{"arm64"}},
+				NewRule("first-rule", "self.metadata.name.startsWith('test-')", "ppc64le"),
+				NewRule("second-rule-also-matches", "self.metadata.name.startsWith('test-')", "amd64"),
+				NewRule("third-rule", "self.metadata.name == 'test-pod'", "arm64"),
 			}
-			pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "test-pod"}}
+			pod := NewPod().WithName("test-pod").Build()
 			result, err := evaluateCELArchitecturePlacement(rules, []string{"s390x"}, pod)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(result.matched).To(BeTrue())
@@ -690,9 +680,9 @@ var _ = Describe("CEL Evaluator", func() {
 
 		It("should not apply fallback when a rule matches", func() {
 			rules := []plugins.ArchitectureRule{
-				{Name: "matching-rule", Expression: "self.metadata.name == 'test-pod'", Architectures: []string{"ppc64le"}},
+				NewRule("matching-rule", "self.metadata.name == 'test-pod'", "ppc64le"),
 			}
-			pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "test-pod"}}
+			pod := NewPod().WithName("test-pod").Build()
 			fallback := []string{"amd64", "arm64"}
 			result, err := evaluateCELArchitecturePlacement(rules, fallback, pod)
 			Expect(err).NotTo(HaveOccurred())
@@ -702,10 +692,10 @@ var _ = Describe("CEL Evaluator", func() {
 
 		It("should only apply first matching rule when multiple rules match", func() {
 			rules := []plugins.ArchitectureRule{
-				{Name: "broad-match", Expression: "has(self.metadata.labels.app)", Architectures: []string{"ppc64le"}},
-				{Name: "specific-match", Expression: "self.metadata.labels.app == 'web'", Architectures: []string{"amd64"}},
+				NewRule("broad-match", "has(self.metadata.labels.app)", "ppc64le"),
+				NewRule("specific-match", "self.metadata.labels.app == 'web'", "amd64"),
 			}
-			pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "web"}}}
+			pod := NewPod().WithLabels("app", "web").Build()
 			result, err := evaluateCELArchitecturePlacement(rules, []string{"s390x"}, pod)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(result.ruleName).To(Equal("broad-match"))
@@ -717,10 +707,10 @@ var _ = Describe("CEL Evaluator", func() {
 		It("should not panic on invalid CEL expressions", func() {
 			Expect(func() {
 				rules := []plugins.ArchitectureRule{
-					{Name: "invalid-syntax", Expression: "self.metadata.name ==", Architectures: []string{"ppc64le"}},
-					{Name: "valid-rule", Expression: "self.metadata.name == 'test-pod'", Architectures: []string{"amd64"}},
+					NewRule("invalid-syntax", "self.metadata.name ==", "ppc64le"),
+					NewRule("valid-rule", "self.metadata.name == 'test-pod'", "amd64"),
 				}
-				pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "test-pod"}}
+				pod := NewPod().WithName("test-pod").Build()
 				result, err := evaluateCELArchitecturePlacement(rules, []string{"s390x"}, pod)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(result.matched).To(BeTrue())
@@ -730,9 +720,9 @@ var _ = Describe("CEL Evaluator", func() {
 
 		It("should treat invalid CEL as false (non-matching) and use fallback", func() {
 			rules := []plugins.ArchitectureRule{
-				{Name: "invalid-expression", Expression: "self.nonexistent.field.access", Architectures: []string{"ppc64le"}},
+				NewRule("invalid-expression", "self.nonexistent.field.access", "ppc64le"),
 			}
-			pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "test-pod"}}
+			pod := NewPod().WithName("test-pod").Build()
 			result, err := evaluateCELArchitecturePlacement(rules, []string{"amd64"}, pod)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(result.matched).To(BeFalse())
@@ -741,10 +731,10 @@ var _ = Describe("CEL Evaluator", func() {
 
 		It("should use fallback when all rules are invalid", func() {
 			rules := []plugins.ArchitectureRule{
-				{Name: "invalid-1", Expression: "self.metadata.name ==", Architectures: []string{"ppc64le"}},
-				{Name: "invalid-2", Expression: "self.nonexistent.field", Architectures: []string{"arm64"}},
+				NewRule("invalid-1", "self.metadata.name ==", "ppc64le"),
+				NewRule("invalid-2", "self.nonexistent.field", "arm64"),
 			}
-			pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "test-pod"}}
+			pod := NewPod().WithName("test-pod").Build()
 			result, err := evaluateCELArchitecturePlacement(rules, []string{"amd64", "s390x"}, pod)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(result.matched).To(BeFalse())
@@ -753,9 +743,9 @@ var _ = Describe("CEL Evaluator", func() {
 
 		It("should remain stable across repeated evaluations of invalid CEL", func() {
 			rules := []plugins.ArchitectureRule{
-				{Name: "invalid-rule", Expression: "self.metadata.name ==", Architectures: []string{"ppc64le"}},
+				NewRule("invalid-rule", "self.metadata.name ==", "ppc64le"),
 			}
-			pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "test-pod"}}
+			pod := NewPod().WithName("test-pod").Build()
 			for i := 0; i < 10; i++ {
 				result, err := evaluateCELArchitecturePlacement(rules, []string{"amd64"}, pod)
 				Expect(err).NotTo(HaveOccurred(), "Iteration %d", i)
@@ -821,7 +811,7 @@ var _ = Describe("CEL Evaluator", func() {
 	Describe("nil and empty pod handling", func() {
 		It("should handle nil pod without panicking or erroring", func() {
 			rules := []plugins.ArchitectureRule{
-				{Name: "test-rule", Expression: "self.metadata.name == 'test'", Architectures: []string{"amd64"}},
+				NewRule("test-rule", "self.metadata.name == 'test'", "amd64"),
 			}
 			result, err := evaluateCELArchitecturePlacement(rules, []string{"ppc64le"}, nil)
 			Expect(err).NotTo(HaveOccurred())
@@ -830,7 +820,7 @@ var _ = Describe("CEL Evaluator", func() {
 		})
 
 		It("should not modify pod for empty architectures list", func() {
-			pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "test-pod"}}
+			pod := NewPod().WithName("test-pod").Build()
 			modified := applyArchitectureConstraints(pod, []string{})
 			Expect(modified).To(BeFalse())
 			Expect(pod.Spec.Affinity).To(BeNil())
@@ -838,7 +828,7 @@ var _ = Describe("CEL Evaluator", func() {
 
 		It("should use fallback for empty rules list", func() {
 			rules := []plugins.ArchitectureRule{}
-			pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "test-pod"}}
+			pod := NewPod().WithName("test-pod").Build()
 			result, err := evaluateCELArchitecturePlacement(rules, []string{"amd64", "arm64"}, pod)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(result.matched).To(BeFalse())
@@ -846,7 +836,7 @@ var _ = Describe("CEL Evaluator", func() {
 		})
 	})
 
-	Describe("applyCELInWebhook – malformed CEL and fallback interaction", func() {
+	Describe("applyCELInWebhook -- malformed CEL and fallback interaction", func() {
 		var ctx context.Context
 		var recorder *record.FakeRecorder
 
@@ -856,29 +846,27 @@ var _ = Describe("CEL Evaluator", func() {
 		})
 
 		It("should skip malformed high-priority PPC and apply valid lower-priority PPC", func() {
-			pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "my-workload", Namespace: "default"},
-				Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "c", Image: "nginx:latest"}}}}
+			pod := NewPod().WithName("my-workload").WithNamespace("default").
+				WithContainersImages("nginx:latest").Build()
 			ppcs := []v1beta1.PodPlacementConfig{
-				{
-					ObjectMeta: metav1.ObjectMeta{Name: "high-prio-malformed", Namespace: "default"},
-					Spec: v1beta1.PodPlacementConfigSpec{
-						Priority: 200,
-						Plugins: &plugins.LocalPlugins{CelArchitecturePlacement: &plugins.CelArchitecturePlacement{
-							BasePlugin: plugins.BasePlugin{Enabled: true}, FallbackArchitectures: []string{"amd64"},
-							Rules: []plugins.ArchitectureRule{{Name: "malformed", Expression: "self.metadata.name ==", Architectures: []string{"amd64"}}},
-						}},
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{Name: "low-prio-valid", Namespace: "default"},
-					Spec: v1beta1.PodPlacementConfigSpec{
-						Priority: 100,
-						Plugins: &plugins.LocalPlugins{CelArchitecturePlacement: &plugins.CelArchitecturePlacement{
-							BasePlugin: plugins.BasePlugin{Enabled: true}, FallbackArchitectures: []string{"s390x"},
-							Rules: []plugins.ArchitectureRule{{Name: "match-by-name", Expression: "self.metadata.name == 'my-workload'", Architectures: []string{"ppc64le"}}},
-						}},
-					},
-				},
+				*NewPodPlacementConfig().
+					WithName("high-prio-malformed").
+					WithNamespace("default").
+					WithPriority(200).
+					WithCelArchitecturePlacement(true, []string{"amd64"},
+						[]plugins.ArchitectureRule{
+							NewRule("malformed", "self.metadata.name ==", "amd64"),
+						}).
+					Build(),
+				*NewPodPlacementConfig().
+					WithName("low-prio-valid").
+					WithNamespace("default").
+					WithPriority(100).
+					WithCelArchitecturePlacement(true, []string{"s390x"},
+						[]plugins.ArchitectureRule{
+							NewRule("match-by-name", "self.metadata.name == 'my-workload'", "ppc64le"),
+						}).
+					Build(),
 			}
 			wh := &PodSchedulingGateMutatingWebHook{}
 			wrappedPod := newPod(pod, ctx, recorder)
@@ -900,18 +888,17 @@ var _ = Describe("CEL Evaluator", func() {
 		})
 
 		It("should apply fallback when CEL expression evaluates to false (valid but non-matching)", func() {
-			pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "unmatched-pod", Namespace: "default"}}
+			pod := NewPod().WithName("unmatched-pod").WithNamespace("default").Build()
 			ppcs := []v1beta1.PodPlacementConfig{
-				{
-					ObjectMeta: metav1.ObjectMeta{Name: "ppc-no-match", Namespace: "default"},
-					Spec: v1beta1.PodPlacementConfigSpec{
-						Priority: 100,
-						Plugins: &plugins.LocalPlugins{CelArchitecturePlacement: &plugins.CelArchitecturePlacement{
-							BasePlugin: plugins.BasePlugin{Enabled: true}, FallbackArchitectures: []string{"arm64"},
-							Rules: []plugins.ArchitectureRule{{Name: "no-match", Expression: "self.metadata.name == 'other-pod'", Architectures: []string{"ppc64le"}}},
-						}},
-					},
-				},
+				*NewPodPlacementConfig().
+					WithName("ppc-no-match").
+					WithNamespace("default").
+					WithPriority(100).
+					WithCelArchitecturePlacement(true, []string{"arm64"},
+						[]plugins.ArchitectureRule{
+							NewRule("no-match", "self.metadata.name == 'other-pod'", "ppc64le"),
+						}).
+					Build(),
 			}
 			wh := &PodSchedulingGateMutatingWebHook{}
 			wrappedPod := newPod(pod, ctx, recorder)
@@ -931,18 +918,17 @@ var _ = Describe("CEL Evaluator", func() {
 		})
 
 		It("should apply rule architectures when CEL expression evaluates to true", func() {
-			pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "matched-pod", Namespace: "default"}}
+			pod := NewPod().WithName("matched-pod").WithNamespace("default").Build()
 			ppcs := []v1beta1.PodPlacementConfig{
-				{
-					ObjectMeta: metav1.ObjectMeta{Name: "ppc-match", Namespace: "default"},
-					Spec: v1beta1.PodPlacementConfigSpec{
-						Priority: 100,
-						Plugins: &plugins.LocalPlugins{CelArchitecturePlacement: &plugins.CelArchitecturePlacement{
-							BasePlugin: plugins.BasePlugin{Enabled: true}, FallbackArchitectures: []string{"amd64"},
-							Rules: []plugins.ArchitectureRule{{Name: "match", Expression: "self.metadata.name == 'matched-pod'", Architectures: []string{"ppc64le"}}},
-						}},
-					},
-				},
+				*NewPodPlacementConfig().
+					WithName("ppc-match").
+					WithNamespace("default").
+					WithPriority(100).
+					WithCelArchitecturePlacement(true, []string{"amd64"},
+						[]plugins.ArchitectureRule{
+							NewRule("match", "self.metadata.name == 'matched-pod'", "ppc64le"),
+						}).
+					Build(),
 			}
 			wh := &PodSchedulingGateMutatingWebHook{}
 			wrappedPod := newPod(pod, ctx, recorder)
@@ -962,28 +948,26 @@ var _ = Describe("CEL Evaluator", func() {
 		})
 
 		It("should evaluate lower-priority PPC when first has all-errored CEL", func() {
-			pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "app-pod", Namespace: "default"}}
+			pod := NewPod().WithName("app-pod").WithNamespace("default").Build()
 			ppcs := []v1beta1.PodPlacementConfig{
-				{
-					ObjectMeta: metav1.ObjectMeta{Name: "p300-malformed", Namespace: "default"},
-					Spec: v1beta1.PodPlacementConfigSpec{
-						Priority: 200,
-						Plugins: &plugins.LocalPlugins{CelArchitecturePlacement: &plugins.CelArchitecturePlacement{
-							BasePlugin: plugins.BasePlugin{Enabled: true}, FallbackArchitectures: []string{"amd64"},
-							Rules: []plugins.ArchitectureRule{{Name: "bad", Expression: "!!! invalid", Architectures: []string{"amd64"}}},
-						}},
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{Name: "p100-valid", Namespace: "default"},
-					Spec: v1beta1.PodPlacementConfigSpec{
-						Priority: 100,
-						Plugins: &plugins.LocalPlugins{CelArchitecturePlacement: &plugins.CelArchitecturePlacement{
-							BasePlugin: plugins.BasePlugin{Enabled: true}, FallbackArchitectures: []string{"arm64"},
-							Rules: []plugins.ArchitectureRule{{Name: "match", Expression: "self.metadata.name == 'app-pod'", Architectures: []string{"s390x"}}},
-						}},
-					},
-				},
+				*NewPodPlacementConfig().
+					WithName("p300-malformed").
+					WithNamespace("default").
+					WithPriority(200).
+					WithCelArchitecturePlacement(true, []string{"amd64"},
+						[]plugins.ArchitectureRule{
+							NewRule("bad", "!!! invalid", "amd64"),
+						}).
+					Build(),
+				*NewPodPlacementConfig().
+					WithName("p100-valid").
+					WithNamespace("default").
+					WithPriority(100).
+					WithCelArchitecturePlacement(true, []string{"arm64"},
+						[]plugins.ArchitectureRule{
+							NewRule("match", "self.metadata.name == 'app-pod'", "s390x"),
+						}).
+					Build(),
 			}
 			wh := &PodSchedulingGateMutatingWebHook{}
 			wrappedPod := newPod(pod, ctx, recorder)
@@ -1003,18 +987,17 @@ var _ = Describe("CEL Evaluator", func() {
 		})
 
 		It("should not set arch constraint when all CEL rules are malformed and no PPC claims the pod", func() {
-			pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "no-match-pod", Namespace: "default"}}
+			pod := NewPod().WithName("no-match-pod").WithNamespace("default").Build()
 			ppcs := []v1beta1.PodPlacementConfig{
-				{
-					ObjectMeta: metav1.ObjectMeta{Name: "all-malformed", Namespace: "default"},
-					Spec: v1beta1.PodPlacementConfigSpec{
-						Priority: 100,
-						Plugins: &plugins.LocalPlugins{CelArchitecturePlacement: &plugins.CelArchitecturePlacement{
-							BasePlugin: plugins.BasePlugin{Enabled: true}, FallbackArchitectures: []string{"amd64"},
-							Rules: []plugins.ArchitectureRule{{Name: "bad", Expression: "self.metadata.name ==", Architectures: []string{"ppc64le"}}},
-						}},
-					},
-				},
+				*NewPodPlacementConfig().
+					WithName("all-malformed").
+					WithNamespace("default").
+					WithPriority(100).
+					WithCelArchitecturePlacement(true, []string{"amd64"},
+						[]plugins.ArchitectureRule{
+							NewRule("bad", "self.metadata.name ==", "ppc64le"),
+						}).
+					Build(),
 			}
 			wh := &PodSchedulingGateMutatingWebHook{}
 			wrappedPod := newPod(pod, ctx, recorder)
@@ -1040,18 +1023,17 @@ var _ = Describe("CEL Evaluator", func() {
 		})
 
 		It("should set NodeAffinityLabel to 'overriden' when CEL successfully applies constraints", func() {
-			pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "target-pod", Namespace: "default"}}
+			pod := NewPod().WithName("target-pod").WithNamespace("default").Build()
 			ppcs := []v1beta1.PodPlacementConfig{
-				{
-					ObjectMeta: metav1.ObjectMeta{Name: "ppc-cel-match", Namespace: "default"},
-					Spec: v1beta1.PodPlacementConfigSpec{
-						Priority: 100,
-						Plugins: &plugins.LocalPlugins{CelArchitecturePlacement: &plugins.CelArchitecturePlacement{
-							BasePlugin: plugins.BasePlugin{Enabled: true}, FallbackArchitectures: []string{"amd64"},
-							Rules: []plugins.ArchitectureRule{{Name: "match", Expression: "self.metadata.name == 'target-pod'", Architectures: []string{"ppc64le"}}},
-						}},
-					},
-				},
+				*NewPodPlacementConfig().
+					WithName("ppc-cel-match").
+					WithNamespace("default").
+					WithPriority(100).
+					WithCelArchitecturePlacement(true, []string{"amd64"},
+						[]plugins.ArchitectureRule{
+							NewRule("match", "self.metadata.name == 'target-pod'", "ppc64le"),
+						}).
+					Build(),
 			}
 			wh := &PodSchedulingGateMutatingWebHook{}
 			wrappedPod := newPod(pod, ctx, recorder)
@@ -1060,21 +1042,18 @@ var _ = Describe("CEL Evaluator", func() {
 		})
 
 		It("should NOT set NodeAffinityLabel to 'overriden' when all CEL rules fail", func() {
-			pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
-				Name: "error-pod", Namespace: "default",
-				Labels: map[string]string{utils.NodeAffinityLabel: utils.LabelValueNotSet},
-			}}
+			pod := NewPod().WithName("error-pod").WithNamespace("default").
+				WithLabels(utils.NodeAffinityLabel, utils.LabelValueNotSet).Build()
 			ppcs := []v1beta1.PodPlacementConfig{
-				{
-					ObjectMeta: metav1.ObjectMeta{Name: "ppc-malformed", Namespace: "default"},
-					Spec: v1beta1.PodPlacementConfigSpec{
-						Priority: 100,
-						Plugins: &plugins.LocalPlugins{CelArchitecturePlacement: &plugins.CelArchitecturePlacement{
-							BasePlugin: plugins.BasePlugin{Enabled: true}, FallbackArchitectures: []string{"amd64"},
-							Rules: []plugins.ArchitectureRule{{Name: "bad", Expression: "self.metadata.name ==", Architectures: []string{"ppc64le"}}},
-						}},
-					},
-				},
+				*NewPodPlacementConfig().
+					WithName("ppc-malformed").
+					WithNamespace("default").
+					WithPriority(100).
+					WithCelArchitecturePlacement(true, []string{"amd64"},
+						[]plugins.ArchitectureRule{
+							NewRule("bad", "self.metadata.name ==", "ppc64le"),
+						}).
+					Build(),
 			}
 			wh := &PodSchedulingGateMutatingWebHook{}
 			wrappedPod := newPod(pod, ctx, recorder)
@@ -1083,18 +1062,17 @@ var _ = Describe("CEL Evaluator", func() {
 		})
 
 		It("should set NodeAffinityLabel to 'overriden' when CEL fallback is applied", func() {
-			pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "nomatch-pod", Namespace: "default"}}
+			pod := NewPod().WithName("nomatch-pod").WithNamespace("default").Build()
 			ppcs := []v1beta1.PodPlacementConfig{
-				{
-					ObjectMeta: metav1.ObjectMeta{Name: "ppc-fallback", Namespace: "default"},
-					Spec: v1beta1.PodPlacementConfigSpec{
-						Priority: 100,
-						Plugins: &plugins.LocalPlugins{CelArchitecturePlacement: &plugins.CelArchitecturePlacement{
-							BasePlugin: plugins.BasePlugin{Enabled: true}, FallbackArchitectures: []string{"s390x"},
-							Rules: []plugins.ArchitectureRule{{Name: "no-match", Expression: "self.metadata.name == 'other'", Architectures: []string{"ppc64le"}}},
-						}},
-					},
-				},
+				*NewPodPlacementConfig().
+					WithName("ppc-fallback").
+					WithNamespace("default").
+					WithPriority(100).
+					WithCelArchitecturePlacement(true, []string{"s390x"},
+						[]plugins.ArchitectureRule{
+							NewRule("no-match", "self.metadata.name == 'other'", "ppc64le"),
+						}).
+					Build(),
 			}
 			wh := &PodSchedulingGateMutatingWebHook{}
 			wrappedPod := newPod(pod, ctx, recorder)
@@ -1103,35 +1081,29 @@ var _ = Describe("CEL Evaluator", func() {
 		})
 	})
 
-	Describe("applyCELArchitecturePlacement – controller path", func() {
+	Describe("applyCELArchitecturePlacement -- controller path", func() {
 		// Both webhook and controller skip PPCs when all CEL rules fail:
-		//   malformed CEL → allRulesErrored=true → skip PPC, do not apply fallback
+		//   malformed CEL -> allRulesErrored=true -> skip PPC, do not apply fallback
 
-		// ── disabled-plugin tests (mirrors cel_new_critical_tests_test.go webhook cases) ──
+		// -- disabled-plugin tests (mirrors cel_new_critical_tests_test.go webhook cases) --
 
 		It("should return false and not modify the pod when the CEL plugin is disabled (Enabled: false)", func() {
 			// Verify the guard at cel_integration.go: !ppc.PluginsEnabled(...)
 			recorder := record.NewFakeRecorder(8)
 			reconciler := &PodReconciler{Recorder: recorder}
 
-			ppc := v1beta1.PodPlacementConfig{
-				ObjectMeta: metav1.ObjectMeta{Name: "disabled-ppc", Namespace: "default"},
-				Spec: v1beta1.PodPlacementConfigSpec{
-					Priority: 100,
-					Plugins: &plugins.LocalPlugins{
-						CelArchitecturePlacement: &plugins.CelArchitecturePlacement{
-							BasePlugin:            plugins.BasePlugin{Enabled: false},
-							FallbackArchitectures: []string{"ppc64le"},
-							Rules: []plugins.ArchitectureRule{
-								{Name: "always-true", Expression: `true`, Architectures: []string{"ppc64le"}},
-							},
-						},
-					},
-				},
-			}
+			ppc := *NewPodPlacementConfig().
+				WithName("disabled-ppc").
+				WithNamespace("default").
+				WithPriority(100).
+				WithCelArchitecturePlacement(false, []string{"ppc64le"},
+					[]plugins.ArchitectureRule{
+						NewRule("always-true", "true", "ppc64le"),
+					}).
+				Build()
 
-			pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "workload", Namespace: "default"},
-				Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "c", Image: "nginx:latest"}}}}
+			pod := NewPod().WithName("workload").WithNamespace("default").
+				WithContainersImages("nginx:latest").Build()
 			wrappedPod := newPod(pod, context.Background(), recorder)
 
 			handled := reconciler.applyCELArchitecturePlacement(context.Background(), ppc, wrappedPod)
@@ -1147,35 +1119,21 @@ var _ = Describe("CEL Evaluator", func() {
 			recorder := record.NewFakeRecorder(8)
 			reconciler := &PodReconciler{Recorder: recorder}
 
-			existingTerm := corev1.NodeSelectorTerm{
-				MatchExpressions: []corev1.NodeSelectorRequirement{
-					{Key: "topology.kubernetes.io/zone", Operator: corev1.NodeSelectorOpIn, Values: []string{"us-east-1a"}},
-				},
-			}
-			pod := &corev1.Pod{
-				ObjectMeta: metav1.ObjectMeta{Name: "pod-with-affinity", Namespace: "default"},
-				Spec: corev1.PodSpec{
-					Affinity: &corev1.Affinity{
-						NodeAffinity: &corev1.NodeAffinity{
-							RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
-								NodeSelectorTerms: []corev1.NodeSelectorTerm{existingTerm},
-							},
-						},
+			pod := NewPod().
+				WithName("pod-with-affinity").
+				WithNamespace("default").
+				WithNodeSelectorTermsMatchExpressions(
+					[]corev1.NodeSelectorRequirement{
+						{Key: "topology.kubernetes.io/zone", Operator: corev1.NodeSelectorOpIn, Values: []string{"us-east-1a"}},
 					},
-				},
-			}
+				).
+				Build()
 
-			ppc := v1beta1.PodPlacementConfig{
-				ObjectMeta: metav1.ObjectMeta{Name: "disabled-ppc", Namespace: "default"},
-				Spec: v1beta1.PodPlacementConfigSpec{
-					Plugins: &plugins.LocalPlugins{
-						CelArchitecturePlacement: &plugins.CelArchitecturePlacement{
-							BasePlugin:            plugins.BasePlugin{Enabled: false},
-							FallbackArchitectures: []string{"ppc64le"},
-						},
-					},
-				},
-			}
+			ppc := *NewPodPlacementConfig().
+				WithName("disabled-ppc").
+				WithNamespace("default").
+				WithCelArchitecturePlacement(false, []string{"ppc64le"}, nil).
+				Build()
 
 			wrappedPod := newPod(pod, context.Background(), recorder)
 			handled := reconciler.applyCELArchitecturePlacement(context.Background(), ppc, wrappedPod)
@@ -1202,31 +1160,21 @@ var _ = Describe("CEL Evaluator", func() {
 			recorder := record.NewFakeRecorder(8)
 			reconciler := &PodReconciler{Recorder: recorder}
 
-			pod := &corev1.Pod{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "unrelated-fields-pod",
-					Namespace: "default",
-					Labels:    map[string]string{"app": "database", "tier": "backend"},
-					Annotations: map[string]string{
-						"custom-annotation": "custom-value",
-					},
-				},
-				Spec: corev1.PodSpec{
-					NodeSelector: map[string]string{"zone": "us-east-1"},
-				},
-			}
+			pod := NewPod().
+				WithName("unrelated-fields-pod").
+				WithNamespace("default").
+				WithLabels("app", "database", "tier", "backend").
+				WithAnnotations(map[string]string{
+					"custom-annotation": "custom-value",
+				}).
+				WithNodeSelectors("zone", "us-east-1").
+				Build()
 
-			ppc := v1beta1.PodPlacementConfig{
-				ObjectMeta: metav1.ObjectMeta{Name: "disabled-ppc", Namespace: "default"},
-				Spec: v1beta1.PodPlacementConfigSpec{
-					Plugins: &plugins.LocalPlugins{
-						CelArchitecturePlacement: &plugins.CelArchitecturePlacement{
-							BasePlugin:            plugins.BasePlugin{Enabled: false},
-							FallbackArchitectures: []string{"ppc64le"},
-						},
-					},
-				},
-			}
+			ppc := *NewPodPlacementConfig().
+				WithName("disabled-ppc").
+				WithNamespace("default").
+				WithCelArchitecturePlacement(false, []string{"ppc64le"}, nil).
+				Build()
 
 			wrappedPod := newPod(pod, context.Background(), recorder)
 			handled := reconciler.applyCELArchitecturePlacement(context.Background(), ppc, wrappedPod)
@@ -1244,7 +1192,7 @@ var _ = Describe("CEL Evaluator", func() {
 				"no affinity must be set when plugin is disabled")
 		})
 
-		// ── malformed-CEL tests ────────────────────────────────────────────────────
+		// -- malformed-CEL tests --
 
 		It("should skip PPC and return false when all CEL rules are malformed", func() {
 			// Construct a minimal PodReconciler; only the Recorder field is needed
@@ -1252,21 +1200,16 @@ var _ = Describe("CEL Evaluator", func() {
 			recorder := record.NewFakeRecorder(8)
 			reconciler := &PodReconciler{Recorder: recorder}
 
-			ppc := v1beta1.PodPlacementConfig{
-				ObjectMeta: metav1.ObjectMeta{Name: "malformed-ppc", Namespace: "default"},
-				Spec: v1beta1.PodPlacementConfigSpec{
-					Plugins: &plugins.LocalPlugins{
-						CelArchitecturePlacement: &plugins.CelArchitecturePlacement{
-							BasePlugin:            plugins.BasePlugin{Enabled: true},
-							FallbackArchitectures: []string{"amd64"},
-							Rules: []plugins.ArchitectureRule{
-								{Name: "bad", Expression: "self.metadata.name ==", Architectures: []string{"ppc64le"}},
-							},
-						},
-					},
-				},
-			}
-			pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "workload", Namespace: "default"}}
+			ppc := *NewPodPlacementConfig().
+				WithName("malformed-ppc").
+				WithNamespace("default").
+				WithCelArchitecturePlacement(true, []string{"amd64"},
+					[]plugins.ArchitectureRule{
+						NewRule("bad", "self.metadata.name ==", "ppc64le"),
+					}).
+				Build()
+
+			pod := NewPod().WithName("workload").WithNamespace("default").Build()
 			wrappedPod := newPod(pod, context.Background(), recorder)
 
 			handled := reconciler.applyCELArchitecturePlacement(context.Background(), ppc, wrappedPod)
@@ -1286,23 +1229,17 @@ var _ = Describe("CEL Evaluator", func() {
 		It("should skip malformed PPC in both webhook and controller", func() {
 			// Both code paths uniformly skip PPCs with all-malformed CEL rules.
 			recorder := record.NewFakeRecorder(8)
-			pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "workload", Namespace: "default"}}
+			pod := NewPod().WithName("workload").WithNamespace("default").Build()
 			ppcs := []v1beta1.PodPlacementConfig{
-				{
-					ObjectMeta: metav1.ObjectMeta{Name: "malformed-ppc", Namespace: "default"},
-					Spec: v1beta1.PodPlacementConfigSpec{
-						Priority: 100,
-						Plugins: &plugins.LocalPlugins{
-							CelArchitecturePlacement: &plugins.CelArchitecturePlacement{
-								BasePlugin:            plugins.BasePlugin{Enabled: true},
-								FallbackArchitectures: []string{"amd64"},
-								Rules: []plugins.ArchitectureRule{
-									{Name: "bad", Expression: "self.metadata.name ==", Architectures: []string{"ppc64le"}},
-								},
-							},
-						},
-					},
-				},
+				*NewPodPlacementConfig().
+					WithName("malformed-ppc").
+					WithNamespace("default").
+					WithPriority(100).
+					WithCelArchitecturePlacement(true, []string{"amd64"},
+						[]plugins.ArchitectureRule{
+							NewRule("bad", "self.metadata.name ==", "ppc64le"),
+						}).
+					Build(),
 			}
 			wh := &PodSchedulingGateMutatingWebHook{}
 			wrappedPod := newPod(pod, context.Background(), recorder)

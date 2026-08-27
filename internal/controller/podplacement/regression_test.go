@@ -64,19 +64,10 @@ var _ = Describe("Finding #1: CEL evaluated with user preferred affinity", func(
 			WithLabelSelector(&metav1.LabelSelector{
 				MatchLabels: map[string]string{"app": "finding1"},
 			}).
-			WithPlugins().
+			WithCelArchitecturePlacement(true, []string{utils.ArchitectureAmd64}, []plugins.ArchitectureRule{
+				NewRule("always-match", `true`, utils.ArchitecturePpc64le),
+			}).
 			Build()
-		ppc.Spec.Plugins.CelArchitecturePlacement = &plugins.CelArchitecturePlacement{
-			BasePlugin:            plugins.BasePlugin{Enabled: true},
-			FallbackArchitectures: []string{utils.ArchitectureAmd64},
-			Rules: []plugins.ArchitectureRule{
-				{
-					Name:          "always-match",
-					Expression:    `true`,
-					Architectures: []string{utils.ArchitecturePpc64le},
-				},
-			},
-		}
 		Expect(k8sClient.Create(ctx, ppc)).To(Succeed())
 
 		By("Creating a pod that already has a user-defined preferred kubernetes.io/arch affinity")
@@ -219,15 +210,11 @@ func TestKEP3838ReconcilerDoesNotShrinkNodeSelectorTerms(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-			pod := &corev1.Pod{
-				ObjectMeta: metav1.ObjectMeta{Name: "kep3838-pod"},
-				Spec: corev1.PodSpec{
-					Affinity: &corev1.Affinity{
-						NodeAffinity: &corev1.NodeAffinity{
-							RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
-								NodeSelectorTerms: tt.initialTerms,
-							},
-						},
+			pod := NewPod().WithName("kep3838-pod").Build()
+			pod.Spec.Affinity = &corev1.Affinity{
+				NodeAffinity: &corev1.NodeAffinity{
+					RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
+						NodeSelectorTerms: tt.initialTerms,
 					},
 				},
 			}
@@ -266,31 +253,15 @@ func TestKEP3838ReconcilerDoesNotShrinkNodeSelectorTerms(t *testing.T) {
 // WOULD shrink the term count when an arch-only term exists, confirming the
 // production risk was real.
 func TestKEP3838OldCodeShrinksTerm(t *testing.T) {
-	pod := &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{Name: "kep3838-old"},
-		Spec: corev1.PodSpec{
-			Affinity: &corev1.Affinity{
-				NodeAffinity: &corev1.NodeAffinity{
-					RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
-						NodeSelectorTerms: []corev1.NodeSelectorTerm{
-							{
-								// arch-only term — will be deleted by removeAllArchitectureConstraints
-								MatchExpressions: []corev1.NodeSelectorRequirement{
-									{Key: utils.ArchLabel, Operator: corev1.NodeSelectorOpIn, Values: []string{utils.ArchitectureAmd64}},
-								},
-							},
-							{
-								// zone term — survives
-								MatchExpressions: []corev1.NodeSelectorRequirement{
-									{Key: "topology.kubernetes.io/zone", Operator: corev1.NodeSelectorOpIn, Values: []string{"us-east-1a"}},
-								},
-							},
-						},
-					},
-				},
+	pod := NewPod().WithName("kep3838-old").
+		WithNodeSelectorTermsMatchExpressions(
+			[]corev1.NodeSelectorRequirement{
+				{Key: utils.ArchLabel, Operator: corev1.NodeSelectorOpIn, Values: []string{utils.ArchitectureAmd64}},
 			},
-		},
-	}
+			[]corev1.NodeSelectorRequirement{
+				{Key: "topology.kubernetes.io/zone", Operator: corev1.NodeSelectorOpIn, Values: []string{"us-east-1a"}},
+			},
+		).Build()
 
 	// Simulate the OLD path
 	applyArchitectureConstraints(pod, []string{utils.ArchitecturePpc64le})
@@ -426,26 +397,12 @@ func TestMalformedPPCDoesNotBlockLowerPriorityValidPPC(t *testing.T) {
 
 	// Scenario 1: high-priority PPC with all malformed CEL rules.
 	// applyCELArchitecturePlacement must return false and must NOT mutate the pod.
-	malformedPPC := multiarchv1beta1.PodPlacementConfig{
-		ObjectMeta: metav1.ObjectMeta{Name: "high-priority-malformed", Namespace: "default"},
-		Spec: multiarchv1beta1.PodPlacementConfigSpec{
-			Priority: 200,
-			Plugins: &plugins.LocalPlugins{
-				CelArchitecturePlacement: &plugins.CelArchitecturePlacement{
-					BasePlugin:            plugins.BasePlugin{Enabled: true},
-					FallbackArchitectures: []string{utils.ArchitectureAmd64},
-					Rules: []plugins.ArchitectureRule{
-						// Syntactically invalid: missing right-hand operand.
-						{Name: "bad-rule", Expression: "self.metadata.name ==", Architectures: []string{utils.ArchitectureS390x}},
-					},
-				},
-			},
-		},
-	}
+	malformedPPC := *NewPodPlacementConfig().WithName("high-priority-malformed").WithNamespace("default").WithPriority(200).
+		WithCelArchitecturePlacement(true, []string{utils.ArchitectureAmd64}, []plugins.ArchitectureRule{
+			NewRule("bad-rule", "self.metadata.name ==", utils.ArchitectureS390x),
+		}).Build()
 
-	pod := newPod(&corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{Name: "test-pod", Namespace: "default"},
-	}, ctx, recorder)
+	pod := newPod(NewPod().WithName("test-pod").WithNamespace("default").Build(), ctx, recorder)
 
 	applied := r.applyCELArchitecturePlacement(ctx, malformedPPC, pod)
 	if applied {
@@ -467,26 +424,12 @@ func TestMalformedPPCDoesNotBlockLowerPriorityValidPPC(t *testing.T) {
 
 	// Scenario 2: lower-priority PPC with a valid matching CEL rule.
 	// applyMatchingPPCs must skip the malformed PPC and apply the valid one.
-	validPPC := multiarchv1beta1.PodPlacementConfig{
-		ObjectMeta: metav1.ObjectMeta{Name: "low-priority-valid", Namespace: "default"},
-		Spec: multiarchv1beta1.PodPlacementConfigSpec{
-			Priority: 100,
-			Plugins: &plugins.LocalPlugins{
-				CelArchitecturePlacement: &plugins.CelArchitecturePlacement{
-					BasePlugin:            plugins.BasePlugin{Enabled: true},
-					FallbackArchitectures: []string{utils.ArchitectureArm64},
-					Rules: []plugins.ArchitectureRule{
-						// Always matches.
-						{Name: "valid-rule", Expression: "true", Architectures: []string{utils.ArchitecturePpc64le}},
-					},
-				},
-			},
-		},
-	}
+	validPPC := *NewPodPlacementConfig().WithName("low-priority-valid").WithNamespace("default").WithPriority(100).
+		WithCelArchitecturePlacement(true, []string{utils.ArchitectureArm64}, []plugins.ArchitectureRule{
+			NewRule("valid-rule", "true", utils.ArchitecturePpc64le),
+		}).Build()
 
-	pod2 := newPod(&corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{Name: "test-pod", Namespace: "default"},
-	}, ctx, recorder)
+	pod2 := newPod(NewPod().WithName("test-pod").WithNamespace("default").Build(), ctx, recorder)
 
 	// applyMatchingPPCs sorts by priority internally; order here is arbitrary.
 	celApplied := r.applyMatchingPPCs(ctx, []multiarchv1beta1.PodPlacementConfig{malformedPPC, validPPC}, pod2, pod2.isPreferredAffinityConfiguredForArchitecture())
@@ -573,19 +516,10 @@ var _ = Describe("Finding #3+#4: KEP-3838 NodeSelectorTerms immutability (integr
 			WithLabelSelector(&metav1.LabelSelector{
 				MatchLabels: map[string]string{"app": "kep3838"},
 			}).
-			WithPlugins().
+			WithCelArchitecturePlacement(true, []string{utils.ArchitecturePpc64le}, []plugins.ArchitectureRule{
+				NewRule("always-true", `true`, utils.ArchitecturePpc64le),
+			}).
 			Build()
-		ppc.Spec.Plugins.CelArchitecturePlacement = &plugins.CelArchitecturePlacement{
-			BasePlugin:            plugins.BasePlugin{Enabled: true},
-			FallbackArchitectures: []string{utils.ArchitecturePpc64le},
-			Rules: []plugins.ArchitectureRule{
-				{
-					Name:          "always-true",
-					Expression:    `true`,
-					Architectures: []string{utils.ArchitecturePpc64le},
-				},
-			},
-		}
 		Expect(k8sClient.Create(ctx, ppc)).To(Succeed())
 
 		By("Creating a pod with 2 NodeSelectorTerms (arch-only + zone)")

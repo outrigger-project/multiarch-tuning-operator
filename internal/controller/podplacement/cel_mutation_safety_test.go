@@ -23,6 +23,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	. "github.com/openshift/multiarch-tuning-operator/pkg/testing/builder"
 	"github.com/openshift/multiarch-tuning-operator/pkg/utils"
 )
 
@@ -30,18 +31,14 @@ var _ = Describe("CEL Mutation Safety", func() {
 
 	// TestOnlyArchitectureRemovedFromNodeSelector
 	It("should remove ONLY kubernetes.io/arch from nodeSelector", func() {
-		pod := &corev1.Pod{
-			ObjectMeta: metav1.ObjectMeta{Name: "test-pod"},
-			Spec: corev1.PodSpec{
-				NodeSelector: map[string]string{
-					utils.ArchLabel:                    "amd64",
-					"kubernetes.io/os":                 "linux",
-					"node.kubernetes.io/instance-type": "m5.large",
-					"topology.kubernetes.io/zone":      "us-east-1a",
-					"custom-label":                     "custom-value",
-				},
-			},
-		}
+		pod := NewPod().WithName("test-pod").
+			WithNodeSelectors(
+				utils.ArchLabel, "amd64",
+				"kubernetes.io/os", "linux",
+				"node.kubernetes.io/instance-type", "m5.large",
+				"topology.kubernetes.io/zone", "us-east-1a",
+				"custom-label", "custom-value",
+			).Build()
 
 		removeArchitectureFromNodeSelector(pod)
 
@@ -62,56 +59,52 @@ var _ = Describe("CEL Mutation Safety", func() {
 
 	// TestUnrelatedAffinityPreserved
 	It("should preserve unrelated pod and pod-anti affinity when removing architecture from node affinity", func() {
-		pod := &corev1.Pod{
-			ObjectMeta: metav1.ObjectMeta{Name: "test-pod"},
-			Spec: corev1.PodSpec{
-				Affinity: &corev1.Affinity{
-					NodeAffinity: &corev1.NodeAffinity{
-						RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
-							NodeSelectorTerms: []corev1.NodeSelectorTerm{
-								{
-									MatchExpressions: []corev1.NodeSelectorRequirement{
-										{
-											Key:      utils.ArchLabel,
-											Operator: corev1.NodeSelectorOpIn,
-											Values:   []string{"amd64"},
-										},
-										{
-											Key:      "kubernetes.io/os",
-											Operator: corev1.NodeSelectorOpIn,
-											Values:   []string{"linux"},
-										},
-									},
-								},
-							},
-						},
-					},
-					PodAffinity: &corev1.PodAffinity{
-						RequiredDuringSchedulingIgnoredDuringExecution: []corev1.PodAffinityTerm{
+		pod := NewPod().WithName("test-pod").
+			WithAffinity(&corev1.Affinity{
+				NodeAffinity: &corev1.NodeAffinity{
+					RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
+						NodeSelectorTerms: []corev1.NodeSelectorTerm{
 							{
-								LabelSelector: &metav1.LabelSelector{
-									MatchLabels: map[string]string{"app": "database"},
-								},
-								TopologyKey: "kubernetes.io/hostname",
-							},
-						},
-					},
-					PodAntiAffinity: &corev1.PodAntiAffinity{
-						PreferredDuringSchedulingIgnoredDuringExecution: []corev1.WeightedPodAffinityTerm{
-							{
-								Weight: 100,
-								PodAffinityTerm: corev1.PodAffinityTerm{
-									LabelSelector: &metav1.LabelSelector{
-										MatchLabels: map[string]string{"app": "cache"},
+								MatchExpressions: []corev1.NodeSelectorRequirement{
+									{
+										Key:      utils.ArchLabel,
+										Operator: corev1.NodeSelectorOpIn,
+										Values:   []string{"amd64"},
 									},
-									TopologyKey: "kubernetes.io/hostname",
+									{
+										Key:      "kubernetes.io/os",
+										Operator: corev1.NodeSelectorOpIn,
+										Values:   []string{"linux"},
+									},
 								},
 							},
 						},
 					},
 				},
-			},
-		}
+				PodAffinity: &corev1.PodAffinity{
+					RequiredDuringSchedulingIgnoredDuringExecution: []corev1.PodAffinityTerm{
+						{
+							LabelSelector: &metav1.LabelSelector{
+								MatchLabels: map[string]string{"app": "database"},
+							},
+							TopologyKey: "kubernetes.io/hostname",
+						},
+					},
+				},
+				PodAntiAffinity: &corev1.PodAntiAffinity{
+					PreferredDuringSchedulingIgnoredDuringExecution: []corev1.WeightedPodAffinityTerm{
+						{
+							Weight: 100,
+							PodAffinityTerm: corev1.PodAffinityTerm{
+								LabelSelector: &metav1.LabelSelector{
+									MatchLabels: map[string]string{"app": "cache"},
+								},
+								TopologyKey: "kubernetes.io/hostname",
+							},
+						},
+					},
+				},
+			}).Build()
 
 		removeArchitectureFromNodeAffinity(pod)
 
@@ -147,42 +140,38 @@ var _ = Describe("CEL Mutation Safety", func() {
 
 	// TestPreferredAffinityPreserved
 	It("should preserve preferredDuringSchedulingIgnoredDuringExecution (including arch entries) when removing required arch", func() {
-		pod := &corev1.Pod{
-			ObjectMeta: metav1.ObjectMeta{Name: "test-pod"},
-			Spec: corev1.PodSpec{
-				Affinity: &corev1.Affinity{
-					NodeAffinity: &corev1.NodeAffinity{
-						RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
-							NodeSelectorTerms: []corev1.NodeSelectorTerm{
-								{
-									MatchExpressions: []corev1.NodeSelectorRequirement{
-										{Key: utils.ArchLabel, Operator: corev1.NodeSelectorOpIn, Values: []string{"amd64"}},
-									},
+		pod := NewPod().WithName("test-pod").
+			WithAffinity(&corev1.Affinity{
+				NodeAffinity: &corev1.NodeAffinity{
+					RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
+						NodeSelectorTerms: []corev1.NodeSelectorTerm{
+							{
+								MatchExpressions: []corev1.NodeSelectorRequirement{
+									{Key: utils.ArchLabel, Operator: corev1.NodeSelectorOpIn, Values: []string{"amd64"}},
 								},
 							},
 						},
-						PreferredDuringSchedulingIgnoredDuringExecution: []corev1.PreferredSchedulingTerm{
-							{
-								Weight: 50,
-								Preference: corev1.NodeSelectorTerm{
-									MatchExpressions: []corev1.NodeSelectorRequirement{
-										{Key: "node-type", Operator: corev1.NodeSelectorOpIn, Values: []string{"compute"}},
-									},
+					},
+					PreferredDuringSchedulingIgnoredDuringExecution: []corev1.PreferredSchedulingTerm{
+						{
+							Weight: 50,
+							Preference: corev1.NodeSelectorTerm{
+								MatchExpressions: []corev1.NodeSelectorRequirement{
+									{Key: "node-type", Operator: corev1.NodeSelectorOpIn, Values: []string{"compute"}},
 								},
 							},
-							{
-								Weight: 30,
-								Preference: corev1.NodeSelectorTerm{
-									MatchExpressions: []corev1.NodeSelectorRequirement{
-										{Key: utils.ArchLabel, Operator: corev1.NodeSelectorOpIn, Values: []string{"arm64"}},
-									},
+						},
+						{
+							Weight: 30,
+							Preference: corev1.NodeSelectorTerm{
+								MatchExpressions: []corev1.NodeSelectorRequirement{
+									{Key: utils.ArchLabel, Operator: corev1.NodeSelectorOpIn, Values: []string{"arm64"}},
 								},
 							},
 						},
 					},
 				},
-			},
-		}
+			}).Build()
 
 		removeArchitectureFromNodeAffinity(pod)
 
@@ -206,27 +195,23 @@ var _ = Describe("CEL Mutation Safety", func() {
 
 	// TestMatchFieldsPreserved
 	It("should preserve MatchFields during architecture cleanup", func() {
-		pod := &corev1.Pod{
-			ObjectMeta: metav1.ObjectMeta{Name: "test-pod"},
-			Spec: corev1.PodSpec{
-				Affinity: &corev1.Affinity{
-					NodeAffinity: &corev1.NodeAffinity{
-						RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
-							NodeSelectorTerms: []corev1.NodeSelectorTerm{
-								{
-									MatchExpressions: []corev1.NodeSelectorRequirement{
-										{Key: utils.ArchLabel, Operator: corev1.NodeSelectorOpIn, Values: []string{"amd64"}},
-									},
-									MatchFields: []corev1.NodeSelectorRequirement{
-										{Key: "metadata.name", Operator: corev1.NodeSelectorOpIn, Values: []string{"node-1", "node-2"}},
-									},
+		pod := NewPod().WithName("test-pod").
+			WithAffinity(&corev1.Affinity{
+				NodeAffinity: &corev1.NodeAffinity{
+					RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
+						NodeSelectorTerms: []corev1.NodeSelectorTerm{
+							{
+								MatchExpressions: []corev1.NodeSelectorRequirement{
+									{Key: utils.ArchLabel, Operator: corev1.NodeSelectorOpIn, Values: []string{"amd64"}},
+								},
+								MatchFields: []corev1.NodeSelectorRequirement{
+									{Key: "metadata.name", Operator: corev1.NodeSelectorOpIn, Values: []string{"node-1", "node-2"}},
 								},
 							},
 						},
 					},
 				},
-			},
-		}
+			}).Build()
 
 		removeArchitectureFromNodeAffinity(pod)
 
@@ -240,32 +225,28 @@ var _ = Describe("CEL Mutation Safety", func() {
 
 	// TestEmptySelectorTermsRemoved
 	It("should remove empty selector terms after architecture cleanup", func() {
-		pod := &corev1.Pod{
-			ObjectMeta: metav1.ObjectMeta{Name: "test-pod"},
-			Spec: corev1.PodSpec{
-				Affinity: &corev1.Affinity{
-					NodeAffinity: &corev1.NodeAffinity{
-						RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
-							NodeSelectorTerms: []corev1.NodeSelectorTerm{
-								{
-									// This term will become empty after arch removal
-									MatchExpressions: []corev1.NodeSelectorRequirement{
-										{Key: utils.ArchLabel, Operator: corev1.NodeSelectorOpIn, Values: []string{"amd64"}},
-									},
+		pod := NewPod().WithName("test-pod").
+			WithAffinity(&corev1.Affinity{
+				NodeAffinity: &corev1.NodeAffinity{
+					RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
+						NodeSelectorTerms: []corev1.NodeSelectorTerm{
+							{
+								// This term will become empty after arch removal
+								MatchExpressions: []corev1.NodeSelectorRequirement{
+									{Key: utils.ArchLabel, Operator: corev1.NodeSelectorOpIn, Values: []string{"amd64"}},
 								},
-								{
-									// This term has other expressions
-									MatchExpressions: []corev1.NodeSelectorRequirement{
-										{Key: utils.ArchLabel, Operator: corev1.NodeSelectorOpIn, Values: []string{"amd64"}},
-										{Key: "kubernetes.io/os", Operator: corev1.NodeSelectorOpIn, Values: []string{"linux"}},
-									},
+							},
+							{
+								// This term has other expressions
+								MatchExpressions: []corev1.NodeSelectorRequirement{
+									{Key: utils.ArchLabel, Operator: corev1.NodeSelectorOpIn, Values: []string{"amd64"}},
+									{Key: "kubernetes.io/os", Operator: corev1.NodeSelectorOpIn, Values: []string{"linux"}},
 								},
 							},
 						},
 					},
 				},
-			},
-		}
+			}).Build()
 
 		removeArchitectureFromNodeAffinity(pod)
 
@@ -280,35 +261,31 @@ var _ = Describe("CEL Mutation Safety", func() {
 
 	// TestNonEmptyUnrelatedSelectorTermsPreserved
 	It("should preserve non-empty unrelated selector terms", func() {
-		pod := &corev1.Pod{
-			ObjectMeta: metav1.ObjectMeta{Name: "test-pod"},
-			Spec: corev1.PodSpec{
-				Affinity: &corev1.Affinity{
-					NodeAffinity: &corev1.NodeAffinity{
-						RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
-							NodeSelectorTerms: []corev1.NodeSelectorTerm{
-								{
-									MatchExpressions: []corev1.NodeSelectorRequirement{
-										{Key: "zone", Operator: corev1.NodeSelectorOpIn, Values: []string{"us-east-1a", "us-east-1b"}},
-									},
+		pod := NewPod().WithName("test-pod").
+			WithAffinity(&corev1.Affinity{
+				NodeAffinity: &corev1.NodeAffinity{
+					RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
+						NodeSelectorTerms: []corev1.NodeSelectorTerm{
+							{
+								MatchExpressions: []corev1.NodeSelectorRequirement{
+									{Key: "zone", Operator: corev1.NodeSelectorOpIn, Values: []string{"us-east-1a", "us-east-1b"}},
 								},
-								{
-									MatchExpressions: []corev1.NodeSelectorRequirement{
-										{Key: utils.ArchLabel, Operator: corev1.NodeSelectorOpIn, Values: []string{"amd64"}},
-										{Key: "instance-type", Operator: corev1.NodeSelectorOpIn, Values: []string{"m5.large"}},
-									},
+							},
+							{
+								MatchExpressions: []corev1.NodeSelectorRequirement{
+									{Key: utils.ArchLabel, Operator: corev1.NodeSelectorOpIn, Values: []string{"amd64"}},
+									{Key: "instance-type", Operator: corev1.NodeSelectorOpIn, Values: []string{"m5.large"}},
 								},
-								{
-									MatchExpressions: []corev1.NodeSelectorRequirement{
-										{Key: "node-role", Operator: corev1.NodeSelectorOpIn, Values: []string{"worker"}},
-									},
+							},
+							{
+								MatchExpressions: []corev1.NodeSelectorRequirement{
+									{Key: "node-role", Operator: corev1.NodeSelectorOpIn, Values: []string{"worker"}},
 								},
 							},
 						},
 					},
 				},
-			},
-		}
+			}).Build()
 
 		removeArchitectureFromNodeAffinity(pod)
 
@@ -325,58 +302,54 @@ var _ = Describe("CEL Mutation Safety", func() {
 
 	// TestComplexAffinityStructure
 	It("should handle complex affinity structure correctly", func() {
-		pod := &corev1.Pod{
-			ObjectMeta: metav1.ObjectMeta{Name: "test-pod"},
-			Spec: corev1.PodSpec{
-				Affinity: &corev1.Affinity{
-					NodeAffinity: &corev1.NodeAffinity{
-						RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
-							NodeSelectorTerms: []corev1.NodeSelectorTerm{
-								{
-									MatchExpressions: []corev1.NodeSelectorRequirement{
-										{Key: utils.ArchLabel, Operator: corev1.NodeSelectorOpIn, Values: []string{"amd64", "arm64"}},
-										{Key: "kubernetes.io/os", Operator: corev1.NodeSelectorOpIn, Values: []string{"linux"}},
-										{Key: "node.kubernetes.io/instance-type", Operator: corev1.NodeSelectorOpNotIn, Values: []string{"t2.micro"}},
-									},
-									MatchFields: []corev1.NodeSelectorRequirement{
-										{Key: "metadata.name", Operator: corev1.NodeSelectorOpIn, Values: []string{"node-1"}},
-									},
-								},
-							},
-						},
-						PreferredDuringSchedulingIgnoredDuringExecution: []corev1.PreferredSchedulingTerm{
+		pod := NewPod().WithName("test-pod").
+			WithAffinity(&corev1.Affinity{
+				NodeAffinity: &corev1.NodeAffinity{
+					RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
+						NodeSelectorTerms: []corev1.NodeSelectorTerm{
 							{
-								Weight: 100,
-								Preference: corev1.NodeSelectorTerm{
-									MatchExpressions: []corev1.NodeSelectorRequirement{
-										{Key: "ssd", Operator: corev1.NodeSelectorOpExists},
-									},
+								MatchExpressions: []corev1.NodeSelectorRequirement{
+									{Key: utils.ArchLabel, Operator: corev1.NodeSelectorOpIn, Values: []string{"amd64", "arm64"}},
+									{Key: "kubernetes.io/os", Operator: corev1.NodeSelectorOpIn, Values: []string{"linux"}},
+									{Key: "node.kubernetes.io/instance-type", Operator: corev1.NodeSelectorOpNotIn, Values: []string{"t2.micro"}},
+								},
+								MatchFields: []corev1.NodeSelectorRequirement{
+									{Key: "metadata.name", Operator: corev1.NodeSelectorOpIn, Values: []string{"node-1"}},
 								},
 							},
 						},
 					},
-					PodAffinity: &corev1.PodAffinity{
-						RequiredDuringSchedulingIgnoredDuringExecution: []corev1.PodAffinityTerm{
-							{
-								LabelSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "cache"}},
-								TopologyKey:   "kubernetes.io/hostname",
-							},
-						},
-					},
-					PodAntiAffinity: &corev1.PodAntiAffinity{
-						PreferredDuringSchedulingIgnoredDuringExecution: []corev1.WeightedPodAffinityTerm{
-							{
-								Weight: 50,
-								PodAffinityTerm: corev1.PodAffinityTerm{
-									LabelSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "competitor"}},
-									TopologyKey:   "topology.kubernetes.io/zone",
+					PreferredDuringSchedulingIgnoredDuringExecution: []corev1.PreferredSchedulingTerm{
+						{
+							Weight: 100,
+							Preference: corev1.NodeSelectorTerm{
+								MatchExpressions: []corev1.NodeSelectorRequirement{
+									{Key: "ssd", Operator: corev1.NodeSelectorOpExists},
 								},
 							},
 						},
 					},
 				},
-			},
-		}
+				PodAffinity: &corev1.PodAffinity{
+					RequiredDuringSchedulingIgnoredDuringExecution: []corev1.PodAffinityTerm{
+						{
+							LabelSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "cache"}},
+							TopologyKey:   "kubernetes.io/hostname",
+						},
+					},
+				},
+				PodAntiAffinity: &corev1.PodAntiAffinity{
+					PreferredDuringSchedulingIgnoredDuringExecution: []corev1.WeightedPodAffinityTerm{
+						{
+							Weight: 50,
+							PodAffinityTerm: corev1.PodAffinityTerm{
+								LabelSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "competitor"}},
+								TopologyKey:   "topology.kubernetes.io/zone",
+							},
+						},
+					},
+				},
+			}).Build()
 
 		removeArchitectureFromNodeAffinity(pod)
 
@@ -425,28 +398,24 @@ var _ = Describe("CEL Mutation Safety", func() {
 
 	// TestMixedArchitectureAndNonArchitectureExpressions
 	It("should remove all architecture expressions and preserve non-architecture expressions", func() {
-		pod := &corev1.Pod{
-			ObjectMeta: metav1.ObjectMeta{Name: "test-pod"},
-			Spec: corev1.PodSpec{
-				Affinity: &corev1.Affinity{
-					NodeAffinity: &corev1.NodeAffinity{
-						RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
-							NodeSelectorTerms: []corev1.NodeSelectorTerm{
-								{
-									MatchExpressions: []corev1.NodeSelectorRequirement{
-										{Key: "zone", Operator: corev1.NodeSelectorOpIn, Values: []string{"us-east-1a"}},
-										{Key: utils.ArchLabel, Operator: corev1.NodeSelectorOpIn, Values: []string{"amd64"}},
-										{Key: "instance-type", Operator: corev1.NodeSelectorOpIn, Values: []string{"m5.large"}},
-										{Key: utils.ArchLabel, Operator: corev1.NodeSelectorOpNotIn, Values: []string{"arm64"}},
-										{Key: "ssd", Operator: corev1.NodeSelectorOpExists},
-									},
+		pod := NewPod().WithName("test-pod").
+			WithAffinity(&corev1.Affinity{
+				NodeAffinity: &corev1.NodeAffinity{
+					RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
+						NodeSelectorTerms: []corev1.NodeSelectorTerm{
+							{
+								MatchExpressions: []corev1.NodeSelectorRequirement{
+									{Key: "zone", Operator: corev1.NodeSelectorOpIn, Values: []string{"us-east-1a"}},
+									{Key: utils.ArchLabel, Operator: corev1.NodeSelectorOpIn, Values: []string{"amd64"}},
+									{Key: "instance-type", Operator: corev1.NodeSelectorOpIn, Values: []string{"m5.large"}},
+									{Key: utils.ArchLabel, Operator: corev1.NodeSelectorOpNotIn, Values: []string{"arm64"}},
+									{Key: "ssd", Operator: corev1.NodeSelectorOpExists},
 								},
 							},
 						},
 					},
 				},
-			},
-		}
+			}).Build()
 
 		removeArchitectureFromNodeAffinity(pod)
 

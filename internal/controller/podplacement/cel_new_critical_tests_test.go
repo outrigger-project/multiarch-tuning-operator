@@ -90,31 +90,21 @@ var _ = Describe("CEL New Critical Tests", func() {
 			},
 		}
 
-		original := &corev1.Pod{
-			ObjectMeta: metav1.ObjectMeta{Name: "pod-with-affinity", Namespace: "default"},
-			Spec: corev1.PodSpec{
-				Affinity: &corev1.Affinity{
-					NodeAffinity: &corev1.NodeAffinity{
-						RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
-							NodeSelectorTerms: []corev1.NodeSelectorTerm{existingTerm},
-						},
+		original := NewPod().WithName("pod-with-affinity").WithNamespace("default").
+			WithAffinity(&corev1.Affinity{
+				NodeAffinity: &corev1.NodeAffinity{
+					RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
+						NodeSelectorTerms: []corev1.NodeSelectorTerm{existingTerm},
 					},
 				},
-			},
-		}
+			}).Build()
 
 		ppcs := []v1beta1.PodPlacementConfig{
-			{
-				ObjectMeta: metav1.ObjectMeta{Name: "disabled-ppc", Namespace: "default"},
-				Spec: v1beta1.PodPlacementConfigSpec{
-					Plugins: &plugins.LocalPlugins{
-						CelArchitecturePlacement: &plugins.CelArchitecturePlacement{
-							BasePlugin:            plugins.BasePlugin{Enabled: false},
-							FallbackArchitectures: []string{utils.ArchitecturePpc64le},
-						},
-					},
-				},
-			},
+			*NewPodPlacementConfig().
+				WithName("disabled-ppc").
+				WithNamespace("default").
+				WithCelArchitecturePlacement(false, []string{utils.ArchitecturePpc64le}, nil).
+				Build(),
 		}
 
 		wh := &PodSchedulingGateMutatingWebHook{}
@@ -136,31 +126,27 @@ var _ = Describe("CEL New Critical Tests", func() {
 
 	// TestApplyArchitectureConstraints_TermOrderPreserved
 	It("should preserve the relative order of NodeSelectorTerms after applying architecture constraints", func() {
-		pod := &corev1.Pod{
-			ObjectMeta: metav1.ObjectMeta{Name: "ordered-pod"},
-			Spec: corev1.PodSpec{
-				Affinity: &corev1.Affinity{
-					NodeAffinity: &corev1.NodeAffinity{
-						RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
-							NodeSelectorTerms: []corev1.NodeSelectorTerm{
-								{MatchExpressions: []corev1.NodeSelectorRequirement{
-									{Key: "topology.kubernetes.io/zone", Operator: corev1.NodeSelectorOpIn, Values: []string{"us-east-1a"}},
-									{Key: utils.ArchLabel, Operator: corev1.NodeSelectorOpIn, Values: []string{"amd64"}},
-								}},
-								{MatchExpressions: []corev1.NodeSelectorRequirement{
-									{Key: "node.kubernetes.io/instance-type", Operator: corev1.NodeSelectorOpIn, Values: []string{"m5.large"}},
-									{Key: utils.ArchLabel, Operator: corev1.NodeSelectorOpIn, Values: []string{"amd64"}},
-								}},
-								{MatchExpressions: []corev1.NodeSelectorRequirement{
-									{Key: "kubernetes.io/os", Operator: corev1.NodeSelectorOpIn, Values: []string{"linux"}},
-									{Key: utils.ArchLabel, Operator: corev1.NodeSelectorOpIn, Values: []string{"amd64"}},
-								}},
-							},
+		pod := NewPod().WithName("ordered-pod").
+			WithAffinity(&corev1.Affinity{
+				NodeAffinity: &corev1.NodeAffinity{
+					RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
+						NodeSelectorTerms: []corev1.NodeSelectorTerm{
+							{MatchExpressions: []corev1.NodeSelectorRequirement{
+								{Key: "topology.kubernetes.io/zone", Operator: corev1.NodeSelectorOpIn, Values: []string{"us-east-1a"}},
+								{Key: utils.ArchLabel, Operator: corev1.NodeSelectorOpIn, Values: []string{"amd64"}},
+							}},
+							{MatchExpressions: []corev1.NodeSelectorRequirement{
+								{Key: "node.kubernetes.io/instance-type", Operator: corev1.NodeSelectorOpIn, Values: []string{"m5.large"}},
+								{Key: utils.ArchLabel, Operator: corev1.NodeSelectorOpIn, Values: []string{"amd64"}},
+							}},
+							{MatchExpressions: []corev1.NodeSelectorRequirement{
+								{Key: "kubernetes.io/os", Operator: corev1.NodeSelectorOpIn, Values: []string{"linux"}},
+								{Key: utils.ArchLabel, Operator: corev1.NodeSelectorOpIn, Values: []string{"amd64"}},
+							}},
 						},
 					},
 				},
-			},
-		}
+			}).Build()
 
 		applyArchitectureConstraints(pod, []string{utils.ArchitecturePpc64le})
 
@@ -197,25 +183,21 @@ var _ = Describe("CEL New Critical Tests", func() {
 
 	// TestRemoveArchitectureFromNodeAffinity_MatchExpressionsOrderPreserved
 	It("should preserve the relative order of non-arch MatchExpressions after removal", func() {
-		pod := &corev1.Pod{
-			ObjectMeta: metav1.ObjectMeta{Name: "order-test"},
-			Spec: corev1.PodSpec{
-				Affinity: &corev1.Affinity{
-					NodeAffinity: &corev1.NodeAffinity{
-						RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
-							NodeSelectorTerms: []corev1.NodeSelectorTerm{
-								{MatchExpressions: []corev1.NodeSelectorRequirement{
-									{Key: "alpha", Operator: corev1.NodeSelectorOpIn, Values: []string{"1"}},
-									{Key: utils.ArchLabel, Operator: corev1.NodeSelectorOpIn, Values: []string{"amd64"}},
-									{Key: "beta", Operator: corev1.NodeSelectorOpIn, Values: []string{"2"}},
-									{Key: "gamma", Operator: corev1.NodeSelectorOpIn, Values: []string{"3"}},
-								}},
-							},
+		pod := NewPod().WithName("order-test").
+			WithAffinity(&corev1.Affinity{
+				NodeAffinity: &corev1.NodeAffinity{
+					RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
+						NodeSelectorTerms: []corev1.NodeSelectorTerm{
+							{MatchExpressions: []corev1.NodeSelectorRequirement{
+								{Key: "alpha", Operator: corev1.NodeSelectorOpIn, Values: []string{"1"}},
+								{Key: utils.ArchLabel, Operator: corev1.NodeSelectorOpIn, Values: []string{"amd64"}},
+								{Key: "beta", Operator: corev1.NodeSelectorOpIn, Values: []string{"2"}},
+								{Key: "gamma", Operator: corev1.NodeSelectorOpIn, Values: []string{"3"}},
+							}},
 						},
 					},
 				},
-			},
-		}
+			}).Build()
 
 		removeArchitectureFromNodeAffinity(pod)
 
@@ -240,27 +222,23 @@ var _ = Describe("CEL New Critical Tests", func() {
 	// Left as explicit struct: PodBuilder.WithNodeSelectorTermsMatchExpressions only sets
 	// MatchExpressions; it cannot represent the MatchFields field.
 	It("should not reorder or remove MatchFields entries during in-place update", func() {
-		pod := &corev1.Pod{
-			ObjectMeta: metav1.ObjectMeta{Name: "matchfields-pod"},
-			Spec: corev1.PodSpec{
-				Affinity: &corev1.Affinity{
-					NodeAffinity: &corev1.NodeAffinity{
-						RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
-							NodeSelectorTerms: []corev1.NodeSelectorTerm{
-								{
-									MatchExpressions: []corev1.NodeSelectorRequirement{
-										{Key: utils.ArchLabel, Operator: corev1.NodeSelectorOpIn, Values: []string{"amd64"}},
-									},
-									MatchFields: []corev1.NodeSelectorRequirement{
-										{Key: "metadata.name", Operator: corev1.NodeSelectorOpIn, Values: []string{"node-a", "node-b"}},
-									},
+		pod := NewPod().WithName("matchfields-pod").
+			WithAffinity(&corev1.Affinity{
+				NodeAffinity: &corev1.NodeAffinity{
+					RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
+						NodeSelectorTerms: []corev1.NodeSelectorTerm{
+							{
+								MatchExpressions: []corev1.NodeSelectorRequirement{
+									{Key: utils.ArchLabel, Operator: corev1.NodeSelectorOpIn, Values: []string{"amd64"}},
+								},
+								MatchFields: []corev1.NodeSelectorRequirement{
+									{Key: "metadata.name", Operator: corev1.NodeSelectorOpIn, Values: []string{"node-a", "node-b"}},
 								},
 							},
 						},
 					},
 				},
-			},
-		}
+			}).Build()
 
 		applyArchitectureConstraints(pod, []string{utils.ArchitecturePpc64le})
 
@@ -331,16 +309,9 @@ var _ = Describe("CEL New Critical Tests", func() {
 		Expect(got.Kind).To(Equal(ownerRef.Kind))
 	})
 
-	// TestApplyArchitectureConstraints_FinalizersPreserved
-	// Left as explicit struct: PodBuilder has no WithFinalizers method.
 	It("should leave finalizers untouched after applyArchitectureConstraints", func() {
-		pod := &corev1.Pod{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:       "finalized-pod",
-				Namespace:  "default",
-				Finalizers: []string{"example.com/my-finalizer", "storage.kubernetes.io/finalizer"},
-			},
-		}
+		pod := NewPod().WithName("finalized-pod").WithNamespace("default").
+			WithFinalizers("example.com/my-finalizer", "storage.kubernetes.io/finalizer").Build()
 
 		applyArchitectureConstraints(pod, []string{utils.ArchitecturePpc64le})
 

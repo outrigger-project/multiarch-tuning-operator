@@ -20,8 +20,8 @@ import (
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	. "github.com/openshift/multiarch-tuning-operator/pkg/testing/builder"
 	"github.com/openshift/multiarch-tuning-operator/pkg/utils"
 )
 
@@ -40,35 +40,20 @@ func TestApplyArchitectureNodeAffinityInPlaceUpdate(t *testing.T) {
 	}{
 		{
 			name: "update existing arch constraint in-place",
-			pod: &corev1.Pod{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "test-pod",
-				},
-				Spec: corev1.PodSpec{
-					Affinity: &corev1.Affinity{
-						NodeAffinity: &corev1.NodeAffinity{
-							RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
-								NodeSelectorTerms: []corev1.NodeSelectorTerm{
-									{
-										MatchExpressions: []corev1.NodeSelectorRequirement{
-											{
-												Key:      "kubernetes.io/os",
-												Operator: corev1.NodeSelectorOpIn,
-												Values:   []string{"linux"},
-											},
-											{
-												Key:      utils.ArchLabel,
-												Operator: corev1.NodeSelectorOpIn,
-												Values:   []string{"amd64", "ppc64le", "s390x"},
-											},
-										},
-									},
-								},
-							},
-						},
+			pod: NewPod().WithName("test-pod").WithNodeSelectorTermsMatchExpressions(
+				[]corev1.NodeSelectorRequirement{
+					{
+						Key:      "kubernetes.io/os",
+						Operator: corev1.NodeSelectorOpIn,
+						Values:   []string{"linux"},
+					},
+					{
+						Key:      utils.ArchLabel,
+						Operator: corev1.NodeSelectorOpIn,
+						Values:   []string{"amd64", "ppc64le", "s390x"},
 					},
 				},
-			},
+			).Build(),
 			architectures:          []string{"ppc64le"},
 			expectedTermCount:      1,
 			expectedArchInEachTerm: []string{"ppc64le"},
@@ -76,49 +61,32 @@ func TestApplyArchitectureNodeAffinityInPlaceUpdate(t *testing.T) {
 		},
 		{
 			name: "update multiple terms with arch constraints",
-			pod: &corev1.Pod{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "test-pod",
-				},
-				Spec: corev1.PodSpec{
-					Affinity: &corev1.Affinity{
-						NodeAffinity: &corev1.NodeAffinity{
-							RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
-								NodeSelectorTerms: []corev1.NodeSelectorTerm{
-									{
-										MatchExpressions: []corev1.NodeSelectorRequirement{
-											{
-												Key:      "kubernetes.io/os",
-												Operator: corev1.NodeSelectorOpIn,
-												Values:   []string{"linux"},
-											},
-											{
-												Key:      utils.ArchLabel,
-												Operator: corev1.NodeSelectorOpIn,
-												Values:   []string{"amd64"},
-											},
-										},
-									},
-									{
-										MatchExpressions: []corev1.NodeSelectorRequirement{
-											{
-												Key:      "node.kubernetes.io/instance-type",
-												Operator: corev1.NodeSelectorOpIn,
-												Values:   []string{"m5.large"},
-											},
-											{
-												Key:      utils.ArchLabel,
-												Operator: corev1.NodeSelectorOpIn,
-												Values:   []string{"amd64"},
-											},
-										},
-									},
-								},
-							},
-						},
+			pod: NewPod().WithName("test-pod").WithNodeSelectorTermsMatchExpressions(
+				[]corev1.NodeSelectorRequirement{
+					{
+						Key:      "kubernetes.io/os",
+						Operator: corev1.NodeSelectorOpIn,
+						Values:   []string{"linux"},
+					},
+					{
+						Key:      utils.ArchLabel,
+						Operator: corev1.NodeSelectorOpIn,
+						Values:   []string{"amd64"},
 					},
 				},
-			},
+				[]corev1.NodeSelectorRequirement{
+					{
+						Key:      "node.kubernetes.io/instance-type",
+						Operator: corev1.NodeSelectorOpIn,
+						Values:   []string{"m5.large"},
+					},
+					{
+						Key:      utils.ArchLabel,
+						Operator: corev1.NodeSelectorOpIn,
+						Values:   []string{"amd64"},
+					},
+				},
+			).Build(),
 			architectures:          []string{"ppc64le"},
 			expectedTermCount:      2,
 			expectedArchInEachTerm: []string{"ppc64le"},
@@ -126,30 +94,15 @@ func TestApplyArchitectureNodeAffinityInPlaceUpdate(t *testing.T) {
 		},
 		{
 			name: "add arch to term without arch constraint",
-			pod: &corev1.Pod{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "test-pod",
-				},
-				Spec: corev1.PodSpec{
-					Affinity: &corev1.Affinity{
-						NodeAffinity: &corev1.NodeAffinity{
-							RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
-								NodeSelectorTerms: []corev1.NodeSelectorTerm{
-									{
-										MatchExpressions: []corev1.NodeSelectorRequirement{
-											{
-												Key:      "kubernetes.io/os",
-												Operator: corev1.NodeSelectorOpIn,
-												Values:   []string{"linux"},
-											},
-										},
-									},
-								},
-							},
-						},
+			pod: NewPod().WithName("test-pod").WithNodeSelectorTermsMatchExpressions(
+				[]corev1.NodeSelectorRequirement{
+					{
+						Key:      "kubernetes.io/os",
+						Operator: corev1.NodeSelectorOpIn,
+						Values:   []string{"linux"},
 					},
 				},
-			},
+			).Build(),
 			architectures:          []string{"ppc64le"},
 			expectedTermCount:      1,
 			expectedArchInEachTerm: []string{"ppc64le"},
@@ -229,38 +182,20 @@ func TestApplyArchitectureNodeAffinityInPlaceUpdate(t *testing.T) {
 // TestApplyArchitectureConstraintsPreservesTermStructure verifies that the complete
 // applyArchitectureConstraints function preserves the NodeSelectorTerms structure
 func TestApplyArchitectureConstraintsPreservesTermStructure(t *testing.T) {
-	pod := &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: "test-pod",
-		},
-		Spec: corev1.PodSpec{
-			NodeSelector: map[string]string{
-				utils.ArchLabel: "amd64",
+	pod := NewPod().WithName("test-pod").WithNodeSelectors(utils.ArchLabel, "amd64").WithNodeSelectorTermsMatchExpressions(
+		[]corev1.NodeSelectorRequirement{
+			{
+				Key:      "kubernetes.io/os",
+				Operator: corev1.NodeSelectorOpIn,
+				Values:   []string{"linux"},
 			},
-			Affinity: &corev1.Affinity{
-				NodeAffinity: &corev1.NodeAffinity{
-					RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
-						NodeSelectorTerms: []corev1.NodeSelectorTerm{
-							{
-								MatchExpressions: []corev1.NodeSelectorRequirement{
-									{
-										Key:      "kubernetes.io/os",
-										Operator: corev1.NodeSelectorOpIn,
-										Values:   []string{"linux"},
-									},
-									{
-										Key:      utils.ArchLabel,
-										Operator: corev1.NodeSelectorOpIn,
-										Values:   []string{"amd64", "ppc64le", "s390x"},
-									},
-								},
-							},
-						},
-					},
-				},
+			{
+				Key:      utils.ArchLabel,
+				Operator: corev1.NodeSelectorOpIn,
+				Values:   []string{"amd64", "ppc64le", "s390x"},
 			},
 		},
-	}
+	).Build()
 
 	originalTermCount := len(pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms)
 
