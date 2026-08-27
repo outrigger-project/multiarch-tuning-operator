@@ -1358,6 +1358,48 @@ var _ = Describe("CEL Evaluator", func() {
 	})
 
 	Context("Performance", func() {
+		It("should handle concurrent cache access at capacity without errors", func() {
+			evaluator, err := newCELEvaluator()
+			Expect(err).NotTo(HaveOccurred())
+
+			var wg sync.WaitGroup
+			const goroutines = 50
+			wg.Add(goroutines)
+			for i := 0; i < goroutines; i++ {
+				go func(idx int) {
+					defer wg.Done()
+					defer GinkgoRecover()
+					expr := fmt.Sprintf("self.metadata.name == 'stress-test-%d'", idx)
+					prog, compileErr := evaluator.compile(expr)
+					Expect(compileErr).NotTo(HaveOccurred())
+					Expect(prog).NotTo(BeNil())
+				}(i)
+			}
+			wg.Wait()
+		})
+
+		It("should validate 500 CEL rules within acceptable latency", func() {
+			plugin := &plugins.CelArchitecturePlacement{
+				BasePlugin:            plugins.BasePlugin{Enabled: true},
+				FallbackArchitectures: []string{utils.ArchitectureAmd64},
+			}
+			for i := 0; i < 500; i++ {
+				plugin.Rules = append(plugin.Rules, NewRule(
+					fmt.Sprintf("rule-%d", i),
+					fmt.Sprintf("self.metadata.name == 'target-%d'", i),
+					utils.ArchitecturePpc64le,
+				))
+			}
+
+			start := time.Now()
+			err := plugin.ValidateCELExpressions()
+			elapsed := time.Since(start)
+
+			Expect(err).NotTo(HaveOccurred())
+			Expect(elapsed).To(BeNumerically("<", 5*time.Second),
+				"500 rules should validate in under 5 seconds, took %v", elapsed)
+		})
+
 		It("should evaluate 1000 rules within acceptable latency", func() {
 			rules := make([]plugins.ArchitectureRule, 1000)
 			for i := 0; i < 1000; i++ {
@@ -1496,6 +1538,39 @@ var _ = Describe("CEL Evaluator", func() {
 			archs := extractArchitectures(wrappedPod.PodObject())
 			Expect(archs).To(ConsistOf(utils.ArchitectureArm64),
 				"should use arm64 fallback from the second PPC after first PPC is fully malformed")
+		})
+	})
+
+	Context("Nil vs Empty Slice Edge Cases", func() {
+		It("should return fallback when rules is nil but fallbackArchitectures is non-nil", func() {
+			fallback := []string{utils.ArchitectureAmd64}
+			result, err := evaluateCELArchitecturePlacement(nil, fallback,
+				NewPod().WithName("nil-rules-pod").WithNamespace("default").Build())
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result.matched).To(BeFalse())
+			Expect(result.architectures).To(ConsistOf(utils.ArchitectureAmd64))
+		})
+	})
+
+	Context("Priority Boundary", func() {
+		It("should evaluate PPC with priority 0 (minimum boundary)", func() {
+			ctx := context.Background()
+			recorder := record.NewFakeRecorder(8)
+
+			pod := NewPod().WithName("priority-zero-pod").WithNamespace("default").Build()
+			ppcs := []v1beta1.PodPlacementConfig{
+				*NewPodPlacementConfig().WithName("ppc-zero").WithNamespace("default").WithPriority(0).
+					WithCelArchitecturePlacement(true, []string{utils.ArchitectureAmd64},
+						[]plugins.ArchitectureRule{NewRule("match", "true", utils.ArchitecturePpc64le)}).Build(),
+			}
+
+			wh := &PodSchedulingGateMutatingWebHook{}
+			wrappedPod := newPod(pod, ctx, recorder)
+			wh.applyCELInWebhook(ctx, wrappedPod, ppcs)
+
+			archs := extractArchitectures(wrappedPod.PodObject())
+			Expect(archs).To(ConsistOf(utils.ArchitecturePpc64le),
+				"PPC with priority 0 should still be evaluated and applied")
 		})
 	})
 

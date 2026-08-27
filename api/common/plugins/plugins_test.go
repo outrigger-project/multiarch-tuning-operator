@@ -210,6 +210,17 @@ func TestLocalPluginChecks_CelArchitecturePlacement(t *testing.T) {
 	}
 }
 
+func TestValidateArchitectures_EmptyStringRejected(t *testing.T) {
+	plugin := &CelArchitecturePlacement{
+		BasePlugin:            BasePlugin{Enabled: true},
+		FallbackArchitectures: []string{""},
+	}
+	err := plugin.ValidateArchitectures()
+	if err == nil {
+		t.Error("expected error for empty string architecture, got nil")
+	}
+}
+
 func TestCelArchitecturePlacement_ValidateCELExpressions(t *testing.T) {
 	tests := []struct {
 		name             string

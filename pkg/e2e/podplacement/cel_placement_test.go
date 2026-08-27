@@ -24,10 +24,8 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
 
 	"github.com/openshift/multiarch-tuning-operator/api/common/plugins"
-	"github.com/openshift/multiarch-tuning-operator/api/v1beta1"
 	"github.com/openshift/multiarch-tuning-operator/pkg/e2e"
 	. "github.com/openshift/multiarch-tuning-operator/pkg/testing/builder"
 	"github.com/openshift/multiarch-tuning-operator/pkg/testing/framework"
@@ -382,9 +380,10 @@ var _ = Describe("CEL Architecture Placement E2E", func() {
 			Eventually(framework.VerifyPodNodeAffinity(ctx, client, ns, "app", "cel-coexist-test",
 				*expectedNSTs), e2e.WaitShort).Should(Succeed())
 
-			By("Verifying the preferred affinity (from NodeAffinityScoring) was applied")
+			By("Verifying the preferred affinity (from PPC + CPPC NodeAffinityScoring) was applied")
 			expectedPreferred := NewPreferredSchedulingTerms().
-				WithArchitectureWeight(utils.ArchitecturePpc64le, 50).Build()
+				WithArchitectureWeight(utils.ArchitecturePpc64le, 50).
+				WithArchitectureWeight(utils.ArchitectureAmd64, 50).Build()
 			Eventually(framework.VerifyPodPreferredNodeAffinity(ctx, client, ns, "app", "cel-coexist-test",
 				expectedPreferred), e2e.WaitShort).Should(Succeed())
 		})
@@ -489,49 +488,22 @@ var _ = Describe("CEL Architecture Placement E2E", func() {
 		})
 	})
 
-	Context("When the CPPC namespaceSelector excludes the namespace", func() {
-		It("should not gate pods even when a PPC with CEL exists in that namespace", func() {
-			By("Updating the CPPC to exclude namespaces with the exclusion label")
-			cppc := &v1beta1.ClusterPodPlacementConfig{}
-			err := client.Get(ctx, types.NamespacedName{Name: "cluster"}, cppc)
-			Expect(err).NotTo(HaveOccurred())
-			originalSpec := cppc.Spec.DeepCopy()
-
-			cppc.Spec.NamespaceSelector = &metav1.LabelSelector{
-				MatchExpressions: []metav1.LabelSelectorRequirement{
-					{
-						Key:      "multiarch.openshift.io/exclude-pod-placement",
-						Operator: metav1.LabelSelectorOpDoesNotExist,
-					},
-				},
-			}
-			err = client.Update(ctx, cppc)
-			Expect(err).NotTo(HaveOccurred())
-			defer func() {
-				By("Restoring the original CPPC")
-				cppcRestore := &v1beta1.ClusterPodPlacementConfig{}
-				err := client.Get(ctx, types.NamespacedName{Name: "cluster"}, cppcRestore)
-				Expect(err).NotTo(HaveOccurred())
-				cppcRestore.Spec = *originalSpec
-				err = client.Update(ctx, cppcRestore)
-				Expect(err).NotTo(HaveOccurred())
-				Eventually(framework.ValidateCreation(client, ctx)).Should(Succeed())
-			}()
-			Eventually(framework.ValidateCreation(client, ctx)).Should(Succeed())
-
-			By("Creating an ephemeral namespace with the exclusion label")
+	Context("When PPC LabelSelector does not match the pod", func() {
+		It("should fall through to image-based detection instead of CEL", func() {
+			By("Creating an ephemeral namespace")
 			ns := framework.NewEphemeralNamespace()
-			ns.Labels = map[string]string{"multiarch.openshift.io/exclude-pod-placement": "true"}
-			err = client.Create(ctx, ns)
+			err := client.Create(ctx, ns)
 			Expect(err).NotTo(HaveOccurred())
-			//nolint:errcheck
-			defer client.Delete(ctx, ns)
+			defer client.Delete(ctx, ns) //nolint:errcheck
 
-			By("Creating a PPC with CEL in the excluded namespace")
+			By("Creating a PPC targeting pods with label team=backend")
 			ppc := NewPodPlacementConfig().
-				WithGenerateName("cel-e2e-excluded-").
+				WithGenerateName("cel-e2e-labelmiss-").
 				WithNamespace(ns.Name).
 				WithPriority(100).
+				WithLabelSelector(&metav1.LabelSelector{
+					MatchLabels: map[string]string{"team": "backend"},
+				}).
 				WithCelArchitecturePlacement(true,
 					[]string{utils.ArchitecturePpc64le},
 					[]plugins.ArchitectureRule{
@@ -540,26 +512,122 @@ var _ = Describe("CEL Architecture Placement E2E", func() {
 				Build()
 			err = client.Create(ctx, ppc)
 			Expect(err).NotTo(HaveOccurred())
-			//nolint:errcheck
-			defer client.Delete(ctx, ppc)
+			defer client.Delete(ctx, ppc) //nolint:errcheck
 
-			By("Creating a deployment")
-			podLabel := map[string]string{"app": "cel-excluded-test"}
+			By("Creating a deployment with a non-matching label app=cel-label-test")
+			podLabel := map[string]string{"app": "cel-label-test"}
 			ps := NewPodSpec().WithContainersImages(helloOpenshiftPublicMultiarchImage).Build()
 			d := NewDeployment().
 				WithSelectorAndPodLabels(podLabel).
 				WithPodSpec(ps).
 				WithReplicas(utils.NewPtr(int32(1))).
-				WithName("cel-excluded-test").
+				WithName("cel-labelmiss-test").
 				WithNamespace(ns.Name).
 				Build()
 			err = client.Create(ctx, d)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Verifying the scheduling gate label was NOT set (pod was not processed by webhook)")
-			schedulingGateNotSetLabel := map[string]string{utils.SchedulingGateLabel: utils.LabelValueNotSet}
-			Eventually(framework.VerifyPodLabels(ctx, client, ns, "app", "cel-excluded-test",
-				e2e.Absent, schedulingGateNotSetLabel), e2e.WaitShort).Should(Succeed())
+			By("Verifying the scheduling gate was applied and removed")
+			Eventually(framework.VerifyPodLabels(ctx, client, ns, "app", "cel-label-test",
+				e2e.Present, schedulingGateLabel), e2e.WaitShort).Should(Succeed())
+
+			By("Verifying image-based detection was used (all architectures from multiarch image), NOT ppc64le from CEL")
+			archLabelNSR := NewNodeSelectorRequirement().
+				WithKeyAndValues(utils.ArchLabel, corev1.NodeSelectorOpIn,
+					utils.ArchitectureAmd64, utils.ArchitectureArm64,
+					utils.ArchitectureS390x, utils.ArchitecturePpc64le).
+				Build()
+			expectedNSTs := NewNodeSelectorTerm().WithMatchExpressions(archLabelNSR).Build()
+			Eventually(framework.VerifyPodNodeAffinity(ctx, client, ns, "app", "cel-label-test",
+				*expectedNSTs), e2e.WaitShort).Should(Succeed())
+		})
+	})
+
+	Context("When PPCs exist in different namespaces", func() {
+		It("should apply each namespace's PPC independently", func() {
+			By("Creating the first ephemeral namespace")
+			ns1 := framework.NewEphemeralNamespace()
+			err := client.Create(ctx, ns1)
+			Expect(err).NotTo(HaveOccurred())
+			defer client.Delete(ctx, ns1) //nolint:errcheck
+
+			By("Creating the second ephemeral namespace")
+			ns2 := framework.NewEphemeralNamespace()
+			err = client.Create(ctx, ns2)
+			Expect(err).NotTo(HaveOccurred())
+			defer client.Delete(ctx, ns2) //nolint:errcheck
+
+			By("Creating a PPC in ns1 forcing ppc64le")
+			ppc1 := NewPodPlacementConfig().
+				WithGenerateName("cel-e2e-ns1-").
+				WithNamespace(ns1.Name).
+				WithPriority(100).
+				WithCelArchitecturePlacement(true,
+					[]string{utils.ArchitecturePpc64le},
+					[]plugins.ArchitectureRule{
+						NewRule("match-all", "true", utils.ArchitecturePpc64le),
+					}).
+				Build()
+			err = client.Create(ctx, ppc1)
+			Expect(err).NotTo(HaveOccurred())
+			defer client.Delete(ctx, ppc1) //nolint:errcheck
+
+			By("Creating a PPC in ns2 forcing arm64")
+			ppc2 := NewPodPlacementConfig().
+				WithGenerateName("cel-e2e-ns2-").
+				WithNamespace(ns2.Name).
+				WithPriority(100).
+				WithCelArchitecturePlacement(true,
+					[]string{utils.ArchitectureArm64},
+					[]plugins.ArchitectureRule{
+						NewRule("match-all", "true", utils.ArchitectureArm64),
+					}).
+				Build()
+			err = client.Create(ctx, ppc2)
+			Expect(err).NotTo(HaveOccurred())
+			defer client.Delete(ctx, ppc2) //nolint:errcheck
+
+			By("Creating deployments in both namespaces")
+			podLabel := map[string]string{"app": "cel-ns-test"}
+			ps := NewPodSpec().WithContainersImages(helloOpenshiftPublicMultiarchImage).Build()
+
+			d1 := NewDeployment().
+				WithSelectorAndPodLabels(podLabel).
+				WithPodSpec(ps).
+				WithReplicas(utils.NewPtr(int32(1))).
+				WithName("cel-ns1-test").
+				WithNamespace(ns1.Name).
+				Build()
+			err = client.Create(ctx, d1)
+			Expect(err).NotTo(HaveOccurred())
+
+			d2 := NewDeployment().
+				WithSelectorAndPodLabels(podLabel).
+				WithPodSpec(ps).
+				WithReplicas(utils.NewPtr(int32(1))).
+				WithName("cel-ns2-test").
+				WithNamespace(ns2.Name).
+				Build()
+			err = client.Create(ctx, d2)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("Verifying ns1 pod gets ppc64le from its PPC")
+			Eventually(framework.VerifyPodLabels(ctx, client, ns1, "app", "cel-ns-test",
+				e2e.Present, schedulingGateLabel), e2e.WaitShort).Should(Succeed())
+			archNSR1 := NewNodeSelectorRequirement().
+				WithKeyAndValues(utils.ArchLabel, corev1.NodeSelectorOpIn, utils.ArchitecturePpc64le).Build()
+			expectedNSTs1 := NewNodeSelectorTerm().WithMatchExpressions(archNSR1).Build()
+			Eventually(framework.VerifyPodNodeAffinity(ctx, client, ns1, "app", "cel-ns-test",
+				*expectedNSTs1), e2e.WaitShort).Should(Succeed())
+
+			By("Verifying ns2 pod gets arm64 from its PPC")
+			Eventually(framework.VerifyPodLabels(ctx, client, ns2, "app", "cel-ns-test",
+				e2e.Present, schedulingGateLabel), e2e.WaitShort).Should(Succeed())
+			archNSR2 := NewNodeSelectorRequirement().
+				WithKeyAndValues(utils.ArchLabel, corev1.NodeSelectorOpIn, utils.ArchitectureArm64).Build()
+			expectedNSTs2 := NewNodeSelectorTerm().WithMatchExpressions(archNSR2).Build()
+			Eventually(framework.VerifyPodNodeAffinity(ctx, client, ns2, "app", "cel-ns-test",
+				*expectedNSTs2), e2e.WaitShort).Should(Succeed())
 		})
 	})
 })
