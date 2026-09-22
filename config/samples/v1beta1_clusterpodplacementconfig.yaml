@@ -8,3 +8,14 @@ spec:
     matchExpressions:
     - key: multiarch.openshift.io/exclude-pod-placement
       operator: DoesNotExist
+  fallbackArchitecture: amd64
+  plugins:
+    execFormatErrorMonitor:
+      enabled: true
+    nodeAffinityScoring:
+      platforms:
+        - architecture: arm64
+          weight: 30
+        - architecture: amd64
+          weight: 50
+      enabled: true
