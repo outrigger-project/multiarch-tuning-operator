@@ -1,0 +1,27 @@
+apiVersion: multiarch.openshift.io/v1beta1
+kind: PodPlacementConfig
+metadata:
+  name: example
+  namespace: default
+spec:
+  priority: 0
+  plugins:
+    nodeAffinityScoring:
+      platforms:
+        - architecture: arm64
+          weight: 30
+      enabled: true
+    celArchitecturePlacement:
+      enabled: true
+      fallbackArchitectures:
+        - amd64
+      rules:
+        - name: arm64-for-ml-workloads
+          expression: "self.metadata.labels['workload-type'] == 'ml'"
+          architectures:
+            - arm64
+        - name: multiarch-for-web-tier
+          expression: "self.metadata.labels['tier'] == 'web'"
+          architectures:
+            - amd64
+            - arm64

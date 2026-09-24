@@ -1,0 +1,6 @@
+apiVersion: multiarch.openshift.io/v1alpha1
+kind: ClusterPodPlacementConfig
+metadata:
+  name: cluster
+spec:
+  logVerbosity: Normal

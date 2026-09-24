@@ -5,12 +5,23 @@ metadata:
     alm-examples: |-
       [
         {
+          "apiVersion": "multiarch.openshift.io/v1alpha1",
+          "kind": "ClusterPodPlacementConfig",
+          "metadata": {
+            "name": "cluster"
+          },
+          "spec": {
+            "logVerbosity": "Normal"
+          }
+        },
+        {
           "apiVersion": "multiarch.openshift.io/v1beta1",
           "kind": "ClusterPodPlacementConfig",
           "metadata": {
             "name": "cluster"
           },
           "spec": {
+            "fallbackArchitecture": "amd64",
             "logVerbosity": "Normal",
             "namespaceSelector": {
               "matchExpressions": [
@@ -19,7 +30,70 @@ metadata:
                   "operator": "DoesNotExist"
                 }
               ]
+            },
+            "plugins": {
+              "execFormatErrorMonitor": {
+                "enabled": true
+              },
+              "nodeAffinityScoring": {
+                "enabled": true,
+                "platforms": [
+                  {
+                    "architecture": "arm64",
+                    "weight": 30
+                  },
+                  {
+                    "architecture": "amd64",
+                    "weight": 50
+                  }
+                ]
+              }
             }
+          }
+        },
+        {
+          "apiVersion": "multiarch.openshift.io/v1beta1",
+          "kind": "PodPlacementConfig",
+          "metadata": {
+            "name": "example",
+            "namespace": "default"
+          },
+          "spec": {
+            "plugins": {
+              "celArchitecturePlacement": {
+                "enabled": true,
+                "fallbackArchitectures": [
+                  "amd64"
+                ],
+                "rules": [
+                  {
+                    "architectures": [
+                      "arm64"
+                    ],
+                    "expression": "self.metadata.labels['workload-type'] == 'ml'",
+                    "name": "arm64-for-ml-workloads"
+                  },
+                  {
+                    "architectures": [
+                      "amd64",
+                      "arm64"
+                    ],
+                    "expression": "self.metadata.labels['tier'] == 'web'",
+                    "name": "multiarch-for-web-tier"
+                  }
+                ]
+              },
+              "nodeAffinityScoring": {
+                "enabled": true,
+                "platforms": [
+                  {
+                    "architecture": "arm64",
+                    "weight": 30
+                  }
+                ]
+              }
+            },
+            "priority": 0
           }
         }
       ]
@@ -27,7 +101,7 @@ metadata:
     categories: OpenShift Optional, Other
     console.openshift.io/disable-operand-delete: "false"
     containerImage: registry.ci.openshift.org/origin/multiarch-tuning-operator:main
-    createdAt: "2026-08-20T14:03:51Z"
+    createdAt: "2026-09-24T00:45:04Z"
     features.operators.openshift.io/cnf: "false"
     features.operators.openshift.io/cni: "false"
     features.operators.openshift.io/csi: "false"
