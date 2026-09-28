@@ -346,6 +346,7 @@ func (r *PodReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		" concurrent reconciles", "maxConcurrentReconciles", maxConcurrentReconciles)
 
 	return ctrl.NewControllerManagedBy(mgr).
+		Named("pod").
 		For(&corev1.Pod{}).
 		// Watch PodPlacementConfig to re-queue gated pods when a PPC is created, updated, or deleted.
 		// Without this, there is a race between a PPC appearing in the API server and the informer

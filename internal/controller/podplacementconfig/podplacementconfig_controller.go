@@ -57,6 +57,7 @@ func (r *PodPlacementConfigReconciler) Reconcile(ctx context.Context, req ctrl.R
 // SetupWithManager sets up the controller with the Manager.
 func (r *PodPlacementConfigReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
+		Named(multiarchv1beta1.PodPlacementConfigResource).
 		For(&multiarchv1beta1.PodPlacementConfig{}).
 		Complete(r)
 }

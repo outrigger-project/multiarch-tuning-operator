@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -151,6 +152,7 @@ func startTestEnv() {
 	testEnv = &envtest.Environment{
 		CRDDirectoryPaths:     []string{filepath.Join("..", "..", "..", "..", "config", "crd", "bases")},
 		ErrorIfCRDPathMissing: true,
+		BinaryAssetsDirectory: getFirstFoundEnvTestBinaryDir(),
 	}
 	var err error
 	// cfg is defined in this file globally.
@@ -259,4 +261,21 @@ func runManager() {
 	}).MustPassRepeatedly(3).Should(
 		Succeed(), "manager is not ready yet")
 	suiteLog.Info("Manager is ready")
+}
+
+// getFirstFoundEnvTestBinaryDir returns the first envtest asset directory under bin/k8s.
+// An empty result leaves discovery to KUBEBUILDER_ASSETS, which make unit sets.
+// This suite lives one directory deeper than the other controller suites.
+func getFirstFoundEnvTestBinaryDir() string {
+	basePath := filepath.Join("..", "..", "..", "..", "bin", "k8s")
+	entries, err := os.ReadDir(basePath)
+	if err != nil {
+		return ""
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			return filepath.Join(basePath, entry.Name())
+		}
+	}
+	return ""
 }

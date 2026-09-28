@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -145,6 +146,7 @@ func startTestEnv() {
 	testEnv = &envtest.Environment{
 		CRDDirectoryPaths:     []string{filepath.Join("..", "..", "..", "config", "crd", "bases")},
 		ErrorIfCRDPathMissing: true,
+		BinaryAssetsDirectory: getFirstFoundEnvTestBinaryDir(),
 		WebhookInstallOptions: envtest.WebhookInstallOptions{
 			ValidatingWebhooks: []*v1.ValidatingWebhookConfiguration{getValidatingWebHook()},
 		},
@@ -338,4 +340,20 @@ func getValidatingWebHook() *v1.ValidatingWebhookConfiguration {
 			},
 		},
 	}
+}
+
+// getFirstFoundEnvTestBinaryDir returns the first envtest asset directory under bin/k8s.
+// An empty result leaves discovery to KUBEBUILDER_ASSETS, which make unit sets.
+func getFirstFoundEnvTestBinaryDir() string {
+	basePath := filepath.Join("..", "..", "..", "bin", "k8s")
+	entries, err := os.ReadDir(basePath)
+	if err != nil {
+		return ""
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			return filepath.Join(basePath, entry.Name())
+		}
+	}
+	return ""
 }

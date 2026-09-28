@@ -47,7 +47,7 @@ The development tooling of this repository depends on the following tools/techno
 - Golang
 - Docker (Community Edition)
 - Development headers and libraries for gpgme (`gpgme-devel` in Fedora/CS9/RHEL, `libgpgme-dev` in Debian)
-- `operator-sdk`
+- `operator-sdk` (v1.42.3; `make bundle` installs this version into `bin/`)
 - `make`
 - `qemu-user-static` (to support building multi-arch container images via `docker buildx`)
 

@@ -241,6 +241,7 @@ func startTestEnv() {
 	testEnv = &envtest.Environment{
 		CRDDirectoryPaths:     []string{filepath.Join("..", "..", "..", "config", "crd", "bases")},
 		ErrorIfCRDPathMissing: true,
+		BinaryAssetsDirectory: getFirstFoundEnvTestBinaryDir(),
 		WebhookInstallOptions: envtest.WebhookInstallOptions{
 			MutatingWebhooks: []*v1.MutatingWebhookConfiguration{getMutatingWebHook()},
 		},
@@ -459,4 +460,20 @@ func createFile(path string, data []byte) {
 	}()
 	_, err = f.Write(data)
 	Expect(err).NotTo(HaveOccurred())
+}
+
+// getFirstFoundEnvTestBinaryDir returns the first envtest asset directory under bin/k8s.
+// An empty result leaves discovery to KUBEBUILDER_ASSETS, which make unit sets.
+func getFirstFoundEnvTestBinaryDir() string {
+	basePath := filepath.Join("..", "..", "..", "bin", "k8s")
+	entries, err := os.ReadDir(basePath)
+	if err != nil {
+		return ""
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			return filepath.Join(basePath, entry.Name())
+		}
+	}
+	return ""
 }

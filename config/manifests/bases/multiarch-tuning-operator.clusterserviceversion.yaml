@@ -44,15 +44,17 @@ spec:
       kind: PodPlacementConfig
       name: podplacementconfigs.multiarch.openshift.io
       version: v1beta1
-    - description: ClusterPodPlacementConfig defines the configuration for the architecture
-        aware pod placement operand. Users can only deploy a single object named "cluster".
+    - description: |-
+        ClusterPodPlacementConfig defines the configuration for the architecture aware pod placement operand.
+        Users can only deploy a single object named "cluster".
         Creating the object enables the operand.
       displayName: Cluster Pod Placement Config
       kind: ClusterPodPlacementConfig
       name: clusterpodplacementconfigs.multiarch.openshift.io
       version: v1beta1
-    - description: ClusterPodPlacementConfig defines the configuration for the architecture
-        aware pod placement operand. Users can only deploy a single object named "cluster".
+    - description: |-
+        ClusterPodPlacementConfig defines the configuration for the architecture aware pod placement operand.
+        Users can only deploy a single object named "cluster".
         Creating the object enables the operand.
       displayName: Cluster Pod Placement Config
       kind: ClusterPodPlacementConfig

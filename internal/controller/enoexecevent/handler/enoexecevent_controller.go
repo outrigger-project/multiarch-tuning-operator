@@ -184,6 +184,7 @@ func (r *Reconciler) SetupWithManager(mgr ctrl.Manager) error {
 		" concurrent reconciles", "maxConcurrentReconciles", maxConcurrentReconciles)
 
 	return ctrl.NewControllerManagedBy(mgr).
+		Named(multiarchv1beta1.ENoExecEventResource).
 		For(&multiarchv1beta1.ENoExecEvent{}).
 		WithOptions(ctrl2.Options{
 			MaxConcurrentReconciles: maxConcurrentReconciles,

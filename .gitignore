@@ -16,6 +16,7 @@ _output/
 # Test binary, built with `go test -c`
 bin
 testbin/*
+/dist/
 Dockerfile.cross
 
 # Test binary, build with `go test -c`

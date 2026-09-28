@@ -69,19 +69,27 @@ endif
 IMG ?= registry.ci.openshift.org/origin/multiarch-tuning-operator:main
 
 #### Tool Versions ####
-### TODO: NOTE: Update these values to match the versions of the K8S API when pivoting to a new version of K8S.
+### Kustomize, controller-gen, operator-sdk, opm, and golangci-lint are pinned below.
+### Envtest follows the controller-runtime and k8s.io/api versions in go.mod.
 # https://github.com/kubernetes-sigs/kustomize/releases
 KUSTOMIZE_VERSION ?= v5.8.1
 # https://github.com/kubernetes-sigs/controller-tools/releases
 CONTROLLER_TOOLS_VERSION ?= v0.21.0
-# https://github.com/kubernetes-sigs/controller-runtime/branches
-SETUP_ENVTEST_VERSION ?= release-0.24
-# ENVTEST_K8S_VERSION refers to the version of kubebuilder assets to be downloaded by envtest binary.
-ENVTEST_K8S_VERSION = 1.36.0
+# https://github.com/operator-framework/operator-sdk/releases
+# v1.42.3 is the CLI used by `make bundle`. There is no Go module bump; runtime
+# versions stay on the newer Go/Kubernetes modules already in go.mod.
+OPERATOR_SDK_VERSION ?= v1.42.3
+# https://github.com/operator-framework/operator-registry/releases
+# operator-sdk v1.40.0 upgrade guide pins opm to v1.55.0.
+OPM_VERSION ?= v1.55.0
+# operator-sdk v1.40.0 derives envtest from go.mod instead of a manual pin.
+# controller-runtime v0.23.x -> release-0.23; k8s.io/api v0.35.x -> 1.35.
+ENVTEST_VERSION := $(shell go list -m -f "{{ .Version }}" sigs.k8s.io/controller-runtime | awk -F'[v.]' '{printf "release-%d.%d", $$2, $$3}')
+ENVTEST_K8S_VERSION := $(shell go list -m -f "{{ .Version }}" k8s.io/api | awk -F'[v.]' '{printf "1.%d", $$3}')
 # https://github.com/golangci/golangci-lint/releases
 GOLINT_VERSION = v2.12.2
 
-BUILD_IMAGE ?= registry.access.redhat.com/ubi9/go-toolset:1.26.7
+BUILD_IMAGE ?= registry.access.redhat.com/ubi9/go-toolset:1.26
 RUNTIME_IMAGE ?= registry.access.redhat.com/ubi9/ubi-minimal:latest
 
 NO_DOCKER ?= 0
@@ -173,6 +181,10 @@ vet: ## Run go vet against code.
 lint:
 	GOLINT_VERSION=$(GOLINT_VERSION) $(DOCKER_CMD) hack/golangci-lint.sh
 
+.PHONY: lint-config
+lint-config: ## Verify golangci-lint linter configuration (operator-sdk v1.40.0).
+	GOLINT_VERSION=$(GOLINT_VERSION) $(DOCKER_CMD) bash -c 'GOFLAGS="" go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$${GOLINT_VERSION} && golangci-lint config verify'
+
 .PHONY: goimports
 goimports: ## Goimports against code
 	$(DOCKER_CMD) hack/goimports.sh .
@@ -213,6 +225,13 @@ docker-build: manifests generate ## Build docker image with the manager.
 .PHONY: docker-push
 docker-push: ## Push docker image with the manager.
 	$(ENGINE) push ${IMG}
+
+.PHONY: build-installer
+build-installer: manifests generate kustomize ## Generate a consolidated YAML with CRDs and deployment.
+	mkdir -p dist
+	cd config/manager && $(KUSTOMIZE) edit set image controller=${IMG}
+	cd config/manager && $(KUSTOMIZE) edit set annotation multiarch.openshift.io/image:$(IMG)
+	$(KUSTOMIZE) build config/default > dist/install.yaml
 
 # PLATFORMS defines the target platforms for  the manager image be build to provide support to multiple
 # architectures. (i.e. make docker-buildx IMG=myregistry/mypoperator:0.0.1). To use this option you need to:
@@ -268,6 +287,7 @@ $(LOCALBIN):
 KUSTOMIZE ?= $(LOCALBIN)/kustomize
 CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen
 ENVTEST ?= $(LOCALBIN)/setup-envtest
+OPERATOR_SDK ?= $(LOCALBIN)/operator-sdk
 
 KUSTOMIZE_INSTALL_SCRIPT ?= "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh"
 .PHONY: kustomize
@@ -288,15 +308,33 @@ $(CONTROLLER_GEN): $(LOCALBIN)
 .PHONY: envtest
 envtest: $(ENVTEST) ## Download envtest-setup locally if necessary.
 $(ENVTEST): $(LOCALBIN)
-	test -s $(LOCALBIN)/setup-envtest || GOBIN=$(LOCALBIN) GOFLAGS='' go install sigs.k8s.io/controller-runtime/tools/setup-envtest@$(SETUP_ENVTEST_VERSION)
+	test -s $(LOCALBIN)/setup-envtest || GOBIN=$(LOCALBIN) GOFLAGS='' go install sigs.k8s.io/controller-runtime/tools/setup-envtest@$(ENVTEST_VERSION)
+
+.PHONY: setup-envtest
+setup-envtest: envtest ## Download envtest binaries for the Kubernetes version in go.mod.
+	@$(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path || { \
+		echo "Error setting up envtest"; exit 1; }
+
+.PHONY: operator-sdk
+operator-sdk: $(OPERATOR_SDK) ## Download operator-sdk locally if necessary. If wrong version is installed, it will be overwritten.
+$(OPERATOR_SDK): $(LOCALBIN)
+	@if test -x $(OPERATOR_SDK) && ! $(OPERATOR_SDK) version 2>/dev/null | grep -q $(OPERATOR_SDK_VERSION); then \
+		echo "$(OPERATOR_SDK) version is not expected $(OPERATOR_SDK_VERSION). Removing it before installing."; \
+		rm -f $(OPERATOR_SDK); \
+	fi
+	test -s $(OPERATOR_SDK) || { \
+		OS=$$(go env GOOS) && ARCH=$$(go env GOARCH); \
+		curl -fsSLo $(OPERATOR_SDK) https://github.com/operator-framework/operator-sdk/releases/download/$(OPERATOR_SDK_VERSION)/operator-sdk_$${OS}_$${ARCH}; \
+		chmod +x $(OPERATOR_SDK); \
+	}
 
 .PHONY: bundle
-bundle: manifests kustomize ## Generate bundle manifests and metadata, then validate generated files.
-	operator-sdk generate kustomize manifests -q
+bundle: manifests kustomize operator-sdk ## Generate bundle manifests and metadata, then validate generated files.
+	$(OPERATOR_SDK) generate kustomize manifests -q
 	cd config/manager && $(KUSTOMIZE) edit set image controller=$(IMG)
 	cd config/manager && $(KUSTOMIZE) edit set annotation multiarch.openshift.io/image:$(IMG)
-	$(KUSTOMIZE) build config/manifests | operator-sdk generate bundle $(BUNDLE_GEN_FLAGS)
-	operator-sdk bundle validate ./bundle
+	$(KUSTOMIZE) build config/manifests | $(OPERATOR_SDK) generate bundle $(BUNDLE_GEN_FLAGS)
+	$(OPERATOR_SDK) bundle validate ./bundle
 	VERSION=$(VERSION) hack/patch-bundle-dockerfile.sh
 
 .PHONY: bundle-verify
@@ -339,21 +377,18 @@ bundle-push: ## Push the bundle image.
 	$(MAKE) docker-push IMG=$(BUNDLE_IMG)
 
 .PHONY: opm
-OPM = ./bin/opm
-opm: ## Download opm locally if necessary.
-ifeq (,$(wildcard $(OPM)))
-ifeq (,$(shell which opm 2>/dev/null))
-	@{ \
-	set -e ;\
-	mkdir -p $(dir $(OPM)) ;\
-	OS=$(shell go env GOOS) && ARCH=$(shell go env GOARCH) && \
-	curl -sSLo $(OPM) https://github.com/operator-framework/operator-registry/releases/download/v1.23.0/$${OS}-$${ARCH}-opm ;\
-	chmod +x $(OPM) ;\
+OPM ?= $(LOCALBIN)/opm
+opm: $(OPM) ## Download opm locally if necessary. If wrong version is installed, it will be overwritten.
+$(OPM): $(LOCALBIN)
+	@if test -x $(OPM) && ! $(OPM) version 2>/dev/null | grep -q $$(echo $(OPM_VERSION) | sed 's/^v//'); then \
+		echo "$(OPM) version is not expected $(OPM_VERSION). Removing it before installing."; \
+		rm -f $(OPM); \
+	fi
+	@test -s $(OPM) || { \
+		OS=$$(go env GOOS) && ARCH=$$(go env GOARCH); \
+		curl -fsSLo $(OPM) https://github.com/operator-framework/operator-registry/releases/download/$(OPM_VERSION)/$${OS}-$${ARCH}-opm; \
+		chmod +x $(OPM); \
 	}
-else
-OPM = $(shell which opm)
-endif
-endif
 
 # A comma-separated list of bundle images (e.g. make catalog-build BUNDLE_IMGS=example.com/operator-bundle:v0.1.0,example.com/operator-bundle:v0.2.0).
 # These images MUST exist in a registry and be pull-able.
@@ -381,12 +416,12 @@ catalog-push: ## Push a catalog image.
 
 GO_JUNIT_REPORT_VERSION ?= v2.1.0
 
-unit: manifests generate envtest
+unit: manifests generate setup-envtest
 	mkdir -p ${ARTIFACT_DIR}
 	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" \
 		./hack/ci-test.sh
 
-e2e: manifests generate envtest
+e2e: manifests generate setup-envtest
 	mkdir -p ${ARTIFACT_DIR}
 	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" \
 	SKIP_COVERAGE="true" \

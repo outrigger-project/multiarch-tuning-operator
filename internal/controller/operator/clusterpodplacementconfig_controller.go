@@ -1174,6 +1174,7 @@ func cppcUpdatePredicate() predicate.Funcs {
 // SetupWithManager sets up the controller with the Manager.
 func (r *ClusterPodPlacementConfigReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	c := ctrl.NewControllerManagedBy(mgr).
+		Named(multiarchv1beta1.ClusterPodPlacementConfigResource).
 		For(&multiarchv1beta1.ClusterPodPlacementConfig{},
 			builder.WithPredicates(cppcUpdatePredicate()),
 		).

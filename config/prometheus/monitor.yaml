@@ -20,6 +20,7 @@ spec:
       scheme: https
       bearerTokenFile: /var/run/secrets/kubernetes.io/serviceaccount/token
       tlsConfig:
+        # insecureSkipVerify skips certificate verification for this scrape.
         insecureSkipVerify: true
   selector:
     matchLabels:
