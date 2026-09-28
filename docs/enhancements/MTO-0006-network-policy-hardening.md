@@ -32,9 +32,10 @@ workloads on supported OpenShift deployments, including HyperShift (HCP). The po
 at runtime by the operator itself, not shipped as static OLM bundle manifests, so they work across
 OCP 4.16-5.x without depending on OLM NetworkPolicy support.
 
-Each MTO-managed workload receives a label-scoped policy. For DNS, API, and metrics peers, MTO
-matches [cluster-storage-operator](https://github.com/openshift/cluster-storage-operator/tree/master/manifests).
-Webhook ingress and image-inspection egress have no CSO equivalent and are MTO-specific.
+Each MTO-managed workload receives a label-scoped policy that follows established OpenShift
+operator conventions for peer encoding: namespace-scoped DNS egress on TCP+UDP 5353,
+destination-less API egress on TCP 6443, namespace-scoped metrics ingress on TCP 8443, and
+MTO-specific rules for source-unrestricted webhook ingress and image-inspection egress.
 
 ## Motivation
 
@@ -59,21 +60,22 @@ and the older OLM constraint.
 
 - Protect every MTO-managed workload (manager, pod-placement controller, pod-placement webhook,
   ENoExec event handler, ENoExec daemon) with a label-scoped `NetworkPolicy`.
-- Match [cluster-storage-operator](https://github.com/openshift/cluster-storage-operator/tree/master/manifests)
-  peer encoding for DNS, API, and metrics; use MTO-specific rules only where CSO has no
-  equivalent:
-  - DNS egress: namespace selector `kubernetes.io/metadata.name=openshift-dns` **and** pod
-    selector `dns.operator.openshift.io/daemonset-dns=default`, TCP+UDP 5353
-    ([CSO allow-to-dns](https://github.com/openshift/cluster-storage-operator/blob/master/manifests/09_network-policy-cso-allow-to-dns.yaml))
-  - API egress: destination-less TCP 6443 (no `to`)
-    ([CSO allow-egress-to-api-server](https://github.com/openshift/cluster-storage-operator/blob/master/manifests/09_network-policy-cso-allow-egress-to-api-server.yaml))
-  - Metrics ingress: source-unrestricted TCP 8443 (no `from`), matching CSO's port-only metrics
-    rule. MTO exposes only 8443, so the CSO secondary port 8444 is omitted
-    ([CSO allow-ingress-to-operator-metrics](https://github.com/openshift/cluster-storage-operator/blob/master/manifests/09_network-policy-cso-allow-ingress-to-operator-metrics.yaml))
-  - Webhook ingress: source-unrestricted TCP 9443 (no `from`). MTO/HCP-specific; no CSO
-    equivalent. Matches the manager/webhook Service `targetPort`.
+- Follow established OpenShift operator conventions for peer encoding, with MTO-specific rules
+  where MTO's network requirements have no common-pattern equivalent:
+  - DNS egress: namespace selector `kubernetes.io/metadata.name=openshift-dns`, TCP+UDP 5353.
+    MTO uses namespace-only scoping (no pod selector) because the
+    `dns.operator.openshift.io/daemonset-dns=default` pod label is not guaranteed on every
+    supported OpenShift/HCP DNS topology.
+  - API egress: destination-less TCP 6443 (no `to`). The API server is host-networked; its
+    address varies by topology.
+  - Metrics ingress: TCP 8443 scoped to the `openshift-monitoring` namespace
+    (`kubernetes.io/metadata.name=openshift-monitoring`). Only Prometheus in
+    `openshift-monitoring` scrapes MTO metrics, so namespace-scoping is least-privilege.
+  - Webhook ingress: source-unrestricted TCP 9443 (no `from`). The API server may call the
+    webhook from outside the guest pod network on HCP topologies. Matches the manager/webhook
+    Service `targetPort`.
   - Registry / image-inspection egress: destination-unrestricted TCP, all ports. MTO-specific;
-    no CSO equivalent.
+    registries, CDN endpoints, mirrors, and proxies use arbitrary addresses.
 - Create all policies at runtime so the operator works on OCP 4.16+ without depending on OLM
   `NetworkPolicy` bundle support.
 - Provide self-healing for the manager policy (recreation on deletion) and lifecycle-bound operand
@@ -85,9 +87,12 @@ and the older OLM constraint.
 
 ### Non-Goals
 
-- No namespace-wide or default-deny policy. The policies are additive; administrators can layer
-  their own deny rules on top. `PolicyTypes: [Ingress, Egress]` already isolate unmatched traffic
-  on the selected pods, so a separate empty deny-all object is not required.
+- MTO does not create a namespace-wide or default-deny policy. The policies are additive;
+  administrators can layer their own deny rules on top. `PolicyTypes: [Ingress, Egress]` already
+  isolate unmatched traffic on the selected pods, so a separate empty deny-all object is not
+  required. However, a platform-level default-deny policy is expected once all operators comply
+  with HPSTRAT-104. MTO's policies must be complete and functional under a default-deny; this is
+  a hard testing requirement (see Test Plan).
 - This story does not add ClusterPodPlacementConfig fields for configuring NetworkPolicy peers, ports, CIDRs, registries, 
   or proxies, and does not add strict egress. It implements the specified OpenShift NetworkPolicies for
   MTO-managed workloads. If non-OCP support later requires a configurable
@@ -102,6 +107,14 @@ and the older OLM constraint.
   by NetworkPolicy.
 - No `policy-group.network.openshift.io/host-network` peer. Nothing in the current MTO workloads
   needs ingress from host-network pods besides kubelet probes, which already bypass NetworkPolicy.
+- MTO does not support installing into a namespace where a default-deny policy already selects the
+  operator pods. The manager policy is created at runtime by `ManagerNetworkPolicyReconciler`,
+  which requires API access to create the policy — a pre-existing default-deny would block that
+  API egress, creating a deadlock. The platform is expected to apply namespace-wide default-deny
+  only after all operators have created their own policies (per HPSTRAT-104 rollout ordering).
+  When MTO migrates the manager policy to a static OLM bundle manifest (see Future Migration
+  section), the bundle-delivered policy will exist before the manager pod starts, removing this
+  ordering constraint.
 
 ## Proposal
 
@@ -117,12 +130,11 @@ the existing `ClusterPodPlacementConfigReconciler`. The manager policy is applie
 - **Selector:** `multiarch.openshift.io/operand: pod-placement-controller`
 - **PolicyTypes:** Ingress, Egress
 - **Ingress:**
-  - Metrics: source-unrestricted TCP 8443 (no `from`; matches CSO)
+  - Metrics: TCP 8443 from `openshift-monitoring` namespace
   - Webhook: source-unrestricted TCP 9443 (HCP-safe; no `from`)
 - **Egress:**
-  - DNS: to `openshift-dns` namespace **and** pods labeled
-    `dns.operator.openshift.io/daemonset-dns=default`, TCP+UDP 5353 (matches CSO)
-  - API: destination-less TCP 6443 (matches CSO)
+  - DNS: to `openshift-dns` namespace (namespace-only), TCP+UDP 5353
+  - API: destination-less TCP 6443
 
 This policy covers the pod-placement controller, pod-placement webhook, and ENoExec event handler
 Deployments, which share the operand label.
@@ -143,21 +155,19 @@ container images.
 - **Selector:** `app: enoexec-event-daemon`
 - **PolicyTypes:** Egress
 - **Egress:**
-  - DNS: to `openshift-dns` namespace **and** pods labeled
-    `dns.operator.openshift.io/daemonset-dns=default`, TCP+UDP 5353 (matches CSO)
-  - API: destination-less TCP 6443 (matches CSO)
+  - DNS: to `openshift-dns` namespace (namespace-only), TCP+UDP 5353
+  - API: destination-less TCP 6443
 
 #### 4. Manager (`multiarch-tuning-operator-controller-manager`)
 
 - **Selector:** `control-plane: controller-manager`
 - **PolicyTypes:** Ingress, Egress
 - **Ingress:**
-  - Metrics: source-unrestricted TCP 8443 (no `from`; matches CSO)
+  - Metrics: TCP 8443 from `openshift-monitoring` namespace
   - Webhook: source-unrestricted TCP 9443 (no `from`)
 - **Egress:**
-  - DNS: to `openshift-dns` namespace **and** pods labeled
-    `dns.operator.openshift.io/daemonset-dns=default`, TCP+UDP 5353 (matches CSO)
-  - API: destination-less TCP 6443 (matches CSO)
+  - DNS: to `openshift-dns` namespace (namespace-only), TCP+UDP 5353
+  - API: destination-less TCP 6443
 
 ### Architecture
 
@@ -188,43 +198,13 @@ before any `ClusterPodPlacementConfig` is created.
 
 #### Cache scoping
 
-The RBAC split between ClusterRole (cluster-scoped resources) and a namespace-scoped Role
-(operator-local resources) requires a matching cache boundary. Without it, controller-runtime
-creates cluster-wide informers for types the Role only permits in the operator namespace,
-causing `Forbidden` errors on list/watch requests and preventing cache synchronization.
+The NetworkPolicy Role is namespace-scoped, so the NetworkPolicy informer must be scoped to
+the operator namespace. Without this, controller-runtime creates a cluster-wide informer that
+the namespace-scoped Role cannot authorize, causing `Forbidden` errors on list/watch requests.
 
-`internal/controller/operator/cache.go` provides two functions:
-
-- `CacheByObject()`: returns a `map[client.Object]cache.ByObject` scoping Deployment,
-  DaemonSet, Service, ServiceAccount, NetworkPolicy, Role, and RoleBinding to
-  `utils.Namespace()`. PodPlacementConfig and Pod are intentionally excluded: the
-  pod-placement controller watches pending Pods cluster-wide, and PPC can exist in any
-  namespace.
-
-- `AddMonitoringCache(byObject)`: conditionally adds ServiceMonitor and PrometheusRule
-  scoping when those CRDs exist on the cluster, gated by `utils.IsResourceAvailable()`.
-  This avoids creating informers for types that may not be installed.
-
-`cmd/main.go` calls `operator.CacheByObject()` in the `enableOperator` block before creating
-the manager, then conditionally calls `operator.AddMonitoringCache()` after checking CRD
-availability:
-
-    if enableOperator {
-        cacheOpts.ByObject = operator.CacheByObject()
-    }
-    // ...
-    if enableOperator {
-        dynClient := dynamic.NewForConfigOrDie(restConfig)
-        if utils.IsResourceAvailable(ctx, dynClient,
-            monitoringv1.SchemeGroupVersion.WithResource("servicemonitors")) {
-            operator.AddMonitoringCache(cacheOpts.ByObject)
-        }
-    }
-
-**Known risk:** `utils.IsResourceAvailable` caches transient API errors as permanent resource
-absence. If the monitoring API is temporarily unreachable at startup, ServiceMonitor and
-PrometheusRule watches are permanently skipped. This is a pre-existing bug tracked in
-[MULTIARCH-6361](https://redhat.atlassian.net/browse/MULTIARCH-6361).
+`cmd/main.go` adds a `cache.ByObject` entry for `NetworkPolicy` scoped to `utils.Namespace()`
+in the `enableOperator` block. All other types (Deployments, Services, etc.) remain on their
+existing ClusterRole and use cluster-wide informers as before.
 
 ```mermaid
 flowchart LR
@@ -247,17 +227,18 @@ flowchart LR
 
 ### Peer Encoding Rationale
 
-DNS, API, and metrics match cluster-storage-operator. Webhook and image-inspection have no CSO
-equivalent and are documented as MTO-specific.
+Peer encoding follows established OpenShift operator conventions where applicable. DNS and
+metrics use tighter scoping for topology compatibility and least-privilege respectively.
+Webhook and image-inspection rules are MTO-specific.
 
 | Flow | Encoding | Rationale |
 |------|----------|-----------|
-| DNS egress | Namespace `kubernetes.io/metadata.name=openshift-dns` **and** pod `dns.operator.openshift.io/daemonset-dns=default`, TCP+UDP 5353 | OpenShift CoreDNS listens on 5353 (not 53). Matches [CSO allow-to-dns](https://github.com/openshift/cluster-storage-operator/blob/master/manifests/09_network-policy-cso-allow-to-dns.yaml). |
-| API egress | Destination-less TCP 6443 (no `to`) | The API server is host-networked; its address varies by topology. On HCP it is not a guest-cluster pod. Matches [CSO allow-egress-to-api-server](https://github.com/openshift/cluster-storage-operator/blob/master/manifests/09_network-policy-cso-allow-egress-to-api-server.yaml). Kubernetes `hostNetwork` / Service-NAT vs NetworkPolicy ordering is CNI-dependent, so this is a compatibility choice, not a guarantee on every CNI. |
-| Metrics ingress | Source-unrestricted TCP 8443 (no `from`) | Matches [CSO allow-ingress-to-operator-metrics](https://github.com/openshift/cluster-storage-operator/blob/master/manifests/09_network-policy-cso-allow-ingress-to-operator-metrics.yaml) port-only shape. CSO also lists 8444; MTO omits 8444 because it does not expose that port. |
-| Webhook ingress | Source-unrestricted TCP 9443 (no `from`) | No CSO equivalent. Same HCP / host-network reasoning as API egress: the API server may call the webhook from outside the guest pod network. MTO Service `targetPort` is 9443. Prefer "source-unrestricted ingress" over "destination-less" (the latter is egress terminology). |
-| Health probes | Not included | Kubelet probes come from the host network and are not subject to NetworkPolicy. samples-operator documents this explicitly. |
-| Image inspection | Destination-unrestricted TCP, all ports (no `to`, no port) | No CSO equivalent. Registries, CDN endpoints, mirrors, and proxies use arbitrary addresses and ports. Standard NetworkPolicy cannot express an FQDN allow-list. |
+| DNS egress | Namespace `kubernetes.io/metadata.name=openshift-dns`, TCP+UDP 5353 (namespace-only, no pod selector) | OpenShift CoreDNS listens on 5353 (not 53). MTO uses namespace-only scoping (no pod selector) because the `dns.operator.openshift.io/daemonset-dns=default` label is not guaranteed on every supported OpenShift/HCP DNS topology. The `openshift-dns` namespace is purpose-built and contains only DNS workloads, so namespace-only scoping is sufficient. |
+| API egress | Destination-less TCP 6443 (no `to`) | The API server is host-networked; its address varies by topology. On HCP it is not a guest-cluster pod. Follows established OpenShift operator convention. Kubernetes `hostNetwork` / Service-NAT vs NetworkPolicy ordering is CNI-dependent, so destination-less is a compatibility choice, not a guarantee on every CNI. |
+| Metrics ingress | TCP 8443 from namespace `kubernetes.io/metadata.name=openshift-monitoring` | Only Prometheus in `openshift-monitoring` scrapes MTO metrics, so namespace-scoping is least-privilege. Some operators use source-unrestricted (no `from`) port-only rules; MTO restricts the source because it can identify the sole consumer. MTO exposes only 8443. |
+| Webhook ingress | Source-unrestricted TCP 9443 (no `from`) | MTO-specific. Same HCP / host-network reasoning as API egress: the API server may call the webhook from outside the guest pod network. MTO Service `targetPort` is 9443. |
+| Health probes | Not included | Kubelet probes come from the host network and are not subject to NetworkPolicy. |
+| Image inspection | Destination-unrestricted TCP, all ports (no `to`, no port) | MTO-specific. Registries, CDN endpoints, mirrors, and proxies use arbitrary addresses and ports. Standard NetworkPolicy cannot express an FQDN allow-list. |
 
 ## Design Details
 
@@ -271,40 +252,30 @@ equivalent and are documented as MTO-specific.
 - `internal/controller/operator/networkpolicy_test.go`: unit tests for all policy builders
 - `internal/controller/operator/manager_networkpolicy_controller_test.go`: envtest for the manager
   policy reconciler
-- `internal/controller/operator/cache.go`: `CacheByObject()` and `AddMonitoringCache()` for
-  per-type namespace scoping of controller-runtime informers
-- `internal/controller/operator/cache_test.go`: unit tests for cache scoping
-- `config/rbac/manager_networkpolicy_rolebinding.yaml`: RoleBinding for the namespace-scoped Role
+- `config/rbac/networkpolicy_role.yaml`: namespace-scoped Role for NetworkPolicy permissions
+- `config/rbac/networkpolicy_rolebinding.yaml`: RoleBinding for the NetworkPolicy Role
 - `pkg/testing/framework/networkpolicy.go`: test framework helpers
 - `pkg/testing/builder/networkpolicy.go`: test builder helpers
 
 #### Modified files
 
-- `internal/controller/operator/clusterpodplacementconfig_controller.go`: RBAC marker
-  (`namespace=system`), operand policies on the desired-objects and delete-ref lists,
-  `Owns(&networkingv1.NetworkPolicy{})`
-- `cmd/main.go`: register `ManagerNetworkPolicyReconciler` in `RunOperator()`, call
-  `operator.CacheByObject()` and conditionally `operator.AddMonitoringCache()` in the
-  `enableOperator` block
-- `pkg/utils/const.go`: policy name constants, DNS/monitoring namespace constants, DNS
-  daemonset pod-label constant (`dns.operator.openshift.io/daemonset-dns`)
+- `internal/controller/operator/clusterpodplacementconfig_controller.go`: operand policies on
+  the desired-objects and delete-ref lists, `Owns(&networkingv1.NetworkPolicy{})`
+- `cmd/main.go`: register `ManagerNetworkPolicyReconciler` in `RunOperator()`, add
+  NetworkPolicy `cache.ByObject` entry scoped to the operator namespace
+- `pkg/utils/const.go`: policy name constants, DNS/monitoring namespace constants
 - `pkg/utils/resource.go`: `*networkingv1.NetworkPolicy` case in `ApplyResource()`
-- `config/rbac/role.yaml`: split into ClusterRole (cluster-scoped) + Role (namespace-scoped)
-- `config/rbac/kustomization.yaml`: includes the new RoleBinding
+- `config/rbac/kustomization.yaml`: includes the new Role and RoleBinding
 - `bundle/manifests/*.clusterserviceversion.yaml`: regenerated CSV with `networking.k8s.io`
-  RBAC in both `clusterPermissions` and `permissions`
+  RBAC in `permissions` (namespace-scoped)
 
 ### RBAC Changes
 
-The operator uses a split RBAC model for least-privilege:
+The existing ClusterRole (`config/rbac/role.yaml`) is unchanged. A dedicated namespace-scoped
+Role is added for NetworkPolicy permissions only, following the same pattern as
+`leader-election-role` and `read-configmaps-role`:
 
-**ClusterRole** (`config/rbac/role.yaml`, `kind: ClusterRole`) retains permissions for
-cluster-scoped and intentionally cross-namespace resources: `ClusterPodPlacementConfig`,
-`PodPlacementConfig`, Pods, Nodes, Namespaces, MutatingWebhookConfigurations,
-ClusterRoles, ClusterRoleBindings, and SecurityContextConstraints.
-
-**Namespace-scoped Role** (`config/rbac/role.yaml`, `kind: Role`, `namespace: system`)
-holds permissions for operator-local namespaced resources:
+**New Role** (`config/rbac/networkpolicy_role.yaml`, `kind: Role`, `namespace: system`):
 
 ```yaml
 - apiGroups:
@@ -321,35 +292,28 @@ holds permissions for operator-local namespaced resources:
     - watch
 ```
 
-Along with Deployments, DaemonSets, Services, ServiceAccounts, Roles, RoleBindings,
-and monitoring resources (ServiceMonitor, PrometheusRule).
+**New RoleBinding** (`config/rbac/networkpolicy_rolebinding.yaml`) binds the Role to the
+controller-manager ServiceAccount in the operator namespace.
 
-A `RoleBinding` (`config/rbac/manager_networkpolicy_rolebinding.yaml`) binds the Role to
-the controller-manager ServiceAccount in the operator namespace.
-
-The kubebuilder marker uses `namespace=system` (the kustomize placeholder rewritten to the
-install namespace at deploy time):
-
-```text
-//+kubebuilder:rbac:groups=networking.k8s.io,resources=networkpolicies,verbs=create;delete;get;list;patch;update;watch,namespace=system
-```
-
-The `namespace=system` marker appears in both `clusterpodplacementconfig_controller.go` and
-`manager_networkpolicy_controller.go`. kubebuilder deduplicates the generated role entry.
+The Role and RoleBinding are hand-maintained YAML files included in
+`config/rbac/kustomization.yaml`, following the same pattern as `leader_election_role.yaml`.
+No kubebuilder `namespace=system` marker is used — this is consistent with the project's
+convention for namespace-scoped Roles. `make manifests` regenerates only the ClusterRole
+from markers; the NetworkPolicy Role is not affected.
 
 The generated CSV includes `networking.k8s.io` permissions in the `permissions` section
 (namespace-scoped), not in `clusterPermissions`.
 
-**Important:** The cache must be scoped to match this RBAC boundary. See the Cache Scoping
-section above. Without per-type namespace scoping in `cache.ByObject`, controller-runtime
-creates cluster-wide informers that the namespace-scoped Role cannot authorize.
+Because the NetworkPolicy Role is namespace-scoped, the NetworkPolicy informer must be scoped
+to the operator namespace in `cache.ByObject`. Without this, controller-runtime creates a
+cluster-wide informer that the Role cannot authorize. See the Cache Scoping section above.
 
 ### Risks and Mitigations
 
 | Risk | Mitigation |
 |------|------------|
 | Additive policies with `PolicyTypes: [Ingress, Egress]` create implicit deny for unmatched traffic on selected pods | Document that the policies are additive but do impose egress restrictions. Ensure all required egress paths (DNS, API, registry) are explicitly allowed. |
-| DNS pod label (`dns.operator.openshift.io/daemonset-dns=default`) is absent on some topologies | Accepted: match cluster-storage-operator exactly (namespace + pod label). Validate DNS egress on standalone OpenShift and HCP in e2e; if a supported topology lacks the label, file a follow-up rather than silently widening to namespace-only. |
+| DNS pod label (`dns.operator.openshift.io/daemonset-dns=default`) is absent on some topologies | Mitigated: MTO uses namespace-only DNS scoping (`openshift-dns` namespace selector without the pod label). The `openshift-dns` namespace is purpose-built and contains only DNS workloads. Validate DNS egress on standalone OpenShift and HCP in e2e. |
 | Proxy-aware image inspection may use non-443 ports (3128, 8080) | The image-inspection policy uses destination-less TCP on all ports, not just 443. |
 | envtest garbage collection does not run kube-controller-manager | Explicitly delete both the manager Deployment and NetworkPolicy in AfterEach; wait for both to be confirmed absent. |
 | `IsResourceAvailable` caches transient errors as permanent resource absence | Pre-existing bug on `main` tracked in [MULTIARCH-6361](https://redhat.atlassian.net/browse/MULTIARCH-6361). Monitoring CRD discovery at startup can permanently skip ServiceMonitor/PrometheusRule if the API is temporarily unreachable. |
@@ -365,11 +329,10 @@ creates cluster-wide informers that the namespace-scoped Role cannot authorize.
 
 #### Unit tests
 
-- Assert exact selectors, port numbers, protocols, peer shapes matching CSO for DNS
-  (namespace **and** `dns.operator.openshift.io/daemonset-dns=default`), API
-  (destination-less TCP 6443), and metrics (source-unrestricted TCP 8443); plus
-  source-unrestricted webhook ingress on TCP 9443; and `PolicyTypes` for each of the
-  four policy builders.
+- Assert exact selectors, port numbers, protocols, peer shapes for DNS
+  (namespace-only `openshift-dns`, TCP+UDP 5353), API (destination-less TCP 6443), and
+  metrics (TCP 8443 from `openshift-monitoring` namespace); plus source-unrestricted
+  webhook ingress on TCP 9443; and `PolicyTypes` for each of the four policy builders.
 - Assert no `IPBlock` rules (no hardcoded CIDRs).
 - Assert image-inspection egress is only on the image-inspection policy.
 - Assert health-probe ingress (TCP 8081) is not listed.
@@ -388,12 +351,24 @@ creates cluster-wide informers that the namespace-scoped Role cannot authorize.
 - Verify DNS resolution, API access, webhook admission, metrics scraping, health probes, and
   image inspection remain functional with all policies installed on standalone OpenShift and HCP
   clusters.
+- **Default-deny validation (required):** Deploy a namespace-wide default-deny policy
+  (`podSelector: {}`, `PolicyTypes: [Ingress, Egress]`, no rules) in the MTO namespace, then
+  verify all MTO functionality remains operational: DNS resolution, API access, webhook
+  admission, metrics scraping, health probes, and image inspection. This proves MTO's policies
+  are sufficient and complete — every required network flow has an explicit allow rule. This test
+  is mandatory because a platform-level default-deny is expected once all operators comply with
+  HPSTRAT-104.
 
 ### Graduation Criteria
 
-This enhancement ships as part of MULTIARCH-5569. No alpha/beta graduation is needed: the policies
-are additive and do not change existing behavior unless a namespace-wide deny policy is layered on
-top by the administrator.
+This enhancement ships as part of MULTIARCH-5569. No alpha/beta graduation is needed.
+
+Applying a NetworkPolicy with `PolicyTypes: [Ingress, Egress]` creates an implicit deny for
+unmatched traffic on the selected pods. This means the policies **do** restrict the network
+posture of MTO workloads as soon as they are created — only the explicitly listed flows (DNS,
+API, metrics, webhook, image-inspection) are allowed. This is the intended hardening behavior.
+All required egress and ingress paths are enumerated in the policy builders; the E2E default-deny
+test validates that no unlisted dependency exists.
 
 ### Upgrade / Downgrade Strategy
 
@@ -420,8 +395,23 @@ This enhancement does not introduce API extensions. No CRD changes, no new
 
 #### Failure Modes
 
-- If the operator lacks `networking.k8s.io` RBAC, policy creation fails and the reconciler logs an
-  error. The operator continues to function without NetworkPolicy protection.
+NetworkPolicy creation failure does not block operator functionality. NetworkPolicy is additive
+security hardening, not a functional requirement for pod placement. Operand NetworkPolicies are
+applied through the same `utils.ApplyResources()` batch as Deployments, Services, and RBAC.
+Because functional resources precede NetworkPolicies in the objects list, a NetworkPolicy apply
+failure occurs after the functional resources are already created. The aggregated error causes
+the reconciler to requeue (retrying all resources including the failed NetworkPolicy), but the
+operator is functional. No dedicated CPPC status condition tracks NetworkPolicy state — the
+failure is surfaced through reconciler logs and retry behavior. The operator continues normal
+operation (pod gating, image inspection, webhook admission) regardless of whether policies
+exist.
+
+Specific failure scenarios:
+
+- If the operator lacks `networking.k8s.io` RBAC, policy creation fails. The reconciler logs
+  the error and retries on subsequent reconciliation cycles.
+- If a transient API server error prevents policy creation or update, the reconciler requeues
+  and retries.
 - If the `openshift-dns` namespace (or DNS pods with
   `dns.operator.openshift.io/daemonset-dns=default`) is absent (non-OpenShift cluster), the
   policies are still created but the DNS peer matches nothing. This is a no-op for that rule, not
@@ -477,10 +467,9 @@ configuration API belongs in MULTIARCH-5324.
 Discover the `kubernetes.default` Service ClusterIP and DNS endpoint IPs at reconcile time, then
 emit `ipBlock` rules.
 
-*Rejected because:* cluster-storage-operator uses destination-less TCP 6443 rather than
-ClusterIP-as-peer; console-operator opens all egress for the same host-network / topology
-reason. The API server is host-networked; Service NAT vs NetworkPolicy ordering is
-CNI-dependent. Destination-less port rules are the safer OpenShift-operator precedent.
+*Rejected because:* the API server is host-networked; Service NAT vs NetworkPolicy ordering is
+CNI-dependent. Established OpenShift operators use destination-less TCP 6443 rather than
+ClusterIP-as-peer for this reason. Destination-less port rules are the safer convention.
 ## Future Migration to OLM-Managed NetworkPolicies
 
 ### Context
