@@ -18,19 +18,26 @@ package podplacement
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	imgspecv1 "github.com/opencontainers/image-spec/specs-go/v1"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/tools/record"
+	ctrl "sigs.k8s.io/controller-runtime"
 	crclient "sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	"github.com/openshift/multiarch-tuning-operator/api/common/plugins"
+	"github.com/openshift/multiarch-tuning-operator/api/v1beta1"
 	"github.com/openshift/multiarch-tuning-operator/pkg/e2e"
 	. "github.com/openshift/multiarch-tuning-operator/pkg/testing/builder"
+	"github.com/openshift/multiarch-tuning-operator/pkg/testing/image/fake/registry"
 	"github.com/openshift/multiarch-tuning-operator/pkg/utils"
 )
 
@@ -1238,6 +1245,53 @@ var _ = Describe("CEL Architecture Placement Controller Integration", func() {
 					"should have exactly one architecture value")
 			}).WithTimeout(timeout).WithPolling(interval).Should(Succeed())
 		})
+	})
+
+	Context("PPC deletion before reconciliation", func() {
+		DescribeTable("should ungate an existing pending pod after its PPC is deleted",
+			func(celAppliedDuringAdmission bool) {
+				ppc := NewPodPlacementConfig().WithName("deleted-ppc").WithNamespace(ns.Name).
+					WithCelArchitecturePlacement(true, []string{utils.ArchitecturePpc64le},
+						[]plugins.ArchitectureRule{NewRule("match-all", "true", utils.ArchitecturePpc64le)}).
+					Build()
+				recorder := record.NewFakeRecorder(32)
+				pod := NewPod().WithName("pending-pod").WithNamespace(ns.Name).
+					WithSchedulingGates(utils.SchedulingGateName).
+					WithContainersImages(fmt.Sprintf("%s/%s/%s:latest", registryAddress,
+						registry.PublicRepo, registry.ComputeNameByMediaType(imgspecv1.MediaTypeImageIndex))).Build()
+				pod.Status.Phase = corev1.PodPending
+				expectedArchitectures := []string{utils.ArchitectureAmd64, utils.ArchitectureArm64}
+				if celAppliedDuringAdmission {
+					wh := &PodSchedulingGateMutatingWebHook{}
+					admittedPod := newPod(pod, ctx, recorder)
+					wh.applyCELInWebhook(ctx, admittedPod, []v1beta1.PodPlacementConfig{*ppc})
+					pod = admittedPod.PodObject()
+					expectedArchitectures = []string{utils.ArchitecturePpc64le}
+					Expect(extractArchitectures(pod)).To(ConsistOf(expectedArchitectures))
+				}
+
+				// A private client lets us delete the PPC while the persisted pod is
+				// still gated, before explicitly running the first reconciliation.
+				localClient := fake.NewClientBuilder().WithScheme(k8sClient.Scheme()).
+					WithObjects(ppc, pod).WithStatusSubresource(&corev1.Pod{}).Build()
+				persisted := &corev1.Pod{}
+				Expect(localClient.Get(ctx, crclient.ObjectKeyFromObject(pod), persisted)).To(Succeed())
+				Expect(persisted.Status.Phase).To(Equal(corev1.PodPending))
+				Expect(persisted.Spec.SchedulingGates).To(ContainElement(corev1.PodSchedulingGate{Name: utils.SchedulingGateName}))
+				Expect(localClient.Delete(ctx, ppc)).To(Succeed())
+				Expect(apierrors.IsNotFound(localClient.Get(ctx, crclient.ObjectKeyFromObject(ppc), &v1beta1.PodPlacementConfig{}))).To(BeTrue())
+
+				reconciler := &PodReconciler{Client: localClient, APIReader: localClient, Recorder: recorder}
+				_, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: crclient.ObjectKeyFromObject(pod)})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(localClient.Get(ctx, crclient.ObjectKeyFromObject(pod), persisted)).To(Succeed())
+				Expect(persisted.Spec.SchedulingGates).NotTo(ContainElement(corev1.PodSchedulingGate{Name: utils.SchedulingGateName}))
+				Expect(persisted.Labels).To(HaveKeyWithValue(utils.SchedulingGateLabel, utils.SchedulingGateLabelValueRemoved))
+				Expect(extractArchitectures(persisted)).To(ConsistOf(expectedArchitectures))
+			},
+			Entry("preserving CEL affinity already applied during admission", true),
+			Entry("setting image-derived affinity when admission did not apply CEL", false),
+		)
 	})
 
 	Context("Event Publishing", func() {

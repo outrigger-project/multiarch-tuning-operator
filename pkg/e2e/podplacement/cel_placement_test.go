@@ -24,6 +24,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	runtimeclient "sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/openshift/multiarch-tuning-operator/api/common/plugins"
 	"github.com/openshift/multiarch-tuning-operator/pkg/e2e"
@@ -390,7 +391,7 @@ var _ = Describe("CEL Architecture Placement E2E", func() {
 	})
 
 	Context("When a PodPlacementConfig is deleted while pods are pending", func() {
-		It("should still ungate the pod using image-based detection", func() {
+		DescribeTable("should still ungate the existing pod without losing its architecture affinity", func(celEnabled bool) {
 			By("Creating an ephemeral namespace")
 			ns := framework.NewEphemeralNamespace()
 			err := client.Create(ctx, ns)
@@ -403,7 +404,7 @@ var _ = Describe("CEL Architecture Placement E2E", func() {
 				WithGenerateName("cel-e2e-delete-").
 				WithNamespace(ns.Name).
 				WithPriority(100).
-				WithCelArchitecturePlacement(true,
+				WithCelArchitecturePlacement(celEnabled,
 					[]string{utils.ArchitecturePpc64le},
 					[]plugins.ArchitectureRule{
 						NewRule("match-all", "true", utils.ArchitecturePpc64le),
@@ -411,28 +412,72 @@ var _ = Describe("CEL Architecture Placement E2E", func() {
 				Build()
 			err = client.Create(ctx, ppc)
 			Expect(err).NotTo(HaveOccurred())
+			DeferCleanup(func() {
+				Expect(runtimeclient.IgnoreNotFound(client.Delete(ctx, ppc))).To(Succeed())
+			})
 
-			By("Creating a deployment")
-			podLabel := map[string]string{"app": "cel-delete-test"}
-			ps := NewPodSpec().WithContainersImages(helloOpenshiftPublicMultiarchImage).Build()
-			d := NewDeployment().
-				WithSelectorAndPodLabels(podLabel).
-				WithPodSpec(ps).
-				WithReplicas(utils.NewPtr(int32(1))).
+			By("Creating a pod and checking that admission added the scheduling gate")
+			pod := NewPod().
 				WithName("cel-delete-test").
 				WithNamespace(ns.Name).
+				WithContainersImages(helloOpenshiftPublicMultiarchImage).
 				Build()
-			err = client.Create(ctx, d)
+			err = client.Create(ctx, pod)
 			Expect(err).NotTo(HaveOccurred())
+			DeferCleanup(func() {
+				Expect(runtimeclient.IgnoreNotFound(client.Delete(ctx, pod))).To(Succeed())
+			})
+			Expect(pod.Spec.SchedulingGates).To(ContainElement(corev1.PodSchedulingGate{Name: utils.SchedulingGateName}))
+			podUID := pod.UID
+
+			celAppliedDuringAdmission := pod.Labels[utils.NodeAffinityLabel] == utils.NodeAffinityLabelValueOverriden
+			imageArchNSR := NewNodeSelectorRequirement().
+				WithKeyAndValues(utils.ArchLabel, corev1.NodeSelectorOpIn,
+					utils.ArchitectureAmd64, utils.ArchitectureArm64,
+					utils.ArchitectureS390x, utils.ArchitecturePpc64le).Build()
+			celArchNSR := NewNodeSelectorRequirement().
+				WithKeyAndValues(utils.ArchLabel, corev1.NodeSelectorOpIn, utils.ArchitecturePpc64le).Build()
+			imageAffinity := &corev1.NodeAffinity{
+				RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
+					NodeSelectorTerms: []corev1.NodeSelectorTerm{*NewNodeSelectorTerm().WithMatchExpressions(imageArchNSR).Build()},
+				},
+			}
+			celAffinity := &corev1.NodeAffinity{
+				RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
+					NodeSelectorTerms: []corev1.NodeSelectorTerm{*NewNodeSelectorTerm().WithMatchExpressions(celArchNSR).Build()},
+				},
+			}
 
 			By("Deleting the PPC immediately")
 			err = client.Delete(ctx, ppc)
 			Expect(err).NotTo(HaveOccurred())
 
-			By("Verifying the pod still gets ungated via image-based detection")
-			Eventually(framework.VerifyPodLabels(ctx, client, ns, "app", "cel-delete-test",
-				e2e.Present, schedulingGateLabel), e2e.WaitMedium).Should(Succeed())
-		})
+			By("Verifying the same pod is ungated and retains the expected required affinity")
+			Eventually(func(g Gomega) {
+				current := &corev1.Pod{}
+				g.Expect(client.Get(ctx, runtimeclient.ObjectKeyFromObject(pod), current)).To(Succeed())
+				g.Expect(current.UID).To(Equal(podUID))
+				g.Expect(current.Spec.SchedulingGates).NotTo(ContainElement(corev1.PodSchedulingGate{Name: utils.SchedulingGateName}))
+				g.Expect(current.Labels).To(HaveKeyWithValue(utils.SchedulingGateLabel, utils.SchedulingGateLabelValueRemoved))
+				switch {
+				case !celEnabled:
+					g.Expect(*current).To(framework.HaveEquivalentNodeAffinity(imageAffinity))
+				case celAppliedDuringAdmission:
+					g.Expect(*current).To(framework.HaveEquivalentNodeAffinity(celAffinity))
+				default:
+					// If admission missed the PPC, reconciliation may still have seen
+					// it before deletion. Both complete architecture sets are valid;
+					// the controller test fixes ordering to verify each path separately.
+					g.Expect(*current).To(SatisfyAny(
+						framework.HaveEquivalentNodeAffinity(celAffinity),
+						framework.HaveEquivalentNodeAffinity(imageAffinity),
+					))
+				}
+			}, e2e.WaitMedium).Should(Succeed())
+		},
+			Entry("with CEL enabled, preserving any already-applied CEL affinity", true),
+			Entry("with CEL disabled, requiring the full image-derived affinity", false),
+		)
 	})
 
 	Context("When a pod has an existing nodeSelector for kubernetes.io/arch", func() {

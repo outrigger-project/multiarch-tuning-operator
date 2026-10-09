@@ -35,6 +35,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"sync"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -998,6 +999,15 @@ var _ = Describe("CEL Webhook", func() {
 
 			ppcs := []v1beta1.PodPlacementConfig{
 				*NewPodPlacementConfig().
+					WithName("concurrent-low-priority-ppc").
+					WithNamespace("default").
+					WithPriority(50).
+					WithCelArchitecturePlacement(true, []string{utils.ArchitectureAmd64},
+						[]plugins.ArchitectureRule{
+							NewRule("match-all-low", "true", utils.ArchitectureArm64),
+						}).
+					Build(),
+				*NewPodPlacementConfig().
 					WithName("concurrent-ppc").
 					WithNamespace("default").
 					WithPriority(100).
@@ -1011,23 +1021,31 @@ var _ = Describe("CEL Webhook", func() {
 			wh := &PodSchedulingGateMutatingWebHook{}
 
 			const goroutines = 20
+			start := make(chan struct{})
 			var wg sync.WaitGroup
 			wg.Add(goroutines)
 			for i := 0; i < goroutines; i++ {
 				go func(idx int) {
 					defer wg.Done()
 					defer GinkgoRecover()
+					// Sorting mutates the slice, but PPC contents are only read.
+					// Each admission needs its own backing array, as in Handle().
+					localPPCs := slices.Clone(ppcs)
+					<-start
 					recorder := record.NewFakeRecorder(8)
 					pod := NewPod().
 						WithName(fmt.Sprintf("concurrent-pod-%d", idx)).
 						WithNamespace("default").Build()
 					wrappedPod := newPod(pod, ctx, recorder)
-					wh.applyCELInWebhook(ctx, wrappedPod, ppcs)
+					wh.applyCELInWebhook(ctx, wrappedPod, localPPCs)
 					archs := extractArchitectures(wrappedPod.PodObject())
 					Expect(archs).To(ConsistOf(utils.ArchitecturePpc64le))
 				}(i)
 			}
+			close(start)
 			wg.Wait()
+			Expect(ppcs[0].Name).To(Equal("concurrent-low-priority-ppc"),
+				"concurrent admissions must not sort the shared fixture")
 		})
 	})
 

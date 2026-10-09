@@ -88,10 +88,11 @@ var (
 )
 
 type sharedData struct {
-	Kubeconfig       api.Config `json:"kubeconfig"`
-	RegistryAddress  string     `json:"registryAddress"`
-	RegistryCert     []byte     `json:"registryCert"`
-	RegistryCertPath string     `json:"registryCertpath"`
+	Kubeconfig         api.Config `json:"kubeconfig"`
+	RegistryAddress    string     `json:"registryAddress"`
+	RegistryCert       []byte     `json:"registryCert"`
+	RegistryCertPath   string     `json:"registryCertpath"`
+	ImageInspectionDir string     `json:"imageInspectionDir"`
 }
 
 func init() {
@@ -125,14 +126,7 @@ var _ = SynchronizedBeforeSuite(func() []byte {
 	dir, err = os.MkdirTemp("", "multiarch-tuning-operator")
 	Expect(err).NotTo(HaveOccurred())
 	Expect(dir).NotTo(BeEmpty())
-	err = os.Setenv("DOCKER_CERTS_DIR", filepath.Join(dir, "docker/certs.d"))
-	Expect(err).NotTo(HaveOccurred())
-	err = os.Setenv("REGISTRIES_CERTS_DIR", filepath.Join(dir, "containers/registries.d"))
-	Expect(err).NotTo(HaveOccurred())
-	err = os.Setenv("REGISTRIES_CONF_PATH", filepath.Join(dir, "containers/registries.conf"))
-	Expect(err).NotTo(HaveOccurred())
-	err = os.Setenv("POLICY_CONF_PATH", filepath.Join(dir, "containers/policy.json"))
-	Expect(err).NotTo(HaveOccurred())
+	setImageInspectionEnvironment(dir)
 
 	// TODO: should we continue running the manager in the BeforeSuite node?
 	runManager()
@@ -176,10 +170,11 @@ var _ = SynchronizedBeforeSuite(func() []byte {
 	// need to pass to all processes
 	registryCertPath := registry.GetCertPath()
 	data := sharedData{
-		Kubeconfig:       kc,
-		RegistryAddress:  registryAddress,
-		RegistryCert:     registryCert,
-		RegistryCertPath: registryCertPath,
+		Kubeconfig:         kc,
+		RegistryAddress:    registryAddress,
+		RegistryCert:       registryCert,
+		RegistryCertPath:   registryCertPath,
+		ImageInspectionDir: dir,
 	}
 	jsonData, err := json.Marshal(data)
 	Expect(err).NotTo(HaveOccurred(), "failed to marshal sharedData")
@@ -195,6 +190,10 @@ var _ = SynchronizedBeforeSuite(func() []byte {
 	var sharedData sharedData
 	err = json.Unmarshal(data, &sharedData)
 	Expect(err).NotTo(HaveOccurred(), "failed to unmarshal sharedData")
+	// Environment changes in process 1 are not inherited by parallel workers.
+	// Point every worker at the shared files before the image package caches
+	// configuration paths or a test invokes a private reconciler.
+	setImageInspectionEnvironment(sharedData.ImageInspectionDir)
 	// Sync registry.perRegistryCertDirPath for registry.PushMockImage
 	registryCertPath := sharedData.RegistryCertPath
 	registry.SetCertPath(registryCertPath)
@@ -210,6 +209,18 @@ var _ = SynchronizedBeforeSuite(func() []byte {
 	Expect(err).NotTo(HaveOccurred())
 	Expect(k8sClient).NotTo(BeNil())
 })
+
+func setImageInspectionEnvironment(configDir string) {
+	Expect(configDir).NotTo(BeEmpty())
+	for key, relativePath := range map[string]string{
+		"DOCKER_CERTS_DIR":     "docker/certs.d",
+		"REGISTRIES_CERTS_DIR": "containers/registries.d",
+		"REGISTRIES_CONF_PATH": "containers/registries.conf",
+		"POLICY_CONF_PATH":     "containers/policy.json",
+	} {
+		Expect(os.Setenv(key, filepath.Join(configDir, relativePath))).To(Succeed())
+	}
+}
 
 var _ = SynchronizedAfterSuite(func() {}, func() {
 	By("Deleting the ClusterPodPlacementConfig")
