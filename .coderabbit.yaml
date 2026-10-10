@@ -1,0 +1,59 @@
+language: en
+reviews:
+  profile: assertive
+  request_changes_workflow: false
+  high_level_summary: true
+  poem: false
+  review_status: true
+  path_filters:
+    - "!vendor/**"
+    - "!**/zz_generated*"
+    - "!config/crd/bases/**"
+    - "!config/rbac/role.yaml"
+    - "!bundle/manifests/**"
+    - "!hack/**"
+    - "!pkg/testing/builder/**"
+    - "!pkg/testing/framework/**"
+    - "!config/**/*.yaml"
+  path_instructions:
+    - path: "api/v1beta1/**"
+      instructions: |
+        Review API types for backward compatibility. Verify JSON tags, validation markers, and
+        that `make manifests generate` was run. Check REVIEW.md for API-specific rules.
+    - path: "internal/controller/operator/**"
+      instructions: |
+        Review RBAC markers, status condition handling, and operand lifecycle management.
+        Check that handleDelete() is updated for any new operand resources. See REVIEW.md.
+    - path: "internal/controller/podplacement/**"
+      instructions: |
+        Review pod placement logic carefully — changes to shouldIgnorePod(), scheduling gate
+        handling, and image inspection affect cluster-wide scheduling. See REVIEW.md.
+    - path: "pkg/image/**"
+      instructions: |
+        Review registry authentication and manifest parsing. Must handle both OCI and Docker
+        v2.2 formats and operator bundle images. See REVIEW.md.
+    - path: "bundle/**"
+      instructions: |
+        Verify CRDs were regenerated (not hand-edited), relatedImages are complete, and
+        make bundle-verify passes. See REVIEW.md.
+  tools:
+    github-checks:
+      enabled: true
+    golangci-lint:
+      enabled: true
+chat:
+  auto_reply: true
+knowledge_base:
+  learnings:
+    scope: auto
+  issues:
+    scope: auto
+  jira:
+    project_keys: []
+  linear:
+    team_keys: []
+  pull_requests:
+    scope: auto
+  filePatterns:
+    - "REVIEW.md"
+    - "AGENTS.md"
