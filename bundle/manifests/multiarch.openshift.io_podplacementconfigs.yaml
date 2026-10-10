@@ -90,9 +90,7 @@ spec:
                 type: object
                 x-kubernetes-map-type: atomic
               plugins:
-                description: |-
-                  Plugins defines the configurable plugins for this component.
-                  This field is required.
+                description: Plugins defines the configurable plugins for this component.
                 properties:
                   celArchitecturePlacement:
                     description: |-
@@ -211,8 +209,6 @@ spec:
                 maximum: 255
                 minimum: 0
                 type: integer
-            required:
-            - plugins
             type: object
           status:
             description: PodPlacementConfigStatus defines the observed state of PodPlacementConfig
