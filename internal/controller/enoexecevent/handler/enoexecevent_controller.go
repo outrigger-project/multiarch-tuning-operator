@@ -21,6 +21,7 @@ import (
 	runtime2 "runtime"
 
 	v1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/record"
@@ -94,11 +95,11 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	// Log the ENoExecEvent instance
 	logger.Info("Reconciling ENoExecEvent", "name", eNoExecEvent.Name, "namespace", eNoExecEvent.Namespace)
 	ret, err := r.reconcile(ctx, eNoExecEvent)
-	// If the reconciliation was successful, or one of the objects was not found, we delete the ENoExecEvent resource.
-	if client.IgnoreNotFound(err) == nil {
+
+	// If the reconciliation was successful, delete the ENoExecEvent resource.
+	if err == nil {
 		if err := r.Delete(ctx, &eNoExecEvent.ENoExecEvent); err != nil {
 			logger.Error(err, "Failed to delete ENoExecEvent resource after reconciliation", "name", eNoExecEvent.Name)
-			// Mark as error but return the original error so client.IgnoreNotFound works
 			r.markAsError(ctx, eNoExecEvent, ErrorReasonReconciliation)
 			return ctrl.Result{}, client.IgnoreNotFound(err)
 		}
@@ -106,9 +107,22 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		logger.Info("Deleted ENoExecEvent resource after successful reconciliation", "name", eNoExecEvent.Name)
 		return ret, nil
 	}
+
+	// If pod/node not found, this is a stale event (object was deleted before processing)
+	if apierrors.IsNotFound(err) {
+		if err := r.Delete(ctx, &eNoExecEvent.ENoExecEvent); err != nil {
+			logger.Error(err, "Failed to delete stale ENoExecEvent resource", "name", eNoExecEvent.Name)
+			r.markAsError(ctx, eNoExecEvent, ErrorReasonReconciliation)
+			return ctrl.Result{}, client.IgnoreNotFound(err)
+		}
+		metrics.EnoexecCounterStale.Inc()
+		logger.Info("Deleted stale ENoExecEvent resource (pod/node not found)", "name", eNoExecEvent.Name)
+		return ret, nil
+	}
+
+	// Real reconciliation error that will be retried
 	metrics.EnoexecCounterInvalid.Inc()
 	logger.Error(err, "Failed to reconcile ENoExecEvent", "name", eNoExecEvent.Name)
-	// Mark as error - this is a real reconciliation error that will be retried
 	r.markAsError(ctx, eNoExecEvent, ErrorReasonReconciliation)
 	return ctrl.Result{}, err
 }
