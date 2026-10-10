@@ -80,3 +80,38 @@ func (p *ClusterPodPlacementConfigBuilder) WithFallbackArchitecture(architecture
 	p.Spec.FallbackArchitecture = architecture
 	return p
 }
+
+func (p *ClusterPodPlacementConfigBuilder) WithGeneration(gen int64) *ClusterPodPlacementConfigBuilder {
+	p.Generation = gen
+	return p
+}
+
+func (p *ClusterPodPlacementConfigBuilder) WithDeletionTimestamp(ts *v1.Time) *ClusterPodPlacementConfigBuilder {
+	p.DeletionTimestamp = ts
+	return p
+}
+
+func (p *ClusterPodPlacementConfigBuilder) WithFinalizers(finalizers ...string) *ClusterPodPlacementConfigBuilder {
+	p.Finalizers = finalizers
+	return p
+}
+
+func (p *ClusterPodPlacementConfigBuilder) WithLabels(labels map[string]string) *ClusterPodPlacementConfigBuilder {
+	p.Labels = labels
+	return p
+}
+
+func (p *ClusterPodPlacementConfigBuilder) WithAnnotations(annotations map[string]string) *ClusterPodPlacementConfigBuilder {
+	p.Annotations = annotations
+	return p
+}
+
+func (p *ClusterPodPlacementConfigBuilder) WithStatusCondition(condType string, status v1.ConditionStatus, reason string, lastTransition v1.Time) *ClusterPodPlacementConfigBuilder {
+	p.Status.Conditions = append(p.Status.Conditions, v1.Condition{
+		Type:               condType,
+		Status:             status,
+		Reason:             reason,
+		LastTransitionTime: lastTransition,
+	})
+	return p
+}

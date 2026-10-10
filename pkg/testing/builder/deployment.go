@@ -55,6 +55,16 @@ func (d *DeploymentBuilder) WithNamespace(namespace string) *DeploymentBuilder {
 	return d
 }
 
+func (d *DeploymentBuilder) WithPodAnnotations(annotations map[string]string) *DeploymentBuilder {
+	if d.deployment.Spec.Template.Annotations == nil {
+		d.deployment.Spec.Template.Annotations = make(map[string]string, len(annotations))
+	}
+	for k, v := range annotations {
+		d.deployment.Spec.Template.Annotations[k] = v
+	}
+	return d
+}
+
 func (d *DeploymentBuilder) Build() *appsv1.Deployment {
 	return d.deployment
 }

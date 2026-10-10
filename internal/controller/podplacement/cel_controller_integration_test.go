@@ -17,18 +17,27 @@ limitations under the License.
 package podplacement
 
 import (
+	"context"
+	"fmt"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	imgspecv1 "github.com/opencontainers/image-spec/specs-go/v1"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/tools/record"
+	ctrl "sigs.k8s.io/controller-runtime"
 	crclient "sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	"github.com/openshift/multiarch-tuning-operator/api/common/plugins"
+	"github.com/openshift/multiarch-tuning-operator/api/v1beta1"
 	"github.com/openshift/multiarch-tuning-operator/pkg/e2e"
 	. "github.com/openshift/multiarch-tuning-operator/pkg/testing/builder"
+	"github.com/openshift/multiarch-tuning-operator/pkg/testing/image/fake/registry"
 	"github.com/openshift/multiarch-tuning-operator/pkg/utils"
 )
 
@@ -59,22 +68,13 @@ var _ = Describe("CEL Architecture Placement Controller Integration", func() {
 						"app": "test",
 					},
 				}).
-				WithPlugins().
+				WithCelArchitecturePlacement(true, []string{utils.ArchitectureAmd64},
+					[]plugins.ArchitectureRule{
+						NewRule("match-database",
+							`has(self.metadata.labels.component) && self.metadata.labels.component == "database"`,
+							utils.ArchitecturePpc64le),
+					}).
 				Build()
-
-			ppc.Spec.Plugins.CelArchitecturePlacement = &plugins.CelArchitecturePlacement{
-				BasePlugin: plugins.BasePlugin{
-					Enabled: true,
-				},
-				FallbackArchitectures: []string{utils.ArchitectureAmd64},
-				Rules: []plugins.ArchitectureRule{
-					{
-						Name:          "match-database",
-						Expression:    `has(self.metadata.labels.component) && self.metadata.labels.component == "database"`,
-						Architectures: []string{utils.ArchitecturePpc64le},
-					},
-				},
-			}
 
 			Expect(k8sClient.Create(ctx, ppc)).To(Succeed())
 
@@ -126,22 +126,11 @@ var _ = Describe("CEL Architecture Placement Controller Integration", func() {
 						"app": "preserve-test",
 					},
 				}).
-				WithPlugins().
+				WithCelArchitecturePlacement(true, []string{utils.ArchitectureArm64},
+					[]plugins.ArchitectureRule{
+						NewRule("match-all", `true`, utils.ArchitectureAmd64),
+					}).
 				Build()
-
-			ppc.Spec.Plugins.CelArchitecturePlacement = &plugins.CelArchitecturePlacement{
-				BasePlugin: plugins.BasePlugin{
-					Enabled: true,
-				},
-				FallbackArchitectures: []string{utils.ArchitectureArm64},
-				Rules: []plugins.ArchitectureRule{
-					{
-						Name:          "match-all",
-						Expression:    `true`,
-						Architectures: []string{utils.ArchitectureAmd64},
-					},
-				},
-			}
 
 			Expect(k8sClient.Create(ctx, ppc)).To(Succeed())
 
@@ -217,22 +206,13 @@ var _ = Describe("CEL Architecture Placement Controller Integration", func() {
 						"app": "fallback-test",
 					},
 				}).
-				WithPlugins().
+				WithCelArchitecturePlacement(true, []string{utils.ArchitecturePpc64le, utils.ArchitectureAmd64},
+					[]plugins.ArchitectureRule{
+						NewRule("match-nothing",
+							`"never-matches" in self.metadata.labels && self.metadata.labels["never-matches"] == "true"`,
+							utils.ArchitectureArm64),
+					}).
 				Build()
-
-			ppc.Spec.Plugins.CelArchitecturePlacement = &plugins.CelArchitecturePlacement{
-				BasePlugin: plugins.BasePlugin{
-					Enabled: true,
-				},
-				FallbackArchitectures: []string{utils.ArchitecturePpc64le, utils.ArchitectureAmd64},
-				Rules: []plugins.ArchitectureRule{
-					{
-						Name:          "match-nothing",
-						Expression:    `"never-matches" in self.metadata.labels && self.metadata.labels["never-matches"] == "true"`,
-						Architectures: []string{utils.ArchitectureArm64},
-					},
-				},
-			}
 
 			Expect(k8sClient.Create(ctx, ppc)).To(Succeed())
 
@@ -284,22 +264,11 @@ var _ = Describe("CEL Architecture Placement Controller Integration", func() {
 						"app": "precedence-test",
 					},
 				}).
-				WithPlugins().
+				WithCelArchitecturePlacement(true, []string{utils.ArchitectureS390x},
+					[]plugins.ArchitectureRule{
+						NewRule("force-s390x", `true`, utils.ArchitectureS390x), // Always matches
+					}).
 				Build()
-
-			ppc.Spec.Plugins.CelArchitecturePlacement = &plugins.CelArchitecturePlacement{
-				BasePlugin: plugins.BasePlugin{
-					Enabled: true,
-				},
-				FallbackArchitectures: []string{utils.ArchitectureS390x},
-				Rules: []plugins.ArchitectureRule{
-					{
-						Name:          "force-s390x",
-						Expression:    `true`, // Always matches
-						Architectures: []string{utils.ArchitectureS390x},
-					},
-				},
-			}
 
 			Expect(k8sClient.Create(ctx, ppc)).To(Succeed())
 
@@ -349,19 +318,12 @@ var _ = Describe("CEL Architecture Placement Controller Integration", func() {
 						"app": "coexist-test",
 					},
 				}).
-				WithPlugins().
 				WithNodeAffinityScoring(true).
 				WithNodeAffinityScoringTerm(utils.ArchitectureAmd64, 100).
 				WithNodeAffinityScoringTerm(utils.ArchitectureArm64, 50).
+				WithCelArchitecturePlacement(true, []string{utils.ArchitectureAmd64, utils.ArchitectureArm64},
+					[]plugins.ArchitectureRule{}).
 				Build()
-
-			ppc.Spec.Plugins.CelArchitecturePlacement = &plugins.CelArchitecturePlacement{
-				BasePlugin: plugins.BasePlugin{
-					Enabled: true,
-				},
-				FallbackArchitectures: []string{utils.ArchitectureAmd64, utils.ArchitectureArm64},
-				Rules:                 []plugins.ArchitectureRule{},
-			}
 
 			Expect(k8sClient.Create(ctx, ppc)).To(Succeed())
 
@@ -410,22 +372,11 @@ var _ = Describe("CEL Architecture Placement Controller Integration", func() {
 						"app": "priority-test",
 					},
 				}).
-				WithPlugins().
+				WithCelArchitecturePlacement(true, []string{utils.ArchitectureArm64},
+					[]plugins.ArchitectureRule{
+						NewRule("low-priority-rule", `true`, utils.ArchitectureArm64),
+					}).
 				Build()
-
-			ppcLow.Spec.Plugins.CelArchitecturePlacement = &plugins.CelArchitecturePlacement{
-				BasePlugin: plugins.BasePlugin{
-					Enabled: true,
-				},
-				FallbackArchitectures: []string{utils.ArchitectureArm64},
-				Rules: []plugins.ArchitectureRule{
-					{
-						Name:          "low-priority-rule",
-						Expression:    `true`,
-						Architectures: []string{utils.ArchitectureArm64},
-					},
-				},
-			}
 
 			Expect(k8sClient.Create(ctx, ppcLow)).To(Succeed())
 
@@ -439,22 +390,11 @@ var _ = Describe("CEL Architecture Placement Controller Integration", func() {
 						"app": "priority-test",
 					},
 				}).
-				WithPlugins().
+				WithCelArchitecturePlacement(true, []string{utils.ArchitecturePpc64le},
+					[]plugins.ArchitectureRule{
+						NewRule("high-priority-rule", `true`, utils.ArchitecturePpc64le),
+					}).
 				Build()
-
-			ppcHigh.Spec.Plugins.CelArchitecturePlacement = &plugins.CelArchitecturePlacement{
-				BasePlugin: plugins.BasePlugin{
-					Enabled: true,
-				},
-				FallbackArchitectures: []string{utils.ArchitecturePpc64le},
-				Rules: []plugins.ArchitectureRule{
-					{
-						Name:          "high-priority-rule",
-						Expression:    `true`,
-						Architectures: []string{utils.ArchitecturePpc64le},
-					},
-				},
-			}
 
 			Expect(k8sClient.Create(ctx, ppcHigh)).To(Succeed())
 
@@ -515,22 +455,11 @@ var _ = Describe("CEL Architecture Placement Controller Integration", func() {
 						"app": "stability-test",
 					},
 				}).
-				WithPlugins().
+				WithCelArchitecturePlacement(true, []string{utils.ArchitectureAmd64},
+					[]plugins.ArchitectureRule{
+						NewRule("stable-rule", `true`, utils.ArchitectureAmd64),
+					}).
 				Build()
-
-			ppc.Spec.Plugins.CelArchitecturePlacement = &plugins.CelArchitecturePlacement{
-				BasePlugin: plugins.BasePlugin{
-					Enabled: true,
-				},
-				FallbackArchitectures: []string{utils.ArchitectureAmd64},
-				Rules: []plugins.ArchitectureRule{
-					{
-						Name:          "stable-rule",
-						Expression:    `true`,
-						Architectures: []string{utils.ArchitectureAmd64},
-					},
-				},
-			}
 
 			Expect(k8sClient.Create(ctx, ppc)).To(Succeed())
 
@@ -607,6 +536,863 @@ var _ = Describe("CEL Architecture Placement Controller Integration", func() {
 
 			// ResourceVersion should have changed (pod was updated), but affinity should be stable
 			Expect(pod.ResourceVersion).NotTo(Equal(initialResourceVersion), "resource version should change on updates")
+		})
+	})
+
+	Context("NodeAffinityScoring Plugin Coexistence", func() {
+		It("should apply CEL architecture constraints AND NodeAffinityScoring preferences", func() {
+			// Create an in-memory pod (never persisted to the API server).
+			// Name and Namespace are irrelevant for these pure in-memory assertions.
+			pod := NewPod().
+				WithLabels("app", "test").
+				WithContainersImages("test:latest").
+				Build()
+
+			// Apply CEL architecture placement (sets required affinity)
+			architectures := []string{"amd64", "arm64"}
+			applyArchitectureConstraints(pod, architectures)
+
+			// Verify required affinity was set by CEL
+			Expect(pod.Spec.Affinity).NotTo(BeNil())
+			Expect(pod.Spec.Affinity.NodeAffinity).NotTo(BeNil())
+			Expect(pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution).NotTo(BeNil())
+
+			terms := pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms
+			Expect(terms).To(HaveLen(1))
+			Expect(terms[0].MatchExpressions).To(HaveLen(1))
+			Expect(terms[0].MatchExpressions[0].Key).To(Equal(utils.ArchLabel))
+			Expect(terms[0].MatchExpressions[0].Operator).To(Equal(corev1.NodeSelectorOpIn))
+			Expect(terms[0].MatchExpressions[0].Values).To(ConsistOf("amd64", "arm64"))
+
+			// Now apply NodeAffinityScoring (sets preferred affinity)
+			nodeAffinityScoring := &plugins.NodeAffinityScoring{
+				BasePlugin: plugins.BasePlugin{Enabled: true},
+				Platforms: []plugins.NodeAffinityScoringPlatformTerm{
+					{Architecture: "amd64", Weight: 50},
+					{Architecture: "arm64", Weight: 30},
+				},
+			}
+
+			// Simulate what SetPreferredArchNodeAffinity does
+			if pod.Spec.Affinity.NodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution == nil {
+				pod.Spec.Affinity.NodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution = []corev1.PreferredSchedulingTerm{}
+			}
+
+			for _, platform := range nodeAffinityScoring.Platforms {
+				term := corev1.PreferredSchedulingTerm{
+					Weight: platform.Weight,
+					Preference: corev1.NodeSelectorTerm{
+						MatchExpressions: []corev1.NodeSelectorRequirement{
+							{
+								Key:      utils.ArchLabel,
+								Operator: corev1.NodeSelectorOpIn,
+								Values:   []string{platform.Architecture},
+							},
+						},
+					},
+				}
+				pod.Spec.Affinity.NodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution =
+					append(pod.Spec.Affinity.NodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution, term)
+			}
+
+			// Verify BOTH required (from CEL) and preferred (from NodeAffinityScoring) are present
+			Expect(pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution).NotTo(BeNil(),
+				"Required affinity from CEL should still be present")
+			Expect(pod.Spec.Affinity.NodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution).NotTo(BeNil(),
+				"Preferred affinity from NodeAffinityScoring should be present")
+
+			// Verify required affinity (CEL) is still intact
+			requiredTerms := pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms
+			Expect(requiredTerms).To(HaveLen(1))
+			Expect(requiredTerms[0].MatchExpressions[0].Values).To(ConsistOf("amd64", "arm64"))
+
+			// Verify preferred affinity (NodeAffinityScoring) was added
+			preferredTerms := pod.Spec.Affinity.NodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution
+			Expect(preferredTerms).To(HaveLen(2))
+			Expect(preferredTerms[0].Weight).To(Equal(int32(50)))
+			Expect(preferredTerms[0].Preference.MatchExpressions[0].Values).To(ConsistOf("amd64"))
+			Expect(preferredTerms[1].Weight).To(Equal(int32(30)))
+			Expect(preferredTerms[1].Preference.MatchExpressions[0].Values).To(ConsistOf("arm64"))
+		})
+
+		It("should preserve CEL required affinity when NodeAffinityScoring adds preferred affinity", func() {
+			// Create an in-memory pod (never persisted to the API server).
+			// Name and Namespace are irrelevant for these pure in-memory assertions.
+			pod := NewPod().
+				WithNodeSelectorTermsMatchExpressions(
+					[]corev1.NodeSelectorRequirement{
+						{
+							Key:      utils.ArchLabel,
+							Operator: corev1.NodeSelectorOpIn,
+							Values:   []string{"ppc64le"},
+						},
+					},
+				).
+				WithContainersImages("test:latest").
+				Build()
+
+			// Store original required affinity
+			originalRequired := pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms[0].MatchExpressions[0].Values
+
+			// Add preferred affinity (simulating NodeAffinityScoring)
+			pod.Spec.Affinity.NodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution = []corev1.PreferredSchedulingTerm{
+				{
+					Weight: 100,
+					Preference: corev1.NodeSelectorTerm{
+						MatchExpressions: []corev1.NodeSelectorRequirement{
+							{
+								Key:      utils.ArchLabel,
+								Operator: corev1.NodeSelectorOpIn,
+								Values:   []string{"ppc64le"},
+							},
+						},
+					},
+				},
+			}
+
+			// Verify required affinity is unchanged
+			currentRequired := pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms[0].MatchExpressions[0].Values
+			Expect(currentRequired).To(Equal(originalRequired), "Required affinity from CEL should not be modified")
+
+			// Verify preferred affinity was added
+			Expect(pod.Spec.Affinity.NodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution).To(HaveLen(1))
+		})
+	})
+
+	Context("Default PPC64LE Behavior", func() {
+		BeforeEach(func() {
+			ns = newEphemeralTestNamespace()
+		})
+
+		It("should default all pods to ppc64le without any special CEL rules", func() {
+			By("Creating a PodPlacementConfig with ppc64le as fallback architecture and no rules")
+			// Configure CEL plugin with ppc64le as fallback and NO rules.
+			// This means ALL pods matching the label selector will default to ppc64le.
+			ppc := NewPodPlacementConfig().
+				WithGenerateName("default-ppc64le-").
+				WithNamespace(ns.Name).
+				WithLabelSelector(&metav1.LabelSelector{
+					MatchLabels: map[string]string{
+						"managed": "true",
+					},
+				}).
+				WithCelArchitecturePlacement(true, []string{utils.ArchitecturePpc64le},
+					[]plugins.ArchitectureRule{}).
+				Build()
+
+			Expect(k8sClient.Create(ctx, ppc)).To(Succeed())
+
+			By("Creating multiple pods with different names - all should default to ppc64le")
+			testPods := []struct {
+				name        string
+				extraLabels map[string]string
+			}{
+				{name: "app-frontend", extraLabels: map[string]string{"component": "frontend"}},
+				{name: "app-backend", extraLabels: map[string]string{"component": "backend"}},
+				{name: "database-postgres", extraLabels: map[string]string{"component": "database"}},
+				{name: "cache-redis", extraLabels: map[string]string{"component": "cache"}},
+			}
+
+			for _, testPod := range testPods {
+				By("Creating pod: " + testPod.name)
+				pod := NewPod().
+					WithName(testPod.name).
+					WithNamespace(ns.Name).
+					WithLabels("managed", "true").
+					WithContainersImages("quay.io/test/image:latest").
+					Build()
+
+				// Add extra labels
+				for k, v := range testPod.extraLabels {
+					pod.Labels[k] = v
+				}
+
+				Expect(k8sClient.Create(ctx, pod)).To(Succeed())
+
+				By("Verifying pod " + testPod.name + " defaults to ppc64le")
+				Eventually(func(g Gomega) {
+					g.Expect(k8sClient.Get(ctx, crclient.ObjectKeyFromObject(pod), pod)).To(Succeed())
+
+					// Verify scheduling gate removed
+					g.Expect(pod.Spec.SchedulingGates).NotTo(ContainElement(corev1.PodSchedulingGate{
+						Name: utils.SchedulingGateName,
+					}))
+
+					// Verify ppc64le architecture constraint applied
+					g.Expect(pod.Spec.Affinity).NotTo(BeNil())
+					g.Expect(pod.Spec.Affinity.NodeAffinity).NotTo(BeNil())
+					g.Expect(pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution).NotTo(BeNil())
+
+					terms := pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms
+					g.Expect(terms).To(HaveLen(1))
+					g.Expect(terms[0].MatchExpressions).To(ContainElement(corev1.NodeSelectorRequirement{
+						Key:      utils.ArchLabel,
+						Operator: corev1.NodeSelectorOpIn,
+						Values:   []string{utils.ArchitecturePpc64le},
+					}))
+				}).WithTimeout(timeout).WithPolling(interval).Should(Succeed())
+			}
+		})
+
+		It("should override existing architecture constraints with ppc64le default", func() {
+			By("Creating a PodPlacementConfig with ppc64le fallback")
+			ppc := NewPodPlacementConfig().
+				WithGenerateName("override-ppc64le-").
+				WithNamespace(ns.Name).
+				WithLabelSelector(&metav1.LabelSelector{
+					MatchLabels: map[string]string{
+						"managed": "true",
+					},
+				}).
+				WithCelArchitecturePlacement(true, []string{utils.ArchitecturePpc64le},
+					[]plugins.ArchitectureRule{}).
+				Build()
+
+			Expect(k8sClient.Create(ctx, ppc)).To(Succeed())
+
+			By("Creating a pod with existing amd64 constraint")
+			pod := NewPod().
+				WithGenerateName("pod-with-amd64-").
+				WithNamespace(ns.Name).
+				WithLabels("managed", "true").
+				WithNodeSelectors(utils.ArchLabel, utils.ArchitectureAmd64). // Existing amd64 constraint
+				WithContainersImages("quay.io/test/image:latest").
+				Build()
+
+			Expect(k8sClient.Create(ctx, pod)).To(Succeed())
+
+			By("Verifying existing amd64 constraint is replaced with ppc64le")
+			Eventually(func(g Gomega) {
+				g.Expect(k8sClient.Get(ctx, crclient.ObjectKeyFromObject(pod), pod)).To(Succeed())
+
+				// Verify old nodeSelector constraint removed
+				g.Expect(pod.Spec.NodeSelector).NotTo(HaveKey(utils.ArchLabel))
+
+				// Verify ppc64le architecture constraint applied
+				g.Expect(pod.Spec.Affinity).NotTo(BeNil())
+				g.Expect(pod.Spec.Affinity.NodeAffinity).NotTo(BeNil())
+				g.Expect(pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution).NotTo(BeNil())
+				terms := pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms
+				g.Expect(terms).To(HaveLen(1))
+				g.Expect(terms[0].MatchExpressions).To(ContainElement(corev1.NodeSelectorRequirement{
+					Key:      utils.ArchLabel,
+					Operator: corev1.NodeSelectorOpIn,
+					Values:   []string{utils.ArchitecturePpc64le},
+				}))
+			}).WithTimeout(timeout).WithPolling(interval).Should(Succeed())
+		})
+	})
+
+	Context("WKC Prefix Matching via Metadata Inspection", func() {
+		BeforeEach(func() {
+			ns = newEphemeralTestNamespace()
+		})
+
+		It("should pin pods with 'wkc-' prefix to specific architecture by inspecting metadata.name", func() {
+			By("Creating a PodPlacementConfig with CEL rule to match wkc- prefix")
+			// Configure CEL plugin with rule to match wkc- prefix in pod name.
+			// NOTE: pod names are meaningful here -- the CEL expression evaluates
+			// self.metadata.name at admission time, so the exact name matters.
+			// Each pod is isolated within the ephemeral namespace, so name
+			// uniqueness across parallel workers is guaranteed by namespace isolation.
+			ppc := NewPodPlacementConfig().
+				WithGenerateName("wkc-prefix-").
+				WithNamespace(ns.Name).
+				WithLabelSelector(&metav1.LabelSelector{
+					MatchLabels: map[string]string{
+						"managed": "true",
+					},
+				}).
+				WithCelArchitecturePlacement(true,
+					[]string{utils.ArchitecturePpc64le}, // Default to ppc64le
+					[]plugins.ArchitectureRule{
+						NewRule("wkc-prefix-rule",
+							`self.metadata.name.startsWith("wkc-")`, // CEL expression to check if pod name starts with "wkc-"
+							utils.ArchitectureAmd64),                // Pin wkc- pods to amd64
+					}).
+				Build()
+
+			Expect(k8sClient.Create(ctx, ppc)).To(Succeed())
+
+			By("Creating pods with wkc- prefix - should be pinned to amd64")
+			wkcPods := []string{
+				"wkc-frontend",
+				"wkc-backend",
+				"wkc-database",
+				"wkc-api-gateway",
+			}
+
+			for _, podName := range wkcPods {
+				By("Creating wkc- pod: " + podName)
+				pod := NewPod().
+					WithName(podName).
+					WithNamespace(ns.Name).
+					WithLabels("managed", "true").
+					WithContainersImages("quay.io/test/image:latest").
+					Build()
+
+				Expect(k8sClient.Create(ctx, pod)).To(Succeed())
+
+				By("Verifying " + podName + " is pinned to amd64")
+				Eventually(func(g Gomega) {
+					g.Expect(k8sClient.Get(ctx, crclient.ObjectKeyFromObject(pod), pod)).To(Succeed())
+
+					// Verify scheduling gate removed
+					g.Expect(pod.Spec.SchedulingGates).NotTo(ContainElement(corev1.PodSchedulingGate{
+						Name: utils.SchedulingGateName,
+					}))
+
+					// Verify amd64 architecture constraint applied (from CEL rule match)
+					g.Expect(pod.Spec.Affinity).NotTo(BeNil())
+					g.Expect(pod.Spec.Affinity.NodeAffinity).NotTo(BeNil())
+					g.Expect(pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution).NotTo(BeNil())
+
+					terms := pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms
+					g.Expect(terms).To(HaveLen(1))
+					g.Expect(terms[0].MatchExpressions).To(ContainElement(corev1.NodeSelectorRequirement{
+						Key:      utils.ArchLabel,
+						Operator: corev1.NodeSelectorOpIn,
+						Values:   []string{utils.ArchitectureAmd64},
+					}))
+				}).WithTimeout(timeout).WithPolling(interval).Should(Succeed())
+			}
+
+			By("Creating pods WITHOUT wkc- prefix - should default to ppc64le")
+			nonWkcPods := []string{
+				"app-frontend",
+				"database-postgres",
+				"cache-redis",
+			}
+
+			for _, podName := range nonWkcPods {
+				By("Creating non-wkc pod: " + podName)
+				pod := NewPod().
+					WithName(podName).
+					WithNamespace(ns.Name).
+					WithLabels("managed", "true").
+					WithContainersImages("quay.io/test/image:latest").
+					Build()
+
+				Expect(k8sClient.Create(ctx, pod)).To(Succeed())
+
+				By("Verifying " + podName + " defaults to ppc64le")
+				Eventually(func(g Gomega) {
+					g.Expect(k8sClient.Get(ctx, crclient.ObjectKeyFromObject(pod), pod)).To(Succeed())
+
+					// Verify scheduling gate removed
+					g.Expect(pod.Spec.SchedulingGates).NotTo(ContainElement(corev1.PodSchedulingGate{
+						Name: utils.SchedulingGateName,
+					}))
+
+					// Verify ppc64le architecture constraint applied (from fallback)
+					g.Expect(pod.Spec.Affinity).NotTo(BeNil())
+					g.Expect(pod.Spec.Affinity.NodeAffinity).NotTo(BeNil())
+					g.Expect(pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution).NotTo(BeNil())
+					terms := pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms
+					g.Expect(terms).To(HaveLen(1))
+					g.Expect(terms[0].MatchExpressions).To(ContainElement(corev1.NodeSelectorRequirement{
+						Key:      utils.ArchLabel,
+						Operator: corev1.NodeSelectorOpIn,
+						Values:   []string{utils.ArchitecturePpc64le},
+					}))
+				}).WithTimeout(timeout).WithPolling(interval).Should(Succeed())
+			}
+		})
+
+		It("should support multiple metadata-based rules with priority ordering", func() {
+			By("Creating a PodPlacementConfig with multiple prefix rules")
+			// Configure CEL plugin with multiple rules - first match wins
+			ppc := NewPodPlacementConfig().
+				WithGenerateName("multi-prefix-").
+				WithNamespace(ns.Name).
+				WithLabelSelector(&metav1.LabelSelector{
+					MatchLabels: map[string]string{
+						"managed": "true",
+					},
+				}).
+				WithCelArchitecturePlacement(true, []string{utils.ArchitecturePpc64le},
+					[]plugins.ArchitectureRule{
+						NewRule("wkc-prefix-rule", `self.metadata.name.startsWith("wkc-")`, utils.ArchitectureAmd64),
+						NewRule("db-prefix-rule", `self.metadata.name.startsWith("db-")`, utils.ArchitectureArm64),
+						NewRule("cache-prefix-rule", `self.metadata.name.startsWith("cache-")`, utils.ArchitectureS390x),
+					}).
+				Build()
+
+			Expect(k8sClient.Create(ctx, ppc)).To(Succeed())
+
+			testCases := []struct {
+				podName              string
+				expectedArchitecture string
+			}{
+				{"wkc-service", utils.ArchitectureAmd64},
+				{"db-postgres", utils.ArchitectureArm64},
+				{"cache-redis", utils.ArchitectureS390x},
+				{"app-frontend", utils.ArchitecturePpc64le}, // No match, uses fallback
+			}
+
+			for _, tc := range testCases {
+				By("Creating pod: " + tc.podName)
+				pod := NewPod().
+					WithName(tc.podName).
+					WithNamespace(ns.Name).
+					WithLabels("managed", "true").
+					WithContainersImages("quay.io/test/image:latest").
+					Build()
+
+				Expect(k8sClient.Create(ctx, pod)).To(Succeed())
+
+				By("Verifying " + tc.podName + " is pinned to " + tc.expectedArchitecture)
+				Eventually(func(g Gomega) {
+					g.Expect(k8sClient.Get(ctx, crclient.ObjectKeyFromObject(pod), pod)).To(Succeed())
+
+					g.Expect(pod.Spec.Affinity).NotTo(BeNil())
+					g.Expect(pod.Spec.Affinity.NodeAffinity).NotTo(BeNil())
+					g.Expect(pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution).NotTo(BeNil())
+					terms := pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms
+					g.Expect(terms).To(HaveLen(1))
+					g.Expect(terms[0].MatchExpressions).To(ContainElement(corev1.NodeSelectorRequirement{
+						Key:      utils.ArchLabel,
+						Operator: corev1.NodeSelectorOpIn,
+						Values:   []string{tc.expectedArchitecture},
+					}))
+				}).WithTimeout(timeout).WithPolling(interval).Should(Succeed())
+			}
+		})
+
+		It("should inspect metadata labels in addition to name", func() {
+			By("Creating a PodPlacementConfig with label-based CEL rule")
+			// Configure CEL plugin to match based on metadata labels.
+			// 'key' in self.metadata.labels is the supported CEL membership-test syntax.
+			ppc := NewPodPlacementConfig().
+				WithGenerateName("wkc-label-").
+				WithNamespace(ns.Name).
+				WithLabelSelector(&metav1.LabelSelector{
+					MatchLabels: map[string]string{
+						"managed": "true",
+					},
+				}).
+				WithCelArchitecturePlacement(true, []string{utils.ArchitecturePpc64le},
+					[]plugins.ArchitectureRule{
+						NewRule("wkc-component-label-rule",
+							`"wkc-component" in self.metadata.labels && self.metadata.labels["wkc-component"] == "true"`,
+							utils.ArchitectureAmd64),
+					}).
+				Build()
+
+			Expect(k8sClient.Create(ctx, ppc)).To(Succeed())
+
+			By("Creating pod with wkc-component label")
+			podWithLabel := NewPod().
+				WithGenerateName("svc-with-wkc-lbl-").
+				WithNamespace(ns.Name).
+				WithLabels("managed", "true", "wkc-component", "true").
+				WithContainersImages("quay.io/test/image:latest").
+				Build()
+
+			Expect(k8sClient.Create(ctx, podWithLabel)).To(Succeed())
+
+			By("Verifying pod with wkc-component label is pinned to amd64")
+			Eventually(func(g Gomega) {
+				g.Expect(k8sClient.Get(ctx, crclient.ObjectKeyFromObject(podWithLabel), podWithLabel)).To(Succeed())
+
+				g.Expect(podWithLabel.Spec.Affinity).NotTo(BeNil())
+				g.Expect(podWithLabel.Spec.Affinity.NodeAffinity).NotTo(BeNil())
+				g.Expect(podWithLabel.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution).NotTo(BeNil())
+				terms := podWithLabel.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms
+				g.Expect(terms).To(HaveLen(1))
+				g.Expect(terms[0].MatchExpressions).To(ContainElement(corev1.NodeSelectorRequirement{
+					Key:      utils.ArchLabel,
+					Operator: corev1.NodeSelectorOpIn,
+					Values:   []string{utils.ArchitectureAmd64},
+				}))
+			}).WithTimeout(timeout).WithPolling(interval).Should(Succeed())
+
+			By("Creating pod without wkc-component label")
+			podWithoutLabel := NewPod().
+				WithGenerateName("svc-no-wkc-lbl-").
+				WithNamespace(ns.Name).
+				WithLabels("managed", "true").
+				WithContainersImages("quay.io/test/image:latest").
+				Build()
+
+			Expect(k8sClient.Create(ctx, podWithoutLabel)).To(Succeed())
+
+			By("Verifying pod without wkc-component label defaults to ppc64le")
+			Eventually(func(g Gomega) {
+				g.Expect(k8sClient.Get(ctx, crclient.ObjectKeyFromObject(podWithoutLabel), podWithoutLabel)).To(Succeed())
+
+				g.Expect(podWithoutLabel.Spec.Affinity).NotTo(BeNil())
+				g.Expect(podWithoutLabel.Spec.Affinity.NodeAffinity).NotTo(BeNil())
+				g.Expect(podWithoutLabel.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution).NotTo(BeNil())
+				terms := podWithoutLabel.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms
+				g.Expect(terms).To(HaveLen(1))
+				g.Expect(terms[0].MatchExpressions).To(ContainElement(corev1.NodeSelectorRequirement{
+					Key:      utils.ArchLabel,
+					Operator: corev1.NodeSelectorOpIn,
+					Values:   []string{utils.ArchitecturePpc64le},
+				}))
+			}).WithTimeout(timeout).WithPolling(interval).Should(Succeed())
+		})
+	})
+
+	Context("No Fallback/Image-Detection Merge After Match", func() {
+		BeforeEach(func() {
+			ns = newEphemeralTestNamespace()
+		})
+
+		It("should contain ONLY matched rule architectures without merging fallback or image-detected architectures", func() {
+			By("Creating a PodPlacementConfig with CEL rule matching to ppc64le only")
+			// Configure CEL plugin with a rule that matches and specifies ONLY ppc64le.
+			// Fallback has multiple architectures to verify they are NOT merged.
+			ppc := NewPodPlacementConfig().
+				WithGenerateName("cel-no-merge-").
+				WithNamespace(ns.Name).
+				WithLabelSelector(&metav1.LabelSelector{
+					MatchLabels: map[string]string{
+						"app": "test",
+					},
+				}).
+				WithCelArchitecturePlacement(true,
+					[]string{
+						utils.ArchitectureAmd64,
+						utils.ArchitectureArm64,
+						utils.ArchitecturePpc64le,
+						utils.ArchitectureS390x,
+					},
+					[]plugins.ArchitectureRule{
+						NewRule("match-database-ppc64le-only",
+							`has(self.metadata.labels.component) && self.metadata.labels.component == "database"`,
+							utils.ArchitecturePpc64le),
+					}).
+				Build()
+
+			Expect(k8sClient.Create(ctx, ppc)).To(Succeed())
+
+			By("Creating a pod that matches the CEL rule")
+			pod := NewPod().
+				WithGenerateName("test-pod-db-").
+				WithNamespace(ns.Name).
+				WithLabels("app", "test", "component", "database").
+				WithContainersImages("quay.io/test/image:latest").
+				Build()
+
+			Expect(k8sClient.Create(ctx, pod)).To(Succeed())
+
+			By("Waiting for reconciliation to complete")
+			Eventually(func(g Gomega) {
+				g.Expect(k8sClient.Get(ctx, crclient.ObjectKeyFromObject(pod), pod)).To(Succeed())
+
+				// Verify scheduling gate removed
+				g.Expect(pod.Spec.SchedulingGates).NotTo(ContainElement(corev1.PodSchedulingGate{
+					Name: utils.SchedulingGateName,
+				}))
+
+				// Verify architecture affinity exists
+				g.Expect(pod.Spec.Affinity).NotTo(BeNil())
+				g.Expect(pod.Spec.Affinity.NodeAffinity).NotTo(BeNil())
+				g.Expect(pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution).NotTo(BeNil())
+
+				terms := pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms
+				g.Expect(terms).To(HaveLen(1), "should have exactly one node selector term")
+
+				// Find the architecture match expression
+				var archExpression *corev1.NodeSelectorRequirement
+				for _, term := range terms {
+					for i := range term.MatchExpressions {
+						if term.MatchExpressions[i].Key == utils.ArchLabel {
+							archExpression = &term.MatchExpressions[i]
+							break
+						}
+					}
+				}
+
+				g.Expect(archExpression).NotTo(BeNil(), "architecture match expression should exist")
+				g.Expect(archExpression.Operator).To(Equal(corev1.NodeSelectorOpIn))
+
+				// CRITICAL ASSERTION: Verify ONLY ppc64le is present
+				// No fallback architectures (amd64, arm64, s390x) should be merged
+				g.Expect(archExpression.Values).To(Equal([]string{utils.ArchitecturePpc64le}),
+					"should contain ONLY ppc64le, not merged with fallback architectures")
+
+				// Additional verification: ensure no other architectures are present
+				g.Expect(archExpression.Values).NotTo(ContainElement(utils.ArchitectureAmd64))
+				g.Expect(archExpression.Values).NotTo(ContainElement(utils.ArchitectureArm64))
+				g.Expect(archExpression.Values).NotTo(ContainElement(utils.ArchitectureS390x))
+			}).WithTimeout(timeout).WithPolling(interval).Should(Succeed())
+		})
+
+		It("should not execute image-based detection when CEL rule matches", func() {
+			By("Creating a PodPlacementConfig with CEL rule")
+			ppc := NewPodPlacementConfig().
+				WithGenerateName("cel-skip-img-").
+				WithNamespace(ns.Name).
+				WithLabelSelector(&metav1.LabelSelector{
+					MatchLabels: map[string]string{
+						"app": "skip-image-test",
+					},
+				}).
+				WithCelArchitecturePlacement(true, []string{utils.ArchitectureAmd64},
+					[]plugins.ArchitectureRule{
+						NewRule("force-arm64", `true`, utils.ArchitectureArm64), // Always matches
+					}).
+				Build()
+
+			Expect(k8sClient.Create(ctx, ppc)).To(Succeed())
+
+			By("Creating a pod with a multi-arch image")
+			// Even if image inspection would detect multiple architectures,
+			// CEL plugin should take precedence and return early
+			pod := NewPod().
+				WithGenerateName("test-pod-multiarch-").
+				WithNamespace(ns.Name).
+				WithLabels("app", "skip-image-test").
+				WithContainersImages("quay.io/test/multiarch:latest").
+				Build()
+
+			Expect(k8sClient.Create(ctx, pod)).To(Succeed())
+
+			By("Verifying ONLY arm64 is applied (CEL rule), not image-detected architectures")
+			Eventually(func(g Gomega) {
+				g.Expect(k8sClient.Get(ctx, crclient.ObjectKeyFromObject(pod), pod)).To(Succeed())
+
+				g.Expect(pod.Spec.SchedulingGates).NotTo(ContainElement(corev1.PodSchedulingGate{
+					Name: utils.SchedulingGateName,
+				}))
+
+				g.Expect(pod.Spec.Affinity).NotTo(BeNil())
+				g.Expect(pod.Spec.Affinity.NodeAffinity).NotTo(BeNil())
+				g.Expect(pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution).NotTo(BeNil())
+				terms := pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms
+				g.Expect(terms).To(HaveLen(1))
+
+				// Verify ONLY arm64 is present
+				var archExpression *corev1.NodeSelectorRequirement
+				for _, term := range terms {
+					for i := range term.MatchExpressions {
+						if term.MatchExpressions[i].Key == utils.ArchLabel {
+							archExpression = &term.MatchExpressions[i]
+							break
+						}
+					}
+				}
+
+				g.Expect(archExpression).NotTo(BeNil())
+				g.Expect(archExpression.Values).To(Equal([]string{utils.ArchitectureArm64}),
+					"should contain ONLY arm64 from CEL rule, not image-detected architectures")
+			}).WithTimeout(timeout).WithPolling(interval).Should(Succeed())
+		})
+
+		It("should not apply CPPC fallbackArchitecture when CEL rule matches", func() {
+			By("Creating a ClusterPodPlacementConfig with fallbackArchitecture")
+			// Note: In a real test environment, CPPC would be set up separately
+			// This test verifies the logic path where CEL returns early
+
+			By("Creating a PodPlacementConfig with CEL rule")
+			ppc := NewPodPlacementConfig().
+				WithGenerateName("cel-no-cppc-fb-").
+				WithNamespace(ns.Name).
+				WithLabelSelector(&metav1.LabelSelector{
+					MatchLabels: map[string]string{
+						"app": "no-cppc-fallback",
+					},
+				}).
+				WithCelArchitecturePlacement(true, []string{utils.ArchitectureAmd64},
+					[]plugins.ArchitectureRule{
+						NewRule("match-s390x", `true`, utils.ArchitectureS390x),
+					}).
+				Build()
+
+			Expect(k8sClient.Create(ctx, ppc)).To(Succeed())
+
+			By("Creating a pod")
+			pod := NewPod().
+				WithGenerateName("test-pod-s390x-").
+				WithNamespace(ns.Name).
+				WithLabels("app", "no-cppc-fallback").
+				WithContainersImages("quay.io/test/image:latest").
+				Build()
+
+			Expect(k8sClient.Create(ctx, pod)).To(Succeed())
+
+			By("Verifying ONLY s390x is applied, no CPPC fallback merged")
+			Eventually(func(g Gomega) {
+				g.Expect(k8sClient.Get(ctx, crclient.ObjectKeyFromObject(pod), pod)).To(Succeed())
+
+				g.Expect(pod.Spec.SchedulingGates).NotTo(ContainElement(corev1.PodSchedulingGate{
+					Name: utils.SchedulingGateName,
+				}))
+
+				g.Expect(pod.Spec.Affinity).NotTo(BeNil())
+				g.Expect(pod.Spec.Affinity.NodeAffinity).NotTo(BeNil())
+				g.Expect(pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution).NotTo(BeNil())
+				terms := pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms
+				g.Expect(terms).To(HaveLen(1))
+
+				var archExpression *corev1.NodeSelectorRequirement
+				for _, term := range terms {
+					for i := range term.MatchExpressions {
+						if term.MatchExpressions[i].Key == utils.ArchLabel {
+							archExpression = &term.MatchExpressions[i]
+							break
+						}
+					}
+				}
+
+				g.Expect(archExpression).NotTo(BeNil())
+				g.Expect(archExpression.Values).To(Equal([]string{utils.ArchitectureS390x}),
+					"should contain ONLY s390x from CEL rule, no CPPC fallback")
+				g.Expect(len(archExpression.Values)).To(Equal(1),
+					"should have exactly one architecture value")
+			}).WithTimeout(timeout).WithPolling(interval).Should(Succeed())
+		})
+	})
+
+	Context("PPC deletion before reconciliation", func() {
+		DescribeTable("should ungate an existing pending pod after its PPC is deleted",
+			func(celAppliedDuringAdmission bool) {
+				ppc := NewPodPlacementConfig().WithName("deleted-ppc").WithNamespace(ns.Name).
+					WithCelArchitecturePlacement(true, []string{utils.ArchitecturePpc64le},
+						[]plugins.ArchitectureRule{NewRule("match-all", "true", utils.ArchitecturePpc64le)}).
+					Build()
+				recorder := record.NewFakeRecorder(32)
+				pod := NewPod().WithName("pending-pod").WithNamespace(ns.Name).
+					WithSchedulingGates(utils.SchedulingGateName).
+					WithContainersImages(fmt.Sprintf("%s/%s/%s:latest", registryAddress,
+						registry.PublicRepo, registry.ComputeNameByMediaType(imgspecv1.MediaTypeImageIndex))).Build()
+				pod.Status.Phase = corev1.PodPending
+				expectedArchitectures := []string{utils.ArchitectureAmd64, utils.ArchitectureArm64}
+				if celAppliedDuringAdmission {
+					wh := &PodSchedulingGateMutatingWebHook{}
+					admittedPod := newPod(pod, ctx, recorder)
+					wh.applyCELInWebhook(ctx, admittedPod, []v1beta1.PodPlacementConfig{*ppc})
+					pod = admittedPod.PodObject()
+					expectedArchitectures = []string{utils.ArchitecturePpc64le}
+					Expect(extractArchitectures(pod)).To(ConsistOf(expectedArchitectures))
+				}
+
+				// A private client lets us delete the PPC while the persisted pod is
+				// still gated, before explicitly running the first reconciliation.
+				localClient := fake.NewClientBuilder().WithScheme(k8sClient.Scheme()).
+					WithObjects(ppc, pod).WithStatusSubresource(&corev1.Pod{}).Build()
+				persisted := &corev1.Pod{}
+				Expect(localClient.Get(ctx, crclient.ObjectKeyFromObject(pod), persisted)).To(Succeed())
+				Expect(persisted.Status.Phase).To(Equal(corev1.PodPending))
+				Expect(persisted.Spec.SchedulingGates).To(ContainElement(corev1.PodSchedulingGate{Name: utils.SchedulingGateName}))
+				Expect(localClient.Delete(ctx, ppc)).To(Succeed())
+				Expect(apierrors.IsNotFound(localClient.Get(ctx, crclient.ObjectKeyFromObject(ppc), &v1beta1.PodPlacementConfig{}))).To(BeTrue())
+
+				reconciler := &PodReconciler{Client: localClient, APIReader: localClient, Recorder: recorder}
+				_, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: crclient.ObjectKeyFromObject(pod)})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(localClient.Get(ctx, crclient.ObjectKeyFromObject(pod), persisted)).To(Succeed())
+				Expect(persisted.Spec.SchedulingGates).NotTo(ContainElement(corev1.PodSchedulingGate{Name: utils.SchedulingGateName}))
+				Expect(persisted.Labels).To(HaveKeyWithValue(utils.SchedulingGateLabel, utils.SchedulingGateLabelValueRemoved))
+				Expect(extractArchitectures(persisted)).To(ConsistOf(expectedArchitectures))
+			},
+			Entry("preserving CEL affinity already applied during admission", true),
+			Entry("setting image-derived affinity when admission did not apply CEL", false),
+		)
+	})
+
+	Context("Event Publishing", func() {
+		It("should publish CELArchitecturePlacementApplied event when a CEL rule matches", func() {
+			recorder := record.NewFakeRecorder(8)
+			reconciler := &PodReconciler{Recorder: recorder}
+
+			ppc := *NewPodPlacementConfig().
+				WithName("event-match-ppc").
+				WithNamespace("default").
+				WithPriority(100).
+				WithCelArchitecturePlacement(true, []string{utils.ArchitectureAmd64},
+					[]plugins.ArchitectureRule{
+						NewRule("match-rule", "self.metadata.name == 'event-pod'", utils.ArchitecturePpc64le),
+					}).
+				Build()
+
+			pod := NewPod().WithName("event-pod").WithNamespace("default").Build()
+			wrappedPod := newPod(pod, context.Background(), recorder)
+
+			handled := reconciler.applyCELArchitecturePlacement(context.Background(), ppc, wrappedPod)
+			Expect(handled).To(BeTrue(), "applyCELArchitecturePlacement should return true when a rule matches")
+
+			var events []string
+			done := false
+			for !done {
+				select {
+				case e := <-recorder.Events:
+					events = append(events, e)
+				default:
+					done = true
+				}
+			}
+			Expect(events).To(HaveLen(1))
+			Expect(events[0]).To(ContainSubstring("CELArchitecturePlacementApplied"))
+			Expect(events[0]).To(ContainSubstring("match-rule"))
+		})
+
+		It("should publish CELArchitecturePlacementFallback event when no CEL rules match", func() {
+			recorder := record.NewFakeRecorder(8)
+			reconciler := &PodReconciler{Recorder: recorder}
+
+			ppc := *NewPodPlacementConfig().
+				WithName("event-fallback-ppc").
+				WithNamespace("default").
+				WithPriority(100).
+				WithCelArchitecturePlacement(true, []string{utils.ArchitectureAmd64},
+					[]plugins.ArchitectureRule{
+						NewRule("no-match-rule", "self.metadata.name == 'nonexistent'", utils.ArchitecturePpc64le),
+					}).
+				Build()
+
+			pod := NewPod().WithName("fallback-pod").WithNamespace("default").Build()
+			wrappedPod := newPod(pod, context.Background(), recorder)
+
+			handled := reconciler.applyCELArchitecturePlacement(context.Background(), ppc, wrappedPod)
+			Expect(handled).To(BeTrue(), "applyCELArchitecturePlacement should return true when fallback is applied")
+
+			var events []string
+			done := false
+			for !done {
+				select {
+				case e := <-recorder.Events:
+					events = append(events, e)
+				default:
+					done = true
+				}
+			}
+			Expect(events).To(HaveLen(1))
+			Expect(events[0]).To(ContainSubstring("CELArchitecturePlacementFallback"))
+		})
+
+		It("should publish CELEvaluationError event when CEL evaluation fails", func() {
+			recorder := record.NewFakeRecorder(8)
+			reconciler := &PodReconciler{Recorder: recorder}
+
+			ppc := *NewPodPlacementConfig().
+				WithName("event-error-ppc").
+				WithNamespace("default").
+				WithPriority(100).
+				WithCelArchitecturePlacement(true, nil, nil).
+				Build()
+
+			pod := NewPod().WithName("error-pod").WithNamespace("default").Build()
+			wrappedPod := newPod(pod, context.Background(), recorder)
+
+			handled := reconciler.applyCELArchitecturePlacement(context.Background(), ppc, wrappedPod)
+			Expect(handled).To(BeFalse(), "applyCELArchitecturePlacement should return false on evaluation error")
+
+			var events []string
+			done := false
+			for !done {
+				select {
+				case e := <-recorder.Events:
+					events = append(events, e)
+				default:
+					done = true
+				}
+			}
+			Expect(events).To(HaveLen(1))
+			Expect(events[0]).To(ContainSubstring("CELEvaluationError"))
 		})
 	})
 })

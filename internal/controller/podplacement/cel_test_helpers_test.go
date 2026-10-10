@@ -22,7 +22,8 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 
-	testingutils "github.com/openshift/multiarch-tuning-operator/pkg/testing/framework"
+	"github.com/openshift/multiarch-tuning-operator/pkg/testing/framework"
+	"github.com/openshift/multiarch-tuning-operator/pkg/utils"
 )
 
 // newEphemeralTestNamespace creates a uniquely-named Namespace suitable for a
@@ -36,8 +37,26 @@ import (
 //
 // The DeferCleanup registered here fires after each It regardless of whether
 // the spec passed or failed, ensuring no leftover resources between parallel workers.
+// extractArchitectures returns all architecture values found in the pod's
+// required node affinity match expressions for the kubernetes.io/arch label.
+func extractArchitectures(pod *corev1.Pod) []string {
+	var archs []string
+	if pod.Spec.Affinity == nil || pod.Spec.Affinity.NodeAffinity == nil ||
+		pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution == nil {
+		return archs
+	}
+	for _, term := range pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms {
+		for _, expr := range term.MatchExpressions {
+			if expr.Key == utils.ArchLabel {
+				archs = append(archs, expr.Values...)
+			}
+		}
+	}
+	return archs
+}
+
 func newEphemeralTestNamespace() *corev1.Namespace {
-	ns := testingutils.NewEphemeralNamespace("cel-")
+	ns := framework.NewEphemeralNamespace("cel-")
 	Expect(k8sClient.Create(ctx, ns)).To(Succeed())
 	DeferCleanup(func() {
 		// Best-effort: ignore NotFound in case the spec itself deleted the namespace.
