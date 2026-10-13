@@ -15,7 +15,6 @@ import (
 	. "github.com/onsi/gomega"
 
 	"github.com/openshift/multiarch-tuning-operator/api/common"
-	"github.com/openshift/multiarch-tuning-operator/api/common/plugins"
 	"github.com/openshift/multiarch-tuning-operator/api/v1beta1"
 	"github.com/openshift/multiarch-tuning-operator/internal/controller/podplacement/metrics"
 	mmoimage "github.com/openshift/multiarch-tuning-operator/pkg/image"
@@ -167,15 +166,7 @@ func TestPod_imagesNamesSet(t *testing.T) {
 	}{
 		{
 			name: "pod with a single container",
-			pod: &v1.Pod{
-				Spec: v1.PodSpec{
-					Containers: []v1.Container{
-						{
-							Image: "bar/foo:latest",
-						},
-					},
-				},
-			},
+			pod:  NewPod().WithContainersImages("bar/foo:latest").Build(),
 			want: sets.New[containerImage](containerImage{
 				imageName: "//bar/foo:latest",
 				skipCache: false,
@@ -297,20 +288,7 @@ func TestPod_getArchitecturePredicate(t *testing.T) {
 	}{
 		{
 			name: "pod with several containers using multi-arch images",
-			pod: &v1.Pod{
-				Spec: v1.PodSpec{
-					Containers: []v1.Container{
-						{
-							Image: fake.MultiArchImage,
-						},
-					},
-					InitContainers: []v1.Container{
-						{
-							Image: fake.MultiArchImage2,
-						},
-					},
-				},
-			},
+			pod:  NewPod().WithInitContainersImages(fake.MultiArchImage2).WithContainersImages(fake.MultiArchImage).Build(),
 			want: v1.NodeSelectorRequirement{
 				Key:      utils.ArchLabel,
 				Operator: v1.NodeSelectorOpIn,
@@ -318,19 +296,8 @@ func TestPod_getArchitecturePredicate(t *testing.T) {
 			},
 		},
 		{
-			name: "pod with non-existing image",
-			pod: &v1.Pod{
-				Spec: v1.PodSpec{
-					Containers: []v1.Container{
-						{
-							Image: fake.MultiArchImage,
-						},
-						{
-							Image: "non-existing-image",
-						},
-					},
-				},
-			},
+			name:    "pod with non-existing image",
+			pod:     NewPod().WithContainersImages(fake.MultiArchImage, "non-existing-image").Build(),
 			wantErr: true,
 			want:    v1.NodeSelectorRequirement{},
 		},
@@ -630,21 +597,9 @@ func TestPod_SetPreferredArchNodeAffinity(t *testing.T) {
 			imageInspectionCache = fake.FacadeSingleton()
 			pod := newPod(tt.pod, ctx, nil)
 			g := NewGomegaWithT(t)
-			cppc := &v1beta1.ClusterPodPlacementConfig{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "cluster",
-				},
-				Spec: v1beta1.ClusterPodPlacementConfigSpec{
-					Plugins: &plugins.Plugins{
-						NodeAffinityScoring: &plugins.NodeAffinityScoring{
-							BasePlugin: plugins.BasePlugin{
-								Enabled: true, // Enable the plugin
-							},
-							Platforms: []plugins.NodeAffinityScoringPlatformTerm{},
-						},
-					},
-				},
-			}
+			cppc := NewClusterPodPlacementConfig().
+				WithName("cluster").
+				WithNodeAffinityScoring(true).Build()
 			pod.SetPreferredArchNodeAffinity(cppc.Spec.Plugins.NodeAffinityScoring, v1beta1.ClusterPodPlacementConfigKind)
 			g.Expect(pod.Spec.Affinity).Should(Equal(tt.want.Spec.Affinity))
 			imageInspectionCache = mmoimage.FacadeSingleton()
@@ -1503,23 +1458,19 @@ func TestPod_filterMatchingPPCs(t *testing.T) {
 							MatchLabels: map[string]string{"app": "test"},
 						}).
 						Build(),
-					{
-						ObjectMeta: metav1.ObjectMeta{
-							Name:      "invalid-ppc",
-							Namespace: "test-ns",
-						},
-						Spec: v1beta1.PodPlacementConfigSpec{
-							LabelSelector: &metav1.LabelSelector{
-								MatchExpressions: []metav1.LabelSelectorRequirement{
-									{
-										Key:      "invalid~key", // Invalid key with special char
-										Operator: metav1.LabelSelectorOpIn,
-										Values:   []string{"value"},
-									},
+					*NewPodPlacementConfig().
+						WithName("invalid-ppc").
+						WithNamespace("test-ns").
+						WithLabelSelector(&metav1.LabelSelector{
+							MatchExpressions: []metav1.LabelSelectorRequirement{
+								{
+									Key:      "invalid~key",
+									Operator: metav1.LabelSelectorOpIn,
+									Values:   []string{"value"},
 								},
 							},
-						},
-					},
+						}).
+						Build(),
 				},
 			},
 			wantLen:   1,
@@ -1646,15 +1597,11 @@ func TestPod_hasMatchingPPCWithPlugin(t *testing.T) {
 		{
 			name: "single PPC with nil Plugins returns false",
 			matchingPPCs: []v1beta1.PodPlacementConfig{
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "ppc-nil-plugins",
-						Namespace: "test-ns",
-					},
-					Spec: v1beta1.PodPlacementConfigSpec{
-						Plugins: &plugins.LocalPlugins{},
-					},
-				},
+				*NewPodPlacementConfig().
+					WithName("ppc-nil-plugins").
+					WithNamespace("test-ns").
+					WithPlugins().
+					Build(),
 			},
 			want: false,
 		},
@@ -1845,40 +1792,32 @@ func TestPod_filterMatchingPPCs_EdgeCases(t *testing.T) {
 			podLabels: map[string]string{"app": "test"},
 			ppcList: &v1beta1.PodPlacementConfigList{
 				Items: []v1beta1.PodPlacementConfig{
-					{
-						ObjectMeta: metav1.ObjectMeta{
-							Name:      "invalid-1",
-							Namespace: "test-ns",
-						},
-						Spec: v1beta1.PodPlacementConfigSpec{
-							LabelSelector: &metav1.LabelSelector{
-								MatchExpressions: []metav1.LabelSelectorRequirement{
-									{
-										Key:      "invalid~key1",
-										Operator: metav1.LabelSelectorOpIn,
-										Values:   []string{"value"},
-									},
+					*NewPodPlacementConfig().
+						WithName("invalid-1").
+						WithNamespace("test-ns").
+						WithLabelSelector(&metav1.LabelSelector{
+							MatchExpressions: []metav1.LabelSelectorRequirement{
+								{
+									Key:      "invalid~key1",
+									Operator: metav1.LabelSelectorOpIn,
+									Values:   []string{"value"},
 								},
 							},
-						},
-					},
-					{
-						ObjectMeta: metav1.ObjectMeta{
-							Name:      "invalid-2",
-							Namespace: "test-ns",
-						},
-						Spec: v1beta1.PodPlacementConfigSpec{
-							LabelSelector: &metav1.LabelSelector{
-								MatchExpressions: []metav1.LabelSelectorRequirement{
-									{
-										Key:      "another-invalid@key",
-										Operator: metav1.LabelSelectorOpIn,
-										Values:   []string{"value"},
-									},
+						}).
+						Build(),
+					*NewPodPlacementConfig().
+						WithName("invalid-2").
+						WithNamespace("test-ns").
+						WithLabelSelector(&metav1.LabelSelector{
+							MatchExpressions: []metav1.LabelSelectorRequirement{
+								{
+									Key:      "another-invalid@key",
+									Operator: metav1.LabelSelectorOpIn,
+									Values:   []string{"value"},
 								},
 							},
-						},
-					},
+						}).
+						Build(),
 				},
 			},
 			wantLen:   0,

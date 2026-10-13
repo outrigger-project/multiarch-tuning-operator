@@ -2,6 +2,8 @@ package framework
 
 import (
 	"context"
+	"fmt"
+	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -123,8 +125,28 @@ func ValidateDeletion(cl client.Client, ctx context.Context, pluginObjectsSet ..
 		for _, obj := range getObjectsFor(pluginObjectsSet...) {
 			newObj := obj.DeepCopyObject().(client.Object)
 			err := cl.Get(ctx, client.ObjectKeyFromObject(obj), newObj)
-			g.Expect(err).To(gomega.HaveOccurred(), "the object should be deleted", err)
-			g.Expect(errors.IsNotFound(err)).To(gomega.BeTrue(), "the error should be \"Not found\"", err)
+			if errors.IsNotFound(err) {
+				continue
+			}
+			if err != nil {
+				g.Expect(err).NotTo(gomega.HaveOccurred(),
+					fmt.Sprintf("unexpected error fetching %s %s/%s",
+						newObj.GetObjectKind().GroupVersionKind().Kind,
+						obj.GetNamespace(), obj.GetName()))
+				continue
+			}
+			var details []string
+			details = append(details, fmt.Sprintf("kind=%s name=%s/%s",
+				newObj.GetObjectKind().GroupVersionKind().Kind,
+				obj.GetNamespace(), obj.GetName()))
+			if ts := newObj.GetDeletionTimestamp(); ts != nil {
+				details = append(details, fmt.Sprintf("deletionTimestamp=%s", ts.UTC().Format("15:04:05")))
+			}
+			if fins := newObj.GetFinalizers(); len(fins) > 0 {
+				details = append(details, fmt.Sprintf("finalizers=%v", fins))
+			}
+			g.Expect(true).To(gomega.BeFalse(),
+				fmt.Sprintf("object still exists: %s", strings.Join(details, ", ")))
 		}
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/event"
 
 	multiarchv1beta1 "github.com/openshift/multiarch-tuning-operator/api/v1beta1"
+	. "github.com/openshift/multiarch-tuning-operator/pkg/testing/builder"
 )
 
 func TestCppcUpdatePredicate(t *testing.T) {
@@ -22,77 +23,45 @@ func TestCppcUpdatePredicate(t *testing.T) {
 	}{
 		{
 			name: "generation change passes",
-			old: &multiarchv1beta1.ClusterPodPlacementConfig{
-				ObjectMeta: metav1.ObjectMeta{Generation: 1},
-			},
-			new: &multiarchv1beta1.ClusterPodPlacementConfig{
-				ObjectMeta: metav1.ObjectMeta{Generation: 2},
-			},
+			old:  NewClusterPodPlacementConfig().WithGeneration(1).Build(),
+			new:  NewClusterPodPlacementConfig().WithGeneration(2).Build(),
 			want: true,
 		},
 		{
 			name: "deletionTimestamp change passes",
-			old: &multiarchv1beta1.ClusterPodPlacementConfig{
-				ObjectMeta: metav1.ObjectMeta{Generation: 1},
-			},
-			new: &multiarchv1beta1.ClusterPodPlacementConfig{
-				ObjectMeta: metav1.ObjectMeta{Generation: 1, DeletionTimestamp: &now},
-			},
+			old:  NewClusterPodPlacementConfig().WithGeneration(1).Build(),
+			new:  NewClusterPodPlacementConfig().WithGeneration(1).WithDeletionTimestamp(&now).Build(),
 			want: true,
 		},
 		{
 			name: "finalizer change passes",
-			old: &multiarchv1beta1.ClusterPodPlacementConfig{
-				ObjectMeta: metav1.ObjectMeta{Generation: 1},
-			},
-			new: &multiarchv1beta1.ClusterPodPlacementConfig{
-				ObjectMeta: metav1.ObjectMeta{Generation: 1, Finalizers: []string{"cleanup"}},
-			},
+			old:  NewClusterPodPlacementConfig().WithGeneration(1).Build(),
+			new:  NewClusterPodPlacementConfig().WithGeneration(1).WithFinalizers("cleanup").Build(),
 			want: true,
 		},
 		{
 			name: "status-only update filtered",
-			old: &multiarchv1beta1.ClusterPodPlacementConfig{
-				ObjectMeta: metav1.ObjectMeta{Generation: 1},
-			},
-			new: &multiarchv1beta1.ClusterPodPlacementConfig{
-				ObjectMeta: metav1.ObjectMeta{Generation: 1},
-				Status: multiarchv1beta1.ClusterPodPlacementConfigStatus{
-					Conditions: []metav1.Condition{
-						{Type: "Available", Status: metav1.ConditionTrue, LastTransitionTime: now, Reason: "Ready"},
-					},
-				},
-			},
+			old:  NewClusterPodPlacementConfig().WithGeneration(1).Build(),
+			new: NewClusterPodPlacementConfig().WithGeneration(1).
+				WithStatusCondition("Available", metav1.ConditionTrue, "Ready", now).Build(),
 			want: false,
 		},
 		{
 			name: "label-only update filtered",
-			old: &multiarchv1beta1.ClusterPodPlacementConfig{
-				ObjectMeta: metav1.ObjectMeta{Generation: 1},
-			},
-			new: &multiarchv1beta1.ClusterPodPlacementConfig{
-				ObjectMeta: metav1.ObjectMeta{Generation: 1, Labels: map[string]string{"foo": "bar"}},
-			},
+			old:  NewClusterPodPlacementConfig().WithGeneration(1).Build(),
+			new:  NewClusterPodPlacementConfig().WithGeneration(1).WithLabels(map[string]string{"foo": "bar"}).Build(),
 			want: false,
 		},
 		{
 			name: "annotation-only update filtered",
-			old: &multiarchv1beta1.ClusterPodPlacementConfig{
-				ObjectMeta: metav1.ObjectMeta{Generation: 1},
-			},
-			new: &multiarchv1beta1.ClusterPodPlacementConfig{
-				ObjectMeta: metav1.ObjectMeta{Generation: 1, Annotations: map[string]string{"note": "test"}},
-			},
+			old:  NewClusterPodPlacementConfig().WithGeneration(1).Build(),
+			new:  NewClusterPodPlacementConfig().WithGeneration(1).WithAnnotations(map[string]string{"note": "test"}).Build(),
 			want: false,
 		},
 		{
 			name: "no change filtered",
-			old: &multiarchv1beta1.ClusterPodPlacementConfig{
-				ObjectMeta: metav1.ObjectMeta{Generation: 1, Finalizers: []string{"cleanup"}},
-			},
-			new: &multiarchv1beta1.ClusterPodPlacementConfig{
-				ObjectMeta: metav1.ObjectMeta{Generation: 1, Finalizers: []string{"cleanup"}},
-			},
+			old:  NewClusterPodPlacementConfig().WithGeneration(1).WithFinalizers("cleanup").Build(),
+			new:  NewClusterPodPlacementConfig().WithGeneration(1).WithFinalizers("cleanup").Build(),
 			want: false,
 		},
 	}
@@ -113,9 +82,7 @@ func TestCppcUpdatePredicate(t *testing.T) {
 func TestCppcUpdatePredicate_CreateDeleteGenericPassThrough(t *testing.T) {
 	p := cppcUpdatePredicate()
 	now := metav1.Now()
-	obj := &multiarchv1beta1.ClusterPodPlacementConfig{
-		ObjectMeta: metav1.ObjectMeta{Name: "cluster", DeletionTimestamp: &now},
-	}
+	obj := NewClusterPodPlacementConfig().WithName("cluster").WithDeletionTimestamp(&now).Build()
 
 	if !p.Create(event.CreateEvent{Object: obj}) {
 		t.Error("CreateFunc should always return true")
@@ -134,12 +101,8 @@ func TestCppcUpdatePredicate_BothTimestampsSet(t *testing.T) {
 	t2 := metav1.NewTime(time.Date(2025, 1, 1, 0, 0, 1, 0, time.UTC))
 
 	got := p.Update(event.UpdateEvent{
-		ObjectOld: &multiarchv1beta1.ClusterPodPlacementConfig{
-			ObjectMeta: metav1.ObjectMeta{Generation: 1, DeletionTimestamp: &t1},
-		},
-		ObjectNew: &multiarchv1beta1.ClusterPodPlacementConfig{
-			ObjectMeta: metav1.ObjectMeta{Generation: 1, DeletionTimestamp: &t2},
-		},
+		ObjectOld: NewClusterPodPlacementConfig().WithGeneration(1).WithDeletionTimestamp(&t1).Build(),
+		ObjectNew: NewClusterPodPlacementConfig().WithGeneration(1).WithDeletionTimestamp(&t2).Build(),
 	})
 	if !got {
 		t.Error("different deletionTimestamps should pass")

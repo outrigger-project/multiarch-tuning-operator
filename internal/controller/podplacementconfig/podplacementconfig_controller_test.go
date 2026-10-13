@@ -294,11 +294,7 @@ var _ = Describe("Internal/Controller/PodPlacementConfig/PodPlacementConfigRecon
 							true,
 							[]string{"amd64"},
 							[]plugins.ArchitectureRule{
-								{
-									Name:          "test-rule",
-									Expression:    "has(self.metadata.labels.app)",
-									Architectures: []string{"arm64"},
-								},
+								builder.NewRule("test-rule", "has(self.metadata.labels.app)", "arm64"),
 							},
 						).
 						Build(),
@@ -324,11 +320,7 @@ var _ = Describe("Internal/Controller/PodPlacementConfig/PodPlacementConfigRecon
 							true,
 							[]string{"amd64"},
 							[]plugins.ArchitectureRule{
-								{
-									Name:          "namespace-rule",
-									Expression:    "self.metadata.namespace == 'production'",
-									Architectures: []string{"ppc64le"},
-								},
+								builder.NewRule("namespace-rule", "self.metadata.namespace == 'production'", "ppc64le"),
 							},
 						).
 						Build(),
@@ -354,11 +346,7 @@ var _ = Describe("Internal/Controller/PodPlacementConfig/PodPlacementConfigRecon
 							true,
 							[]string{"amd64"},
 							[]plugins.ArchitectureRule{
-								{
-									Name:          "annotation-rule",
-									Expression:    "has(self.metadata.annotations.arch)",
-									Architectures: []string{"s390x"},
-								},
+								builder.NewRule("annotation-rule", "has(self.metadata.annotations.arch)", "s390x"),
 							},
 						).
 						Build(),
@@ -384,11 +372,7 @@ var _ = Describe("Internal/Controller/PodPlacementConfig/PodPlacementConfigRecon
 							true,
 							[]string{"amd64"},
 							[]plugins.ArchitectureRule{
-								{
-									Name:          "compound-and-rule",
-									Expression:    "has(self.metadata.labels.app) && self.metadata.namespace == 'prod'",
-									Architectures: []string{"arm64"},
-								},
+								builder.NewRule("compound-and-rule", "has(self.metadata.labels.app) && self.metadata.namespace == 'prod'", "arm64"),
 							},
 						).
 						Build(),
@@ -414,11 +398,7 @@ var _ = Describe("Internal/Controller/PodPlacementConfig/PodPlacementConfigRecon
 							true,
 							[]string{"amd64"},
 							[]plugins.ArchitectureRule{
-								{
-									Name:          "compound-or-rule",
-									Expression:    "self.metadata.namespace == 'prod' || self.metadata.namespace == 'staging'",
-									Architectures: []string{"ppc64le"},
-								},
+								builder.NewRule("compound-or-rule", "self.metadata.namespace == 'prod' || self.metadata.namespace == 'staging'", "ppc64le"),
 							},
 						).
 						Build(),
@@ -468,16 +448,8 @@ var _ = Describe("Internal/Controller/PodPlacementConfig/PodPlacementConfigRecon
 							true,
 							[]string{"amd64"},
 							[]plugins.ArchitectureRule{
-								{
-									Name:          "rule1",
-									Expression:    "has(self.metadata.labels.tier) && self.metadata.labels.tier == 'frontend'",
-									Architectures: []string{"arm64"},
-								},
-								{
-									Name:          "rule2",
-									Expression:    "self.metadata.namespace == 'backend'",
-									Architectures: []string{"ppc64le"},
-								},
+								builder.NewRule("rule1", "has(self.metadata.labels.tier) && self.metadata.labels.tier == 'frontend'", "arm64"),
+								builder.NewRule("rule2", "self.metadata.namespace == 'backend'", "ppc64le"),
 							},
 						).
 						Build(),
@@ -505,11 +477,7 @@ var _ = Describe("Internal/Controller/PodPlacementConfig/PodPlacementConfigRecon
 							true,
 							[]string{"amd64"},
 							[]plugins.ArchitectureRule{
-								{
-									Name:          "malformed-rule",
-									Expression:    "self.metadata.labels[",
-									Architectures: []string{"arm64"},
-								},
+								builder.NewRule("malformed-rule", "self.metadata.labels[", "arm64"),
 							},
 						).
 						Build(),
@@ -537,11 +505,7 @@ var _ = Describe("Internal/Controller/PodPlacementConfig/PodPlacementConfigRecon
 							true,
 							[]string{"amd64"},
 							[]plugins.ArchitectureRule{
-								{
-									Name:          "incomplete-rule",
-									Expression:    "self.metadata.labels.app ==",
-									Architectures: []string{"arm64"},
-								},
+								builder.NewRule("incomplete-rule", "self.metadata.labels.app ==", "arm64"),
 							},
 						).
 						Build(),
@@ -568,11 +532,7 @@ var _ = Describe("Internal/Controller/PodPlacementConfig/PodPlacementConfigRecon
 							true,
 							[]string{"amd64"},
 							[]plugins.ArchitectureRule{
-								{
-									Name:          "invalid-operator-rule",
-									Expression:    "self.metadata.name === 'test'",
-									Architectures: []string{"arm64"},
-								},
+								builder.NewRule("invalid-operator-rule", "self.metadata.name === 'test'", "arm64"),
 							},
 						).
 						Build(),
@@ -599,11 +559,7 @@ var _ = Describe("Internal/Controller/PodPlacementConfig/PodPlacementConfigRecon
 							true,
 							[]string{"amd64"},
 							[]plugins.ArchitectureRule{
-								{
-									Name:          "string-return-rule",
-									Expression:    "self.metadata.name",
-									Architectures: []string{"arm64"},
-								},
+								builder.NewRule("string-return-rule", "self.metadata.name", "arm64"),
 							},
 						).
 						Build(),
@@ -630,11 +586,7 @@ var _ = Describe("Internal/Controller/PodPlacementConfig/PodPlacementConfigRecon
 							true,
 							[]string{"amd64"},
 							[]plugins.ArchitectureRule{
-								{
-									Name:          "int-return-rule",
-									Expression:    "1 + 2",
-									Architectures: []string{"arm64"},
-								},
+								builder.NewRule("int-return-rule", "1 + 2", "arm64"),
 							},
 						).
 						Build(),
@@ -661,11 +613,7 @@ var _ = Describe("Internal/Controller/PodPlacementConfig/PodPlacementConfigRecon
 							true,
 							[]string{"amd64"},
 							[]plugins.ArchitectureRule{
-								{
-									Name:          "invalid-field-rule",
-									Expression:    "self.metadata.nonexistent.field == 'value'",
-									Architectures: []string{"arm64"},
-								},
+								builder.NewRule("invalid-field-rule", "self.metadata.nonexistent.field == 'value'", "arm64"),
 							},
 						).
 						Build(),
@@ -720,11 +668,7 @@ var _ = Describe("Internal/Controller/PodPlacementConfig/PodPlacementConfigRecon
 							true,
 							[]string{"amd64"},
 							[]plugins.ArchitectureRule{
-								{
-									Name:          "invalid-arch-rule",
-									Expression:    "true",
-									Architectures: []string{"bad-arch"},
-								},
+								builder.NewRule("invalid-arch-rule", "true", "bad-arch"),
 							},
 						).
 						Build(),
@@ -752,11 +696,7 @@ var _ = Describe("Internal/Controller/PodPlacementConfig/PodPlacementConfigRecon
 							true,
 							[]string{"amd64", "arm64", "ppc64le", "s390x"},
 							[]plugins.ArchitectureRule{
-								{
-									Name:          "all-archs-rule",
-									Expression:    "true",
-									Architectures: []string{"amd64", "arm64", "ppc64le", "s390x"},
-								},
+								builder.NewRule("all-archs-rule", "true", "amd64", "arm64", "ppc64le", "s390x"),
 							},
 						).
 						Build(),
@@ -809,11 +749,7 @@ var _ = Describe("Internal/Controller/PodPlacementConfig/PodPlacementConfigRecon
 							true,
 							[]string{"amd64"},
 							[]plugins.ArchitectureRule{
-								{
-									Name:          "empty-rule",
-									Expression:    "",
-									Architectures: []string{"arm64"},
-								},
+								builder.NewRule("empty-rule", "", "arm64"),
 							},
 						).
 						Build(),
@@ -839,11 +775,7 @@ var _ = Describe("Internal/Controller/PodPlacementConfig/PodPlacementConfigRecon
 							true,
 							[]string{"amd64"},
 							[]plugins.ArchitectureRule{
-								{
-									Name:          "whitespace-rule",
-									Expression:    "   ",
-									Architectures: []string{"arm64"},
-								},
+								builder.NewRule("whitespace-rule", "   ", "arm64"),
 							},
 						).
 						Build(),
@@ -869,11 +801,7 @@ var _ = Describe("Internal/Controller/PodPlacementConfig/PodPlacementConfigRecon
 							true,
 							[]string{"amd64"},
 							[]plugins.ArchitectureRule{
-								{
-									Name:          "unicode-rule",
-									Expression:    "'app.kubernetes.io/name' in self.metadata.labels",
-									Architectures: []string{"arm64"},
-								},
+								builder.NewRule("unicode-rule", "'app.kubernetes.io/name' in self.metadata.labels", "arm64"),
 							},
 						).
 						Build(),
@@ -902,11 +830,7 @@ var _ = Describe("Internal/Controller/PodPlacementConfig/PodPlacementConfigRecon
 							true,
 							[]string{"amd64"},
 							[]plugins.ArchitectureRule{
-								{
-									Name:          "long-rule",
-									Expression:    longExpr,
-									Architectures: []string{"arm64"},
-								},
+								builder.NewRule("long-rule", longExpr, "arm64"),
 							},
 						).
 						Build(),
@@ -932,16 +856,8 @@ var _ = Describe("Internal/Controller/PodPlacementConfig/PodPlacementConfigRecon
 							true,
 							[]string{"amd64"},
 							[]plugins.ArchitectureRule{
-								{
-									Name:          "valid-rule",
-									Expression:    "has(self.metadata.labels.app)",
-									Architectures: []string{"arm64"},
-								},
-								{
-									Name:          "invalid-rule",
-									Expression:    "self.metadata.labels[",
-									Architectures: []string{"ppc64le"},
-								},
+								builder.NewRule("valid-rule", "has(self.metadata.labels.app)", "arm64"),
+								builder.NewRule("invalid-rule", "self.metadata.labels[", "ppc64le"),
 							},
 						).
 						Build(),
@@ -970,11 +886,7 @@ var _ = Describe("Internal/Controller/PodPlacementConfig/PodPlacementConfigRecon
 							false, // Plugin disabled
 							[]string{"amd64"},
 							[]plugins.ArchitectureRule{
-								{
-									Name:          "should-not-validate",
-									Expression:    "invalid[[[",
-									Architectures: []string{"arm64"},
-								},
+								builder.NewRule("should-not-validate", "invalid[[[", "arm64"),
 							},
 						).
 						Build(),
@@ -1028,11 +940,7 @@ var _ = Describe("Internal/Controller/PodPlacementConfig/PodPlacementConfigRecon
 					},
 					FallbackArchitectures: []string{"amd64"},
 					Rules: []plugins.ArchitectureRule{
-						{
-							Name:          "test-rule",
-							Expression:    "has(self.metadata.labels.app)",
-							Architectures: []string{"arm64"},
-						},
+						builder.NewRule("test-rule", "has(self.metadata.labels.app)", "arm64"),
 					},
 				}
 
@@ -1053,11 +961,7 @@ var _ = Describe("Internal/Controller/PodPlacementConfig/PodPlacementConfigRecon
 					By("Generating exactly 1000 rules programmatically")
 					rules := make([]plugins.ArchitectureRule, 1000)
 					for i := 0; i < 1000; i++ {
-						rules[i] = plugins.ArchitectureRule{
-							Name:          fmt.Sprintf("rule-%d", i),
-							Expression:    "has(self.metadata.labels.app)",
-							Architectures: []string{"amd64"},
-						}
+						rules[i] = builder.NewRule(fmt.Sprintf("rule-%d", i), "has(self.metadata.labels.app)", "amd64")
 					}
 
 					By("Creating PodPlacementConfig with exactly 1000 rules")
@@ -1098,11 +1002,7 @@ var _ = Describe("Internal/Controller/PodPlacementConfig/PodPlacementConfigRecon
 					By("Generating 1001 rules programmatically")
 					rules := make([]plugins.ArchitectureRule, 1001)
 					for i := 0; i < 1001; i++ {
-						rules[i] = plugins.ArchitectureRule{
-							Name:          fmt.Sprintf("rule-%d", i),
-							Expression:    "has(self.metadata.labels.app)",
-							Architectures: []string{"amd64"},
-						}
+						rules[i] = builder.NewRule(fmt.Sprintf("rule-%d", i), "has(self.metadata.labels.app)", "amd64")
 					}
 
 					By("Creating PodPlacementConfig with 1001 rules")
@@ -1156,11 +1056,7 @@ var _ = Describe("Internal/Controller/PodPlacementConfig/PodPlacementConfigRecon
 						case 2:
 							expr = "has(self.metadata.labels.tier) && self.metadata.namespace == 'prod'"
 						}
-						rules[i] = plugins.ArchitectureRule{
-							Name:          fmt.Sprintf("perf-rule-%d", i),
-							Expression:    expr,
-							Architectures: []string{"amd64", "arm64"},
-						}
+						rules[i] = builder.NewRule(fmt.Sprintf("perf-rule-%d", i), expr, "amd64", "arm64")
 					}
 
 					By("Creating PodPlacementConfig and measuring validation doesn't panic")
@@ -1201,11 +1097,7 @@ var _ = Describe("Internal/Controller/PodPlacementConfig/PodPlacementConfigRecon
 					By("Generating exactly 999 rules")
 					rules := make([]plugins.ArchitectureRule, 999)
 					for i := 0; i < 999; i++ {
-						rules[i] = plugins.ArchitectureRule{
-							Name:          fmt.Sprintf("boundary-rule-%d", i),
-							Expression:    "has(self.metadata.labels.app)",
-							Architectures: []string{"amd64"},
-						}
+						rules[i] = builder.NewRule(fmt.Sprintf("boundary-rule-%d", i), "has(self.metadata.labels.app)", "amd64")
 					}
 
 					By("Creating PodPlacementConfig with 999 rules")
@@ -1246,18 +1138,10 @@ var _ = Describe("Internal/Controller/PodPlacementConfig/PodPlacementConfigRecon
 					By("Generating 500 valid rules and 1 invalid rule")
 					rules := make([]plugins.ArchitectureRule, 501)
 					for i := 0; i < 500; i++ {
-						rules[i] = plugins.ArchitectureRule{
-							Name:          fmt.Sprintf("valid-rule-%d", i),
-							Expression:    "has(self.metadata.labels.app)",
-							Architectures: []string{"amd64"},
-						}
+						rules[i] = builder.NewRule(fmt.Sprintf("valid-rule-%d", i), "has(self.metadata.labels.app)", "amd64")
 					}
 					// Add one invalid rule
-					rules[500] = plugins.ArchitectureRule{
-						Name:          "invalid-expression-rule",
-						Expression:    "self.metadata.labels[",
-						Architectures: []string{"amd64"},
-					}
+					rules[500] = builder.NewRule("invalid-expression-rule", "self.metadata.labels[", "amd64")
 
 					By("Creating PodPlacementConfig with invalid rule among valid ones")
 					err = k8sClient.Create(ctx,
@@ -1276,6 +1160,154 @@ var _ = Describe("Internal/Controller/PodPlacementConfig/PodPlacementConfigRecon
 					Expect(err.Error()).To(ContainSubstring("invalid-expression-rule"), "error should identify the specific invalid rule")
 				})
 			})
+		})
+	})
+
+	When("Updating a PodPlacementConfig with CEL expression changes", func() {
+		It("should reject update from valid to invalid CEL expression", func() {
+			By("Create an ephemeral namespace")
+			ns := framework.NewEphemeralNamespace()
+			err := k8sClient.Create(ctx, ns)
+			Expect(err).NotTo(HaveOccurred())
+			defer func() {
+				_ = k8sClient.Delete(ctx, ns)
+			}()
+
+			By("Creating a PPC with a valid CEL rule")
+			err = k8sClient.Create(ctx,
+				builder.NewPodPlacementConfig().
+					WithName("test-cel-update-invalid").
+					WithNamespace(ns.Name).
+					WithCelArchitecturePlacement(
+						true,
+						[]string{"amd64"},
+						[]plugins.ArchitectureRule{
+							builder.NewRule("valid-rule", "has(self.metadata.labels.app)", "arm64"),
+						},
+					).
+					Build(),
+			)
+			Expect(err).NotTo(HaveOccurred(), "initial PPC with valid CEL should be accepted")
+
+			By("Fetching the created PPC")
+			ppc := &v1beta1.PodPlacementConfig{}
+			Eventually(func(g Gomega) {
+				err := k8sClient.Get(ctx, crclient.ObjectKey{
+					Name:      "test-cel-update-invalid",
+					Namespace: ns.Name,
+				}, ppc)
+				g.Expect(err).NotTo(HaveOccurred())
+			}).Should(Succeed(), "PPC should exist after creation")
+
+			By("Updating the PPC with an invalid CEL expression")
+			ppc.Spec.Plugins.CelArchitecturePlacement.Rules = []plugins.ArchitectureRule{
+				builder.NewRule("now-invalid-rule", "self.metadata.labels[", "arm64"),
+			}
+			err = k8sClient.Update(ctx, ppc)
+			Expect(err).To(HaveOccurred(), "update with invalid CEL expression should be rejected")
+			Expect(err.Error()).To(ContainSubstring("invalid CEL expression"), "error should mention invalid CEL expression")
+		})
+
+		It("should accept update from valid to different valid CEL expression", func() {
+			By("Create an ephemeral namespace")
+			ns := framework.NewEphemeralNamespace()
+			err := k8sClient.Create(ctx, ns)
+			Expect(err).NotTo(HaveOccurred())
+			defer func() {
+				_ = k8sClient.Delete(ctx, ns)
+			}()
+
+			By("Creating a PPC with a valid CEL rule")
+			err = k8sClient.Create(ctx,
+				builder.NewPodPlacementConfig().
+					WithName("test-cel-update-valid").
+					WithNamespace(ns.Name).
+					WithCelArchitecturePlacement(
+						true,
+						[]string{"amd64"},
+						[]plugins.ArchitectureRule{
+							builder.NewRule("original-rule", "has(self.metadata.labels.app)", "arm64"),
+						},
+					).
+					Build(),
+			)
+			Expect(err).NotTo(HaveOccurred(), "initial PPC with valid CEL should be accepted")
+
+			By("Fetching the created PPC")
+			ppc := &v1beta1.PodPlacementConfig{}
+			Eventually(func(g Gomega) {
+				err := k8sClient.Get(ctx, crclient.ObjectKey{
+					Name:      "test-cel-update-valid",
+					Namespace: ns.Name,
+				}, ppc)
+				g.Expect(err).NotTo(HaveOccurred())
+			}).Should(Succeed(), "PPC should exist after creation")
+
+			By("Updating the PPC with a different valid CEL expression")
+			ppc.Spec.Plugins.CelArchitecturePlacement.Rules = []plugins.ArchitectureRule{
+				builder.NewRule("updated-rule", "self.metadata.namespace == 'production'", "ppc64le"),
+			}
+			err = k8sClient.Update(ctx, ppc)
+			Expect(err).NotTo(HaveOccurred(), "update with valid CEL expression should be accepted")
+
+			By("Verifying the update was persisted")
+			updatedPPC := &v1beta1.PodPlacementConfig{}
+			Eventually(func(g Gomega) {
+				err := k8sClient.Get(ctx, crclient.ObjectKey{
+					Name:      "test-cel-update-valid",
+					Namespace: ns.Name,
+				}, updatedPPC)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(updatedPPC.Spec.Plugins.CelArchitecturePlacement.Rules).To(HaveLen(1))
+				g.Expect(updatedPPC.Spec.Plugins.CelArchitecturePlacement.Rules[0].Name).To(Equal("updated-rule"))
+			}).Should(Succeed(), "updated PPC should reflect new rule")
+		})
+
+		It("should reject update with disallowed self.spec.* reference", func() {
+			By("Create an ephemeral namespace")
+			ns := framework.NewEphemeralNamespace()
+			err := k8sClient.Create(ctx, ns)
+			Expect(err).NotTo(HaveOccurred())
+			defer func() {
+				_ = k8sClient.Delete(ctx, ns)
+			}()
+
+			By("Creating a PPC with a valid CEL rule")
+			err = k8sClient.Create(ctx,
+				builder.NewPodPlacementConfig().
+					WithName("test-cel-update-spec").
+					WithNamespace(ns.Name).
+					WithCelArchitecturePlacement(
+						true,
+						[]string{"amd64"},
+						[]plugins.ArchitectureRule{
+							builder.NewRule("valid-rule", "has(self.metadata.labels.app)", "arm64"),
+						},
+					).
+					Build(),
+			)
+			Expect(err).NotTo(HaveOccurred(), "initial PPC with valid CEL should be accepted")
+
+			By("Fetching the created PPC")
+			ppc := &v1beta1.PodPlacementConfig{}
+			Eventually(func(g Gomega) {
+				err := k8sClient.Get(ctx, crclient.ObjectKey{
+					Name:      "test-cel-update-spec",
+					Namespace: ns.Name,
+				}, ppc)
+				g.Expect(err).NotTo(HaveOccurred())
+			}).Should(Succeed(), "PPC should exist after creation")
+
+			By("Updating the PPC with a rule referencing self.spec.nodeName")
+			ppc.Spec.Plugins.CelArchitecturePlacement.Rules = []plugins.ArchitectureRule{
+				builder.NewRule("spec-access-rule", "self.spec.nodeName == 'worker-1'", "arm64"),
+			}
+			err = k8sClient.Update(ctx, ppc)
+			Expect(err).To(HaveOccurred(), "update with self.spec.* reference should be rejected")
+			Expect(err.Error()).To(SatisfyAny(
+				ContainSubstring("disallowed field"),
+				ContainSubstring("undefined field"),
+			), "error should reject the self.spec.* reference")
 		})
 	})
 })

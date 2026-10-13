@@ -17,375 +17,212 @@ limitations under the License.
 package podplacement
 
 import (
-	"testing"
-
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+
+	. "github.com/openshift/multiarch-tuning-operator/pkg/testing/builder"
 	"github.com/openshift/multiarch-tuning-operator/pkg/utils"
 )
 
-func TestRemoveArchitectureFromNodeSelector(t *testing.T) {
-	tests := []struct {
-		name           string
-		pod            *corev1.Pod
-		expectedRemove bool
-	}{
-		{
-			name: "remove arch from nodeSelector",
-			pod: &corev1.Pod{
-				Spec: corev1.PodSpec{
-					NodeSelector: map[string]string{
-						utils.ArchLabel: "amd64",
-						"other-label":   "value",
-					},
-				},
-			},
-			expectedRemove: true,
-		},
-		{
-			name: "no arch in nodeSelector",
-			pod: &corev1.Pod{
-				Spec: corev1.PodSpec{
-					NodeSelector: map[string]string{
-						"other-label": "value",
-					},
-				},
-			},
-			expectedRemove: false,
-		},
-		{
-			name: "nil nodeSelector",
-			pod: &corev1.Pod{
-				Spec: corev1.PodSpec{
-					NodeSelector: nil,
-				},
-			},
-			expectedRemove: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			removed := removeArchitectureFromNodeSelector(tt.pod)
-			if removed != tt.expectedRemove {
-				t.Errorf("Expected removed=%v, got %v", tt.expectedRemove, removed)
-			}
+var _ = Describe("RemoveArchitectureFromNodeSelector", func() {
+	DescribeTable("should handle architecture removal from nodeSelector correctly",
+		func(pod *corev1.Pod, expectedRemove bool) {
+			removed := removeArchitectureFromNodeSelector(pod)
+			Expect(removed).To(Equal(expectedRemove))
 			// Verify arch label was actually removed
-			if tt.pod.Spec.NodeSelector != nil {
-				if _, exists := tt.pod.Spec.NodeSelector[utils.ArchLabel]; exists {
-					t.Error("Architecture label still exists in nodeSelector")
-				}
+			if pod.Spec.NodeSelector != nil {
+				_, exists := pod.Spec.NodeSelector[utils.ArchLabel]
+				Expect(exists).To(BeFalse(), "Architecture label still exists in nodeSelector")
 			}
-		})
-	}
-}
+		},
+		Entry("remove arch from nodeSelector",
+			NewPod().WithNodeSelectors(utils.ArchLabel, "amd64", "other-label", "value").Build(),
+			true,
+		),
+		Entry("no arch in nodeSelector",
+			NewPod().WithNodeSelectors("other-label", "value").Build(),
+			false,
+		),
+		Entry("nil nodeSelector",
+			NewPod().Build(),
+			false,
+		),
+	)
+})
 
-func TestRemoveArchitectureFromNodeAffinity(t *testing.T) {
-	tests := []struct {
-		name           string
-		pod            *corev1.Pod
-		expectedRemove bool
-		checkNil       bool
-	}{
-		{
-			name: "remove arch from nodeAffinity",
-			pod: &corev1.Pod{
-				Spec: corev1.PodSpec{
-					Affinity: &corev1.Affinity{
-						NodeAffinity: &corev1.NodeAffinity{
-							RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
-								NodeSelectorTerms: []corev1.NodeSelectorTerm{
-									{
-										MatchExpressions: []corev1.NodeSelectorRequirement{
-											{
-												Key:      utils.ArchLabel,
-												Operator: corev1.NodeSelectorOpIn,
-												Values:   []string{"amd64"},
-											},
-										},
-									},
-								},
-							},
-						},
-					},
-				},
-			},
-			expectedRemove: true,
-			checkNil:       true,
-		},
-		{
-			name: "remove arch but keep other expressions",
-			pod: &corev1.Pod{
-				Spec: corev1.PodSpec{
-					Affinity: &corev1.Affinity{
-						NodeAffinity: &corev1.NodeAffinity{
-							RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
-								NodeSelectorTerms: []corev1.NodeSelectorTerm{
-									{
-										MatchExpressions: []corev1.NodeSelectorRequirement{
-											{
-												Key:      utils.ArchLabel,
-												Operator: corev1.NodeSelectorOpIn,
-												Values:   []string{"amd64"},
-											},
-											{
-												Key:      "other-label",
-												Operator: corev1.NodeSelectorOpIn,
-												Values:   []string{"value"},
-											},
-										},
-									},
-								},
-							},
-						},
-					},
-				},
-			},
-			expectedRemove: true,
-			checkNil:       false,
-		},
-		{
-			name: "preserve preferred affinity",
-			pod: &corev1.Pod{
-				Spec: corev1.PodSpec{
-					Affinity: &corev1.Affinity{
-						NodeAffinity: &corev1.NodeAffinity{
-							RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
-								NodeSelectorTerms: []corev1.NodeSelectorTerm{
-									{
-										MatchExpressions: []corev1.NodeSelectorRequirement{
-											{
-												Key:      utils.ArchLabel,
-												Operator: corev1.NodeSelectorOpIn,
-												Values:   []string{"amd64"},
-											},
-										},
-									},
-								},
-							},
-							PreferredDuringSchedulingIgnoredDuringExecution: []corev1.PreferredSchedulingTerm{
-								{
-									Weight: 50,
-									Preference: corev1.NodeSelectorTerm{
-										MatchExpressions: []corev1.NodeSelectorRequirement{
-											{
-												Key:      utils.ArchLabel,
-												Operator: corev1.NodeSelectorOpIn,
-												Values:   []string{"ppc64le"},
-											},
-										},
-									},
-								},
-							},
-						},
-					},
-				},
-			},
-			expectedRemove: true,
-			checkNil:       false,
-		},
-		{
-			name: "nil affinity",
-			pod: &corev1.Pod{
-				Spec: corev1.PodSpec{
-					Affinity: nil,
-				},
-			},
-			expectedRemove: false,
-			checkNil:       false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			removed := removeArchitectureFromNodeAffinity(tt.pod)
-			if removed != tt.expectedRemove {
-				t.Errorf("Expected removed=%v, got %v", tt.expectedRemove, removed)
-			}
+var _ = Describe("RemoveArchitectureFromNodeAffinity", func() {
+	DescribeTable("should handle architecture removal from nodeAffinity correctly",
+		func(pod *corev1.Pod, expectedRemove bool, checkNil bool, checkPreferredPreserved bool) {
+			removed := removeArchitectureFromNodeAffinity(pod)
+			Expect(removed).To(Equal(expectedRemove))
 
 			// Verify arch expressions were removed from required affinity
-			if tt.pod.Spec.Affinity != nil && tt.pod.Spec.Affinity.NodeAffinity != nil {
-				if tt.pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution != nil {
-					for _, term := range tt.pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms {
+			if pod.Spec.Affinity != nil && pod.Spec.Affinity.NodeAffinity != nil {
+				if pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution != nil {
+					for _, term := range pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms {
 						for _, expr := range term.MatchExpressions {
-							if expr.Key == utils.ArchLabel {
-								t.Error("Architecture expression still exists in required affinity")
-							}
+							Expect(expr.Key).NotTo(Equal(utils.ArchLabel),
+								"Architecture expression still exists in required affinity")
 						}
 					}
 				}
 
 				// Verify preferred affinity was preserved
-				if tt.name == "preserve preferred affinity" {
-					if tt.pod.Spec.Affinity.NodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution == nil {
-						t.Error("Preferred affinity was removed but should be preserved")
-					}
+				if checkPreferredPreserved {
+					Expect(pod.Spec.Affinity.NodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution).NotTo(BeNil(),
+						"Preferred affinity was removed but should be preserved")
 				}
 			}
 
 			// Check if structures were properly nil'd out
-			if tt.checkNil {
-				if tt.pod.Spec.Affinity != nil {
-					if tt.pod.Spec.Affinity.NodeAffinity != nil {
-						if tt.pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution != nil {
-							if len(tt.pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms) > 0 {
-								t.Error("Expected empty node selector terms after cleanup")
-							}
-						}
-					}
+			if checkNil {
+				if pod.Spec.Affinity != nil && pod.Spec.Affinity.NodeAffinity != nil &&
+					pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution != nil {
+					Expect(pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms).
+						To(BeEmpty(), "Expected empty node selector terms after cleanup")
 				}
 			}
-		})
-	}
-}
-
-func TestRemoveAllArchitectureConstraints(t *testing.T) {
-	tests := []struct {
-		name           string
-		pod            *corev1.Pod
-		expectedRemove bool
-	}{
-		{
-			name: "remove from both nodeSelector and nodeAffinity",
-			pod: &corev1.Pod{
-				Spec: corev1.PodSpec{
-					NodeSelector: map[string]string{
-						utils.ArchLabel: "amd64",
+		},
+		Entry("remove arch from nodeAffinity",
+			NewPod().WithNodeSelectorTermsMatchExpressions(
+				[]corev1.NodeSelectorRequirement{
+					{
+						Key:      utils.ArchLabel,
+						Operator: corev1.NodeSelectorOpIn,
+						Values:   []string{"amd64"},
 					},
-					Affinity: &corev1.Affinity{
-						NodeAffinity: &corev1.NodeAffinity{
-							RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
-								NodeSelectorTerms: []corev1.NodeSelectorTerm{
-									{
-										MatchExpressions: []corev1.NodeSelectorRequirement{
-											{
-												Key:      utils.ArchLabel,
-												Operator: corev1.NodeSelectorOpIn,
-												Values:   []string{"amd64"},
-											},
-										},
-									},
-								},
+				},
+			).Build(),
+			true, true, false,
+		),
+		Entry("remove arch but keep other expressions",
+			NewPod().WithNodeSelectorTermsMatchExpressions(
+				[]corev1.NodeSelectorRequirement{
+					{
+						Key:      utils.ArchLabel,
+						Operator: corev1.NodeSelectorOpIn,
+						Values:   []string{"amd64"},
+					},
+					{
+						Key:      "other-label",
+						Operator: corev1.NodeSelectorOpIn,
+						Values:   []string{"value"},
+					},
+				},
+			).Build(),
+			true, false, false,
+		),
+		Entry("preserve preferred affinity",
+			NewPod().WithNodeSelectorTermsMatchExpressions(
+				[]corev1.NodeSelectorRequirement{
+					{
+						Key:      utils.ArchLabel,
+						Operator: corev1.NodeSelectorOpIn,
+						Values:   []string{"amd64"},
+					},
+				},
+			).WithPreferredDuringSchedulingIgnoredDuringExecution(
+				&corev1.PreferredSchedulingTerm{
+					Weight: 50,
+					Preference: corev1.NodeSelectorTerm{
+						MatchExpressions: []corev1.NodeSelectorRequirement{
+							{
+								Key:      utils.ArchLabel,
+								Operator: corev1.NodeSelectorOpIn,
+								Values:   []string{"ppc64le"},
 							},
 						},
 					},
 				},
-			},
-			expectedRemove: true,
-		},
-		{
-			name: "remove from nodeSelector only",
-			pod: &corev1.Pod{
-				Spec: corev1.PodSpec{
-					NodeSelector: map[string]string{
-						utils.ArchLabel: "amd64",
-					},
-				},
-			},
-			expectedRemove: true,
-		},
-		{
-			name: "remove from nodeAffinity only",
-			pod: &corev1.Pod{
-				Spec: corev1.PodSpec{
-					Affinity: &corev1.Affinity{
-						NodeAffinity: &corev1.NodeAffinity{
-							RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
-								NodeSelectorTerms: []corev1.NodeSelectorTerm{
-									{
-										MatchExpressions: []corev1.NodeSelectorRequirement{
-											{
-												Key:      utils.ArchLabel,
-												Operator: corev1.NodeSelectorOpIn,
-												Values:   []string{"amd64"},
-											},
-										},
-									},
-								},
-							},
-						},
-					},
-				},
-			},
-			expectedRemove: true,
-		},
-		{
-			name: "no architecture constraints",
-			pod: &corev1.Pod{
-				Spec: corev1.PodSpec{
-					NodeSelector: map[string]string{
-						"other-label": "value",
-					},
-				},
-			},
-			expectedRemove: false,
-		},
-	}
+			).Build(),
+			true, false, true,
+		),
+		Entry("nil affinity",
+			NewPod().Build(),
+			false, false, false,
+		),
+	)
+})
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			removed := removeAllArchitectureConstraints(tt.pod)
-			if removed != tt.expectedRemove {
-				t.Errorf("Expected removed=%v, got %v", tt.expectedRemove, removed)
-			}
+var _ = Describe("RemoveAllArchitectureConstraints", func() {
+	DescribeTable("should remove all architecture constraints correctly",
+		func(pod *corev1.Pod, expectedRemove bool) {
+			removed := removeAllArchitectureConstraints(pod)
+			Expect(removed).To(Equal(expectedRemove))
 
 			// Verify all architecture constraints were removed
-			if tt.pod.Spec.NodeSelector != nil {
-				if _, exists := tt.pod.Spec.NodeSelector[utils.ArchLabel]; exists {
-					t.Error("Architecture label still exists in nodeSelector")
-				}
+			if pod.Spec.NodeSelector != nil {
+				_, exists := pod.Spec.NodeSelector[utils.ArchLabel]
+				Expect(exists).To(BeFalse(), "Architecture label still exists in nodeSelector")
 			}
 
-			if tt.pod.Spec.Affinity != nil && tt.pod.Spec.Affinity.NodeAffinity != nil {
-				if tt.pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution != nil {
-					for _, term := range tt.pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms {
+			if pod.Spec.Affinity != nil && pod.Spec.Affinity.NodeAffinity != nil {
+				if pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution != nil {
+					for _, term := range pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms {
 						for _, expr := range term.MatchExpressions {
-							if expr.Key == utils.ArchLabel {
-								t.Error("Architecture expression still exists in required affinity")
-							}
+							Expect(expr.Key).NotTo(Equal(utils.ArchLabel),
+								"Architecture expression still exists in required affinity")
 						}
 					}
 				}
 			}
-		})
-	}
-}
-
-func TestRemoveArchitectureFromNodeAffinityEmptyTermCleanup(t *testing.T) {
-	pod := &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: "test-pod",
 		},
-		Spec: corev1.PodSpec{
-			Affinity: &corev1.Affinity{
-				NodeAffinity: &corev1.NodeAffinity{
-					RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
-						NodeSelectorTerms: []corev1.NodeSelectorTerm{
-							{
-								MatchExpressions: []corev1.NodeSelectorRequirement{
-									{
-										Key:      utils.ArchLabel,
-										Operator: corev1.NodeSelectorOpIn,
-										Values:   []string{"amd64"},
-									},
-								},
-							},
-						},
+		Entry("remove from both nodeSelector and nodeAffinity",
+			NewPod().WithNodeSelectors(utils.ArchLabel, "amd64").WithNodeSelectorTermsMatchExpressions(
+				[]corev1.NodeSelectorRequirement{
+					{
+						Key:      utils.ArchLabel,
+						Operator: corev1.NodeSelectorOpIn,
+						Values:   []string{"amd64"},
 					},
 				},
+			).Build(),
+			true,
+		),
+		Entry("remove from nodeSelector only",
+			NewPod().WithNodeSelectors(utils.ArchLabel, "amd64").Build(),
+			true,
+		),
+		Entry("remove from nodeAffinity only",
+			NewPod().WithNodeSelectorTermsMatchExpressions(
+				[]corev1.NodeSelectorRequirement{
+					{
+						Key:      utils.ArchLabel,
+						Operator: corev1.NodeSelectorOpIn,
+						Values:   []string{"amd64"},
+					},
+				},
+			).Build(),
+			true,
+		),
+		Entry("no architecture constraints",
+			NewPod().WithNodeSelectors("other-label", "value").Build(),
+			false,
+		),
+	)
+})
+
+var _ = Describe("RemoveArchitectureFromNodeAffinityEmptyTermCleanup", func() {
+	It("should clean up empty RequiredDuringSchedulingIgnoredDuringExecution after removing all terms", func() {
+		pod := NewPod().WithName("test-pod").WithNodeSelectorTermsMatchExpressions(
+			[]corev1.NodeSelectorRequirement{
+				{
+					Key:      utils.ArchLabel,
+					Operator: corev1.NodeSelectorOpIn,
+					Values:   []string{"amd64"},
+				},
 			},
-		},
-	}
+		).Build()
 
-	removed := removeArchitectureFromNodeAffinity(pod)
-	if !removed {
-		t.Error("Expected architecture to be removed")
-	}
+		removed := removeArchitectureFromNodeAffinity(pod)
+		Expect(removed).To(BeTrue(), "Expected architecture to be removed")
 
-	// Verify empty term was cleaned up - the entire RequiredDuringSchedulingIgnoredDuringExecution should be nil
-	if pod.Spec.Affinity != nil && pod.Spec.Affinity.NodeAffinity != nil &&
-		pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution != nil {
-		t.Error("Expected RequiredDuringSchedulingIgnoredDuringExecution to be nil after removing all terms")
-	}
-}
+		// Verify empty term was cleaned up - the entire RequiredDuringSchedulingIgnoredDuringExecution should be nil
+		if pod.Spec.Affinity != nil && pod.Spec.Affinity.NodeAffinity != nil {
+			Expect(pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution).To(BeNil(),
+				"Expected RequiredDuringSchedulingIgnoredDuringExecution to be nil after removing all terms")
+		}
+	})
+})
