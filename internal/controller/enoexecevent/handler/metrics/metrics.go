@@ -10,6 +10,7 @@ import (
 
 var EnoexecCounter prometheus.Counter
 var EnoexecCounterInvalid prometheus.Counter
+var EnoexecCounterStale prometheus.Counter
 var onceCommon sync.Once
 
 func initMetrics() {
@@ -23,11 +24,18 @@ func initMetrics() {
 		EnoexecCounterInvalid = prometheus.NewCounter(
 			prometheus.CounterOpts{
 				Name: "mto_enoexecevents_invalid_total",
-				Help: "The counter for ENoExecEvents objects that faled the reconciliation and report as pod events",
+				Help: "The counter for ENoExecEvents objects that failed reconciliation and were reported as pod events",
+			},
+		)
+		EnoexecCounterStale = prometheus.NewCounter(
+			prometheus.CounterOpts{
+				Name: "mto_enoexecevents_stale_total",
+				Help: "The counter for ENoExecEvents referencing pods/nodes that no longer exist",
 			},
 		)
 		metrics2.Registry.MustRegister(EnoexecCounter)
 		metrics2.Registry.MustRegister(EnoexecCounterInvalid)
+		metrics2.Registry.MustRegister(EnoexecCounterStale)
 	})
 }
 
