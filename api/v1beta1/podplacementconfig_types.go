@@ -33,9 +33,8 @@ type PodPlacementConfigSpec struct {
 	LabelSelector *metav1.LabelSelector `json:"labelSelector,omitempty"`
 
 	// Plugins defines the configurable plugins for this component.
-	// This field is required.
-	// +kubebuilder:validation:Required
-	Plugins *plugins.LocalPlugins `json:"plugins"`
+	// +optional
+	Plugins *plugins.LocalPlugins `json:"plugins,omitempty"`
 
 	// Priority defines the priority of the PodPlacementConfig and only accepts values in the range 0-255.
 	// This field is optional and will default to 0 if not set.
