@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 )
 
 type Transaction struct {
@@ -14,11 +15,13 @@ type Transaction struct {
 	originals map[string]artifactBackup
 	sequence  int
 	closed    bool
+	sources   map[string]artifactBackup
 }
 
 type ModuleCheckpoint struct {
 	dir       string
 	artifacts map[string]artifactBackup
+	sources   map[string]artifactBackup
 }
 
 type artifactBackup struct {
@@ -37,7 +40,7 @@ func BeginTransaction(root string) (*Transaction, error) {
 	if err != nil {
 		return nil, fmt.Errorf("create transaction backup: %w", err)
 	}
-	transaction := &Transaction{root: root, backupDir: backupDir, originals: make(map[string]artifactBackup, len(dependencyArtifactPaths))}
+	transaction := &Transaction{root: root, backupDir: backupDir, originals: make(map[string]artifactBackup, len(dependencyArtifactPaths)), sources: make(map[string]artifactBackup)}
 	for _, name := range dependencyArtifactPaths {
 		backup := artifactBackup{path: filepath.Join(backupDir, "original", name)}
 		if err := backupArtifact(filepath.Join(root, name), backup.path, &backup.existed); err != nil {
@@ -55,7 +58,7 @@ func (t *Transaction) Checkpoint() (ModuleCheckpoint, error) {
 	}
 	t.sequence++
 	dir := filepath.Join(t.backupDir, "checkpoints", fmt.Sprintf("%06d", t.sequence))
-	checkpoint := ModuleCheckpoint{dir: dir, artifacts: make(map[string]artifactBackup, 2)}
+	checkpoint := ModuleCheckpoint{dir: dir, artifacts: make(map[string]artifactBackup, 2), sources: make(map[string]artifactBackup)}
 	for _, name := range []string{"go.mod", "go.sum"} {
 		backup := artifactBackup{path: filepath.Join(dir, name)}
 		if err := backupArtifact(filepath.Join(t.root, name), backup.path, &backup.existed); err != nil {
@@ -81,6 +84,59 @@ func (t *Transaction) RestoreCheckpoint(checkpoint ModuleCheckpoint) error {
 			failures = append(failures, fmt.Errorf("restore checkpoint %s: %w", name, err))
 		}
 	}
+	if err := t.restoreSources(checkpoint.sources); err != nil {
+		failures = append(failures, err)
+	}
+	return errors.Join(failures...)
+}
+
+func (t *Transaction) WriteSource(checkpoint ModuleCheckpoint, relative string, content []byte) error {
+	if t.closed || checkpoint.sources == nil {
+		return errors.New("source write requires an open transaction checkpoint")
+	}
+	clean := filepath.Clean(relative)
+	if filepath.IsAbs(clean) || !filepath.IsLocal(clean) || filepath.Ext(clean) != ".go" {
+		return fmt.Errorf("invalid migration source path %q", relative)
+	}
+	path := filepath.Join(t.root, clean)
+	info, err := os.Lstat(path)
+	if err != nil {
+		return err
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("migration source %q is not a regular file", relative)
+	}
+	for _, backupSet := range []struct {
+		files map[string]artifactBackup
+		dir   string
+	}{
+		{t.sources, filepath.Join(t.backupDir, "sources")},
+		{checkpoint.sources, filepath.Join(checkpoint.dir, "sources")},
+	} {
+		if _, exists := backupSet.files[clean]; exists {
+			continue
+		}
+		backup := artifactBackup{path: filepath.Join(backupSet.dir, clean)}
+		if err := backupArtifact(path, backup.path, &backup.existed); err != nil {
+			return fmt.Errorf("backup migration source %s: %w", relative, err)
+		}
+		backupSet.files[clean] = backup
+	}
+	return writeFileAtomically(path, content, info.Mode().Perm())
+}
+
+func (t *Transaction) restoreSources(sources map[string]artifactBackup) error {
+	paths := make([]string, 0, len(sources))
+	for path := range sources {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+	var failures []error
+	for _, path := range paths {
+		if err := restoreArtifact(sources[path], filepath.Join(t.root, path)); err != nil {
+			failures = append(failures, fmt.Errorf("restore source %s: %w", path, err))
+		}
+	}
 	return errors.Join(failures...)
 }
 
@@ -93,6 +149,9 @@ func (t *Transaction) Rollback() error {
 		if err := restoreArtifact(t.originals[name], filepath.Join(t.root, name)); err != nil {
 			failures = append(failures, fmt.Errorf("restore original %s: %w", name, err))
 		}
+	}
+	if err := t.restoreSources(t.sources); err != nil {
+		failures = append(failures, err)
 	}
 	if len(failures) != 0 {
 		return errors.Join(failures...)

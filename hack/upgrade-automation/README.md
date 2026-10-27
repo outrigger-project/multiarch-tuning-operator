@@ -35,7 +35,7 @@ The Kubernetes map is the release-alignment policy: list every intended module/v
 
 1. Requires this repository and a clean Git working tree, then records `go.mod`'s Go directive/toolchain and inventories `go list -m -json all`.
 2. Applies requested Go and Kubernetes targets as one transaction and checks the full graph before any individual dependency trials.
-3. Processes module paths in lexical order. Only modules explicitly required in the current root `go.mod` receive individual candidate trials; graph-only transitive modules are skipped. For each eligible module it lists versions newest-first, skipping prereleases, downgrades, and module-path/major migrations. It requests a specific version with `go get module@version`, never `go get -u`.
+3. Processes module paths in lexical order. Only modules explicitly required in the current root `go.mod` receive individual candidate trials; graph-only transitive modules are skipped. For each eligible module it lists versions newest-first, skipping prereleases and downgrades. It requests a specific version with `go get module@version`, never `go get -u`. If that release declares a renamed module path, the updater can migrate root-module imports transactionally (see below).
 4. Runs `go mod tidy`, reloads the selected graph, and verifies the candidate's actual selected version plus every Go/toolchain/Kubernetes exact pin. Accepted trials include graph-wide additions, removals, and version changes.
 5. Refreshes the inventory after accepted trials and processes newly discovered modules. A fixed pass bound and cycle detection prevent unbounded runs.
 6. Normalizes `go.mod` to exactly two `require` blocks (direct first, indirect second), rechecks the selected graph and exact pins, then runs `go mod vendor` before accepting the complete transaction.
@@ -56,11 +56,19 @@ The compiler used for module commands must match the pinned baseline compiler (t
 
 ## Transaction and interruption behavior
 
-Each rejected candidate is restored to the last accepted checkpoint before the next candidate. The whole run remains transactional until exact validation and vendoring succeed. A failed retrieval, incompatible target set, final validation failure, pass-bound/cycle result, or handled interrupt restores the original `go.mod`, `go.sum`, and `vendor`; the report remains in the workspace. Accepted trial details remain in the report even when the overall transaction is rolled back. A forced process termination such as `SIGKILL` cannot run cleanup.
+Each rejected candidate is restored to the last accepted checkpoint before the next candidate. The whole run remains transactional until exact validation and vendoring succeed. A failed retrieval, incompatible target set, final validation failure, pass-bound/cycle result, or handled interrupt restores the original `go.mod`, `go.sum`, `vendor`, and any Go source files rewritten by a module-path migration; the report remains in the workspace. Accepted trial details remain in the report even when the overall transaction is rolled back. A forced process termination such as `SIGKILL` cannot run cleanup.
 
 The updater never commits or pushes. For Prow use, configure the periodic job to provide the explicit target flags, run this command, and only on exit code `0` publish the updated workspace and report as the job's single pull request. Scheduling, credentials, branch naming, and pull-request create/update are owned by the external Prow configuration.
 
 After the final tidy, the updater keeps exactly two `require` blocks, including an empty block when one class has no requirements. Module paths are sorted within each block; the normalization preserves requirement versions, direct/indirect classification, comments, and other `go.mod` directives. It then reloads the graph and validates exact pins before vendoring.
+
+## Renamed module paths
+
+For an error such as `github.com/google/cel-go@v0.32.0` declaring `cel.dev/cel-go`, the updater verifies the declaration under the new path and requests **the same exact candidate version** (`cel.dev/cel-go@v0.32.0`). It rewrites matching import paths in root-module `.go` files, including test files, and replaces the old root requirement before tidy and full-graph pin validation. Import aliases, comments, and non-import strings are preserved. Imports owned by separately selected nested modules are left alone; vendor, hidden directories, testdata, and nested Go modules are excluded from source rewriting.
+
+A rename is accepted only if the selected new module version is exact, all policies still hold, and `go build -mod=readonly ./...` succeeds for the current platform/build configuration. Known compiler/API incompatibilities reject the candidate and restore its source and module edits before trying an older candidate. Retrieval or environment failures still abort the run. This build does not execute tests or validate other build configurations.
+
+Protected modules cannot be migrated automatically. A rename with no matching root imports is blocked because upstream/transitive consumers must migrate first. An existing new-path module at a different version is not silently overridden. If other dependencies still require the old path, it may remain in the selected graph as a transitive dependency; migrating root imports does not rewrite upstream modules. Reporting includes `migratedTo` on the original module and `targetPath`/`sourceFiles` on migration attempts.
 
 ## Report
 
@@ -78,7 +86,7 @@ Module outcomes are `updated`, `already-current`, `policy-pinned`, `blocked-by-c
 - **Pseudo-versions:** allowed as existing selected versions; only newer stable tagged versions are candidates.
 - **Local or remote replacements:** unsupported; fail before mutation with the replacement directive identified.
 - **Active Go workspace (`go.work`):** unsupported; fail clearly rather than silently changing workspace semantics.
-- **Major/import-path migrations and downgrades:** never performed automatically.
+- **Module-path renames:** supported only when an explicit candidate declares the new path; root imports are rewritten and validated transactionally. Major-version/import-path migrations are not guessed and versions are not downgraded automatically.
 
 ## Exit codes
 

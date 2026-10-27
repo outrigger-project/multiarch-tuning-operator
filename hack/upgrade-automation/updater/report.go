@@ -18,10 +18,12 @@ type Change struct {
 }
 
 type Attempt struct {
-	Version  string   `json:"version"`
-	Outcome  string   `json:"outcome"`
-	Evidence string   `json:"evidence,omitempty"`
-	Changes  []Change `json:"changes,omitempty"`
+	Version     string   `json:"version"`
+	Outcome     string   `json:"outcome"`
+	Evidence    string   `json:"evidence,omitempty"`
+	Changes     []Change `json:"changes,omitempty"`
+	TargetPath  string   `json:"targetPath,omitempty"`
+	SourceFiles []string `json:"sourceFiles,omitempty"`
 }
 
 type ModuleResult struct {
@@ -33,6 +35,7 @@ type ModuleResult struct {
 	Outcome               string    `json:"outcome"`
 	Attempts              []Attempt `json:"attempts,omitempty"`
 	CandidateLimitReached bool      `json:"candidateLimitReached,omitempty"`
+	MigratedTo            string    `json:"migratedTo,omitempty"`
 }
 
 type Report struct {
