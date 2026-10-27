@@ -2,7 +2,7 @@
 
 ## Prerequisites
 
-- **Go 1.26.7+** (`go.mod` — `go 1.26.7`)
+- **Go 1.26.10+** (`go.mod` — `go 1.26.10`)
 - **gpgme-devel** (RHEL/Fedora) or **libgpgme-dev** (Debian) — CGO dependency for image inspection
 - **Podman** or **Docker** — containerized builds run by default
 - **qemu-user-static** — required only for multi-arch builds via `docker buildx`
@@ -28,7 +28,7 @@ make fmt          # gofmt -s (hack/go-fmt.sh)
 make vet          # go vet ./...
 make goimports    # Import grouping check (hack/goimports.sh)
 make gosec        # SAST security scan (hack/gosec.sh)
-make lint         # golangci-lint v2.12.2 (hack/golangci-lint.sh)
+make lint         # golangci-lint v2.15.0 (hack/golangci-lint.sh)
 make unit         # Ginkgo unit/integration tests with coverage
 ```
 
@@ -127,7 +127,7 @@ Create a `.env` file (see `dotenv.example`):
 |----------|---------|---------|
 | `VERSION` | `1.3.4` | Operator version |
 | `IMAGE_TAG_BASE` | `registry.ci.openshift.org/origin/multiarch-tuning-operator` | Image registry base |
-| `GOLINT_VERSION` | `v2.12.2` | golangci-lint version |
+| `GOLINT_VERSION` | `v2.15.0` | golangci-lint version |
 | `CONTROLLER_TOOLS_VERSION` | `v0.21.0` | controller-gen version |
 | `OPERATOR_SDK_VERSION` | `v1.42.3` | operator-sdk version |
 | `KUSTOMIZE_VERSION` | `v5.8.1` | kustomize version |

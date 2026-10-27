@@ -71,6 +71,8 @@ type Snapshot struct {
 type Change struct { Path, Before, After string }
 type Attempt struct {
     Version, Outcome, Evidence string
+    TargetPath string
+    SourceFiles []string
     Changes []Change
 }
 type ModuleResult struct {
@@ -78,6 +80,7 @@ type ModuleResult struct {
     InitialDirect, FinalDirect bool
     Outcome string
     Attempts []Attempt
+    MigratedTo string // empty unless the module path was migrated
 }
 type Report struct {
     Status string
@@ -89,6 +92,7 @@ type Config struct {
     Root string
     Policy Policy
     GoBinary string
+    ReportPath string // publish the completed report before committing dependency changes
     MaxPasses int // zero uses the fixed production bound
     Progress io.Writer // optional human-readable progress destination
 }

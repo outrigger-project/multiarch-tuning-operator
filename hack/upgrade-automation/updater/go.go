@@ -25,7 +25,7 @@ func (r GoRunner) Run(ctx context.Context, args ...string) ([]byte, error) {
 	if goBin == "" {
 		goBin = "go"
 	}
-	cmd := exec.CommandContext(ctx, goBin, args...)
+	cmd := exec.CommandContext(ctx, goBin, args...) // #nosec G204 -- the maintainer selects the compiler; arguments are passed without a shell.
 	cmd.Dir = root
 	cmd.Env = environmentWith(map[string]string{"GOTOOLCHAIN": "local", "GOFLAGS": "-mod=mod"})
 	output, err := cmd.CombinedOutput()
@@ -53,11 +53,11 @@ func (r GoRunner) CheckCompiler(ctx context.Context, expected string) error {
 	}
 	for i, component := range want {
 		if got[i] != component {
-			return fmt.Errorf("Go compiler is %s, policy requires %s", actual, expected)
+			return fmt.Errorf("go compiler is %s, policy requires %s", actual, expected)
 		}
 	}
 	if len(want) == 3 && len(got) != 3 {
-		return fmt.Errorf("Go compiler is %s, policy requires exact %s", actual, expected)
+		return fmt.Errorf("go compiler is %s, policy requires exact %s", actual, expected)
 	}
 	return nil
 }
@@ -105,7 +105,7 @@ func removeToolchainDirective(root string) error {
 	if err != nil {
 		return err
 	}
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) // #nosec G304 -- fixed go.mod path under the maintainer-selected repository root.
 	if err != nil {
 		return err
 	}
@@ -133,17 +133,17 @@ func writeFileAtomically(path string, content []byte, mode os.FileMode) error {
 		return err
 	}
 	temporaryPath := temporary.Name()
-	defer os.Remove(temporaryPath)
+	defer func() { _ = os.Remove(temporaryPath) }()
 	if err := temporary.Chmod(mode); err != nil {
-		temporary.Close()
+		_ = temporary.Close()
 		return err
 	}
 	if _, err := temporary.Write(content); err != nil {
-		temporary.Close()
+		_ = temporary.Close()
 		return err
 	}
 	if err := temporary.Sync(); err != nil {
-		temporary.Close()
+		_ = temporary.Close()
 		return err
 	}
 	if err := temporary.Close(); err != nil {
@@ -165,12 +165,4 @@ func environmentWith(overrides map[string]string) []string {
 		filtered = append(filtered, key+"="+value)
 	}
 	return filtered
-}
-
-func (r GoRunner) absoluteRoot() (string, error) {
-	root := r.Root
-	if root == "" {
-		root = "."
-	}
-	return filepath.Abs(root)
 }

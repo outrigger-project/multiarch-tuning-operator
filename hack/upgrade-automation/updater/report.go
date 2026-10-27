@@ -95,7 +95,7 @@ func WriteReport(path string, report Report) error {
 	}
 	data = append(data, '\n')
 	directory := filepath.Dir(path)
-	if err := os.MkdirAll(directory, 0o755); err != nil {
+	if err := os.MkdirAll(directory, 0o750); err != nil {
 		return fmt.Errorf("create report directory: %w", err)
 	}
 	temporary, err := os.CreateTemp(directory, ".dependency-upgrade-report-*")
@@ -103,17 +103,17 @@ func WriteReport(path string, report Report) error {
 		return fmt.Errorf("create temporary report: %w", err)
 	}
 	temporaryPath := temporary.Name()
-	defer os.Remove(temporaryPath)
+	defer func() { _ = os.Remove(temporaryPath) }()
 	if err := temporary.Chmod(0o644); err != nil {
-		temporary.Close()
+		_ = temporary.Close()
 		return fmt.Errorf("set report permissions: %w", err)
 	}
 	if _, err := bytes.NewReader(data).WriteTo(temporary); err != nil {
-		temporary.Close()
+		_ = temporary.Close()
 		return fmt.Errorf("write report: %w", err)
 	}
 	if err := temporary.Sync(); err != nil {
-		temporary.Close()
+		_ = temporary.Close()
 		return fmt.Errorf("sync report: %w", err)
 	}
 	if err := temporary.Close(); err != nil {

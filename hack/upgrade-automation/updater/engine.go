@@ -10,11 +10,12 @@ import (
 )
 
 type Config struct {
-	Root      string
-	Policy    Policy
-	GoBinary  string
-	MaxPasses int
-	Progress  io.Writer
+	Root       string
+	Policy     Policy
+	GoBinary   string
+	ReportPath string
+	MaxPasses  int
+	Progress   io.Writer
 }
 
 const defaultMaxPasses = 5
@@ -188,7 +189,7 @@ func Run(ctx context.Context, cfg Config) (report Report, runErr error) {
 			result.Attempts = append(result.Attempts, Attempt{Version: targetVersion, Outcome: attemptAccepted, Evidence: "explicit Kubernetes target", Changes: targetChanges})
 		}
 		if selected.Version != targetVersion {
-			return report, fmt.Errorf("Kubernetes module %q selected %q after target setup, want %q", modulePath, selected.Version, targetVersion)
+			return report, fmt.Errorf("kubernetes module %q selected %q after target setup, want %q", modulePath, selected.Version, targetVersion)
 		}
 	}
 
@@ -483,15 +484,22 @@ func Run(ctx context.Context, cfg Config) (report Report, runErr error) {
 	if violations := ValidatePolicy(baseline, final, cfg.Policy); len(violations) != 0 {
 		return report, fmt.Errorf("final exact-policy validation failed: %w", errors.Join(violations...))
 	}
-	if err := transaction.Commit(); err != nil {
-		return report, fmt.Errorf("commit dependency transaction: %w", err)
-	}
-	committed = true
 	report.Status = runCompleted
 	report.Final = final
 	annotateMigrations(results, migrations)
 	finalizeResults(results, final, cfg.Policy, false)
 	report.Modules = sortedResults(results)
+	if cfg.ReportPath != "" {
+		if err := WriteReport(cfg.ReportPath, report); err != nil {
+			report.Status = runFailed
+			return report, fmt.Errorf("publish dependency report: %w", err)
+		}
+	}
+	if err := transaction.Commit(); err != nil {
+		report.Status = runFailed
+		return report, fmt.Errorf("commit dependency transaction: %w", err)
+	}
+	committed = true
 	emitRunSummary(cfg.Progress, report)
 	return report, nil
 }

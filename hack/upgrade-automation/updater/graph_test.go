@@ -108,7 +108,7 @@ func setLocalProxy(t *testing.T, proxy string) {
 	proxyURL := (&url.URL{Scheme: "file", Path: proxy}).String()
 	moduleCache := t.TempDir()
 	t.Cleanup(func() {
-		filepath.WalkDir(moduleCache, func(path string, entry os.DirEntry, err error) error {
+		if err := filepath.WalkDir(moduleCache, func(path string, entry os.DirEntry, err error) error {
 			if err != nil {
 				return err
 			}
@@ -119,7 +119,9 @@ func setLocalProxy(t *testing.T, proxy string) {
 				return os.Chmod(path, 0o700)
 			}
 			return os.Chmod(path, 0o600)
-		})
+		}); err != nil {
+			t.Errorf("make module cache writable for cleanup: %v", err)
+		}
 	})
 	t.Setenv("GOPROXY", proxyURL)
 	t.Setenv("GOSUMDB", "off")
@@ -174,24 +176,24 @@ func writeProxyModuleWithSource(t *testing.T, proxy, modulePath, version, goVers
 	entry := fmt.Sprintf("%s@%s/go.mod", modulePath, version)
 	writer, err := archive.Create(entry)
 	if err != nil {
-		zipFile.Close()
+		_ = zipFile.Close()
 		t.Fatal(err)
 	}
 	if _, err := writer.Write([]byte(mod.String())); err != nil {
-		zipFile.Close()
+		_ = zipFile.Close()
 		t.Fatal(err)
 	}
 	sourceWriter, err := archive.Create(fmt.Sprintf("%s@%s/placeholder.go", modulePath, version))
 	if err != nil {
-		zipFile.Close()
+		_ = zipFile.Close()
 		t.Fatal(err)
 	}
 	if _, err := sourceWriter.Write([]byte(source)); err != nil {
-		zipFile.Close()
+		_ = zipFile.Close()
 		t.Fatal(err)
 	}
 	if err := archive.Close(); err != nil {
-		zipFile.Close()
+		_ = zipFile.Close()
 		t.Fatal(err)
 	}
 	if err := zipFile.Close(); err != nil {
