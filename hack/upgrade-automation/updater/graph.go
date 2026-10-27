@@ -93,7 +93,8 @@ func CaptureSnapshot(ctx context.Context, root, goBin string) (Snapshot, error) 
 		if listed.Replace != nil {
 			return Snapshot{}, &PreconditionError{Err: fmt.Errorf("replace directives are unsupported: selected module %q is replaced by %q", listed.Path, listed.Replace.Path)}
 		}
-		modules[listed.Path] = Module{Path: listed.Path, Version: listed.Version, Main: listed.Main, Direct: direct[listed.Path]}
+		isDirect, required := direct[listed.Path]
+		modules[listed.Path] = Module{Path: listed.Path, Version: listed.Version, Main: listed.Main, Direct: isDirect, Required: required}
 	}
 	if len(modules) == 0 {
 		return Snapshot{}, &PreconditionError{Err: errors.New("selected module graph is empty")}

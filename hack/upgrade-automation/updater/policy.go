@@ -26,10 +26,11 @@ type Policy struct {
 }
 
 type Module struct {
-	Path    string `json:"path"`
-	Version string `json:"version"`
-	Main    bool   `json:"main,omitempty"`
-	Direct  bool   `json:"direct"`
+	Path     string `json:"path"`
+	Version  string `json:"version"`
+	Main     bool   `json:"main,omitempty"`
+	Direct   bool   `json:"direct"`
+	Required bool   `json:"required"`
 }
 
 type Snapshot struct {

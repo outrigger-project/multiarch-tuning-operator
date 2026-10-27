@@ -45,8 +45,14 @@ exclude example.test/excluded v1.2.3
 	if !reflect.DeepEqual(indirect, []string{"example.test/indirect-a", "example.test/indirect-z"}) {
 		t.Fatalf("indirect require paths = %v", indirect)
 	}
-	if file.Go != "1.26.7" || file.Toolchain != "go1.26.7" || len(file.Exclude) != 1 {
-		t.Fatalf("non-require directives changed: Go=%s toolchain=%s excludes=%v", file.Go, file.Toolchain, file.Exclude)
+	if file.Go == nil || file.Go.Version != "1.26.7" {
+		t.Fatalf("Go directive changed: got %+v, want version 1.26.7", file.Go)
+	}
+	if file.Toolchain == nil || file.Toolchain.Name != "go1.26.7" {
+		t.Fatalf("toolchain directive changed: got %+v, want name go1.26.7", file.Toolchain)
+	}
+	if len(file.Exclude) != 1 {
+		t.Fatalf("exclude directives changed: got %v, want one exclusion", file.Exclude)
 	}
 }
 

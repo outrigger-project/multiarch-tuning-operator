@@ -31,6 +31,7 @@ const (
 	moduleBlocked          = "blocked-by-constraints"
 	moduleRemoved          = "removed"
 	moduleExecutionFailure = "execution-failure"
+	moduleNotInGoMod       = "not-in-go-mod"
 
 	attemptAccepted = "accepted"
 )
@@ -208,6 +209,10 @@ func Run(ctx context.Context, cfg Config) (report Report, runErr error) {
 			}
 			if isProtectedModule(modulePath, cfg.Policy) {
 				progressf(cfg.Progress, "Pinned %s at %s (policy-pinned)", modulePath, versionLabel(module.Version))
+				continue
+			}
+			if !module.Required {
+				progressf(cfg.Progress, "Skipping %s at %s (not-in-go-mod)", modulePath, versionLabel(module.Version))
 				continue
 			}
 			progressf(cfg.Progress, "Checking %s at %s", modulePath, versionLabel(module.Version))
@@ -654,6 +659,8 @@ func finalizeResults(results map[string]*ModuleResult, final Snapshot, policy Po
 			result.Outcome = moduleExecutionFailure
 		} else if hasAttemptOutcome(result, moduleBlocked) {
 			result.Outcome = moduleBlocked
+		} else if exists && !module.Required && len(result.Attempts) == 0 && result.Outcome == "" {
+			result.Outcome = moduleNotInGoMod
 		} else if result.Outcome == "" {
 			result.Outcome = moduleAlreadyCurrent
 		}

@@ -1,6 +1,6 @@
 # Go dependency updater
 
-`scripts/upgrade.sh` updates the selected Go module graph, including indirect dependencies. It does not choose Go or Kubernetes target versions, create commits, push branches, or open pull requests. Maintainers can run it manually; the external Prow periodic job can pass the same explicit inputs and publish the workspace changes.
+`scripts/upgrade.sh` tries dependency updates only for modules explicitly required in the root `go.mod`, including `// indirect` requirements. It still inventories and validates the entire selected module graph. It does not choose Go or Kubernetes target versions, create commits, push branches, or open pull requests. Maintainers can run it manually; the external Prow periodic job can pass the same explicit inputs and publish the workspace changes.
 
 ## Modes
 
@@ -35,7 +35,7 @@ The Kubernetes map is the release-alignment policy: list every intended module/v
 
 1. Requires this repository and a clean Git working tree, then records `go.mod`'s Go directive/toolchain and inventories `go list -m -json all`.
 2. Applies requested Go and Kubernetes targets as one transaction and checks the full graph before any individual dependency trials.
-3. Processes module paths in lexical order. For each eligible module it lists versions newest-first, skipping prereleases, downgrades, and module-path/major migrations. It requests a specific version with `go get module@version`, never `go get -u`.
+3. Processes module paths in lexical order. Only modules explicitly required in the current root `go.mod` receive individual candidate trials; graph-only transitive modules are skipped. For each eligible module it lists versions newest-first, skipping prereleases, downgrades, and module-path/major migrations. It requests a specific version with `go get module@version`, never `go get -u`.
 4. Runs `go mod tidy`, reloads the selected graph, and verifies the candidate's actual selected version plus every Go/toolchain/Kubernetes exact pin. Accepted trials include graph-wide additions, removals, and version changes.
 5. Refreshes the inventory after accepted trials and processes newly discovered modules. A fixed pass bound and cycle detection prevent unbounded runs.
 6. Normalizes `go.mod` to exactly two `require` blocks (direct first, indirect second), rechecks the selected graph and exact pins, then runs `go mod vendor` before accepting the complete transaction.
@@ -44,7 +44,7 @@ Progress is written to stderr as the updater runs. Target setup shows the baseli
 
 The algorithm is deterministic and sequential, but it does not find a globally optimal dependency-version combination. A module update can be rejected because of Go requirements, exact pins, exclusions, or graph-wide constraints; older candidates are then considered. A retrieval or authentication failure is reported as an execution failure, not as proof that a version is incompatible.
 
-Each module has a maximum of **20 candidate trials across the entire run**, including repeat passes. These are different candidate versions, not retries of the same download. Modules selected transitively can appear in `go list -m all` without an explicit requirement in the root `go.mod`; they are intentionally inventoried and processed too. If the limit leaves candidates unchecked, the updater continues accounting for other modules, records `candidateLimitReached: true` for the capped module, then reports an incomplete run (exit `3`) and rolls back the run's dependency changes. It does not claim that no compatible version exists beyond the limit.
+Each eligible module has a maximum of **20 candidate trials across the entire run**, including repeat passes. These are different candidate versions, not retries of the same download. Modules selected transitively can appear in `go list -m all` without an explicit requirement in the root `go.mod`; they are inventoried and policy-checked but receive no individual update trials. They may still change transitively when an eligible dependency is updated. If the limit leaves candidates unchecked, the updater continues accounting for other modules, records `candidateLimitReached: true` for the capped module, then reports an incomplete run (exit `3`) and rolls back the run's dependency changes. It does not claim that no compatible version exists beyond the limit.
 
 ## Go compiler and directive rules
 
@@ -70,7 +70,7 @@ The default report is `_output/dependency-upgrade-report.json`; override it with
 - overall `completed`, `incomplete`, or `failed` status, plus run-level failure and rollback state;
 - a path-sorted result for every initially or subsequently discovered module, with initial/final version, direct/indirect classification, attempted candidates, outcome, rejection evidence, and accepted transitive changes.
 
-Module outcomes are `updated`, `already-current`, `policy-pinned`, `blocked-by-constraints`, `removed`, and `execution-failure`. Excluded versions omitted by Go's version listing are not attempts; if the resolver returns an excluded version and rejects it, that rejection is recorded. Credential-like URL/query values are redacted from error evidence.
+Module outcomes are `updated`, `already-current`, `policy-pinned`, `blocked-by-constraints`, `removed`, `execution-failure`, and `not-in-go-mod` (an unchanged graph-only module skipped for candidate trials). Snapshot entries include `required` to distinguish explicit `go.mod` requirements from graph-only modules. Excluded versions omitted by Go's version listing are not attempts; if the resolver returns an excluded version and rejects it, that rejection is recorded. Credential-like URL/query values are redacted from error evidence.
 
 ## Supported and unsupported module states
 
