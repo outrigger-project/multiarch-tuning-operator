@@ -133,6 +133,42 @@ func TestEngineRequiresExplicitDecisionForNewKubernetesModule(t *testing.T) {
 	}
 }
 
+func TestEngineSkipsGraphOnlyModulesAndUpdatesExplicitIndirectRequirements(t *testing.T) {
+	root, proxy := engineFixture(t)
+	writeProxyModuleWithSource(t, proxy, "example.test/direct", "v1.0.0", "1.20", map[string]string{
+		"example.test/graph-only": "v1.0.0",
+		"example.test/indirect":   "v1.0.0",
+	}, "package fixture\nimport _ \"example.test/indirect\"\n")
+	writeProxyModule(t, proxy, "example.test/graph-only", "v1.0.0", "1.20", nil)
+	// A version lookup would fail, proving graph-only modules are never candidates.
+	if err := os.Remove(filepath.Join(proxy, "example.test", "graph-only", "@v", "list")); err != nil {
+		t.Fatal(err)
+	}
+	for _, version := range []string{"v1.0.0", "v1.1.0"} {
+		writeProxyModule(t, proxy, "example.test/indirect", version, "1.20", nil)
+	}
+	writeProxyVersionList(t, proxy, "example.test/indirect", []string{"v1.0.0", "v1.1.0"})
+	writeModule(t, root, "module fixture.test/root\n\ngo 1.26.7\n\nrequire example.test/direct v1.0.0\nrequire example.test/indirect v1.0.0 // indirect\n")
+	writeFile(t, filepath.Join(root, "fixture.go"), "package fixture\nimport _ \"example.test/direct\"\n")
+	setLocalProxy(t, proxy)
+	var progress bytes.Buffer
+	report, err := Run(context.Background(), Config{Root: root, Policy: mustPolicy(t, "pin-both", "", nil), GoBinary: "go", Progress: &progress})
+	if err != nil {
+		t.Fatalf("Run(): %v", err)
+	}
+	graphOnly := moduleResult(t, report, "example.test/graph-only")
+	if len(graphOnly.Attempts) != 0 || graphOnly.Outcome != moduleNotInGoMod || graphOnly.FinalVersion != "v1.0.0" {
+		t.Fatalf("graph-only result = %#v, want skipped without candidate attempts", graphOnly)
+	}
+	indirect := moduleResult(t, report, "example.test/indirect")
+	if indirect.Outcome != moduleUpdated || indirect.FinalVersion != "v1.1.0" || indirect.FinalDirect {
+		t.Fatalf("explicit indirect result = %#v, want indirect upgrade", indirect)
+	}
+	if !strings.Contains(progress.String(), "Skipping example.test/graph-only at v1.0.0 (not-in-go-mod)") {
+		t.Fatalf("missing skip reason in progress: %s", progress.String())
+	}
+}
+
 func TestKubernetesMapAllowsExplicitTargetForNewTransitiveModule(t *testing.T) {
 	root, proxy := newKubernetesIntroductionFixture(t)
 	setLocalProxy(t, proxy)

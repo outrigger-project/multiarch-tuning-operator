@@ -9,7 +9,7 @@ Replace the current interactive OCP-wide `hack/upgrade-automation/scripts/upgrad
 - Offer four independent policies: pin Go and Kubernetes; update Go only; update Kubernetes only; update both.
 - Require exact, explicit Go and Kubernetes targets when those dimensions are updated. Kubernetes targets are an exact module-path-to-version map.
 - Preserve baseline Go directive/toolchain policy and every selected `k8s.io/*` module version whenever pinned.
-- Try stable, newer candidates one module at a time over the full selected graph, including indirect modules, and record a disposition for every discovered dependency.
+- Try stable, newer candidates one module at a time only for explicit root `go.mod` requirements, including indirect requirements, while inventorying and validating the full selected graph. Record a disposition for every discovered dependency; unchanged graph-only dependencies are `not-in-go-mod`.
 - Roll back rejected trials, validate the selected graph and exact pins after tidy, and report accepted transitive changes.
 - Produce deterministic JSON reporting and deterministic fixture-based tests using a local Go module proxy.
 - Emit concise progress on stderr with candidate source/target versions, decisions, and final per-module outcomes.
@@ -63,7 +63,7 @@ Apply the requested Go directive and all explicit Kubernetes module/version pair
 Separate policy evaluation, candidate selection, trial execution, and reporting into independently testable Go components.
 
 1. Require a clean worktree, capture baseline `go.mod`/`go.sum`, and inventory `go list -m -json all`.
-2. Sort module paths lexically. For each eligible module, request available versions from Go tooling, order newest first, and consider only stable versions newer than current. Never change module paths or downgrade.
+2. Sort module paths lexically. Skip individual candidate trials for modules not explicitly required in the current root `go.mod`. For each eligible module, request available versions from Go tooling, order newest first, and consider only stable versions newer than current. Never change module paths or downgrade.
 3. Apply each candidate from the last accepted checkpoint using `go get <module>@<exact-version>` without `-u`, then `go mod tidy`.
 4. Reload the entire graph and verify the requested module selected the candidate, Go/toolchain policy is exact, all protected Kubernetes versions are exact, and no unapproved new Kubernetes module appeared.
 5. Compare the complete selected graph to the checkpoint. Record all transitive additions, removals, and version changes for each accepted trial.
@@ -91,7 +91,7 @@ Each candidate starts from the last accepted checkpoint. Rejected trials restore
 
 Write stable JSON to the requested path. Include policy inputs; baseline/final Go directive and toolchain; baseline/final Kubernetes map; overall status (`completed`, `incomplete`, `failed`); and a path-sorted module list containing initial/final version, direct/indirect state, attempts, outcome, rejection/failure evidence, and accepted trial transitive changes. Emit progress to stderr while running, including each candidate's selected-to-requested version and a final summary that explicitly states when a module was not updated and why.
 
-Every initial or newly discovered module receives one final disposition: `updated`, `already-current`, `policy-pinned`, `blocked-by-constraints`, `removed`, or `execution-failure`. Include both initial and final direct/indirect classification. If the run transaction rolls back, the final versions match baseline and attempted/accepted-then-rolled-back trials remain visible in the attempts section. The report distinguishes an exhausted constrained search from an incomplete bounded/cyclic run and failed validation. No “optimal” claim is made.
+Every initial or newly discovered module receives one final disposition: `updated`, `already-current`, `policy-pinned`, `blocked-by-constraints`, `removed`, `execution-failure`, or `not-in-go-mod`. Include both initial and final direct/indirect classification and explicit-requirement membership in snapshots. If the run transaction rolls back, the final versions match baseline and attempted/accepted-then-rolled-back trials remain visible in the attempts section. The report distinguishes an exhausted constrained search from an incomplete bounded/cyclic run and failed validation. No “optimal” claim is made.
 
 Exit codes: `0` completed constrained run; `1` invalid invocation, dirty tree, or unsupported repository state; `2` failed retrieval/execution/final validation; `3` incomplete because of pass bound or cycle. Once a valid invocation starts, write the report atomically on every terminal path.
 

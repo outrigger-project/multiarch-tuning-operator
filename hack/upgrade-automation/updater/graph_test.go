@@ -47,9 +47,9 @@ require (
 	}
 	want := map[string]Module{
 		"fixture.test/root":     {Path: "fixture.test/root", Main: true},
-		"example.test/direct":   {Path: "example.test/direct", Version: "v1.0.0", Direct: true},
-		"example.test/indirect": {Path: "example.test/indirect", Version: "v1.0.0"},
-		"k8s.io/api":            {Path: "k8s.io/api", Version: "v0.36.5", Direct: true},
+		"example.test/direct":   {Path: "example.test/direct", Version: "v1.0.0", Direct: true, Required: true},
+		"example.test/indirect": {Path: "example.test/indirect", Version: "v1.0.0", Required: true},
+		"k8s.io/api":            {Path: "k8s.io/api", Version: "v0.36.5", Direct: true, Required: true},
 	}
 	if len(snapshot.Modules) != len(want) {
 		t.Fatalf("module count = %d, want %d: %#v", len(snapshot.Modules), len(want), snapshot.Modules)
