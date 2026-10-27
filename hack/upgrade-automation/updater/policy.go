@@ -118,7 +118,7 @@ func ValidatePolicy(before, after Snapshot, policy Policy) []error {
 			wantVersion = target
 		}
 		if selected.Version != wantVersion {
-			violations = append(violations, fmt.Errorf("Kubernetes module %q selected %q, want exact %q", path, selected.Version, wantVersion))
+			violations = append(violations, fmt.Errorf("kubernetes module %q selected %q, want exact %q", path, selected.Version, wantVersion))
 		}
 	}
 

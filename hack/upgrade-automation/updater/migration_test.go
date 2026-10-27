@@ -49,7 +49,11 @@ var text = "old.test/lib/pkg"
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer transaction.Rollback()
+	t.Cleanup(func() {
+		if err := transaction.Rollback(); err != nil {
+			t.Errorf("Rollback(): %v", err)
+		}
+	})
 	checkpoint, err := transaction.Checkpoint()
 	if err != nil {
 		t.Fatal(err)
@@ -93,7 +97,7 @@ func TestMigrationReplacesRequirementAndRewritesImports(t *testing.T) {
 	writeFile(t, filepath.Join(proxy, oldPath, "@v", "v1.1.0.mod"), "module "+newPath+"\n\ngo 1.20\n")
 	writeProxyVersionList(t, proxy, oldPath, []string{"v1.0.0", "v1.1.0"})
 	writeProxyModule(t, proxy, newPath, "v1.1.0", "1.20", nil)
-	writeModule(t, root, "module fixture.test/root\n\ngo 1.26.7\nrequire "+oldPath+" v1.0.0\n")
+	writeModule(t, root, "module fixture.test/root\n\ngo "+testGoVersion+"\nrequire "+oldPath+" v1.0.0\n")
 	writeFile(t, filepath.Join(root, "fixture.go"), "package fixture\nimport _ \""+oldPath+"\"\n")
 	setLocalProxy(t, proxy)
 	report, err := Run(context.Background(), Config{Root: root, Policy: mustPolicy(t, "pin-both", "", nil), GoBinary: "go"})
@@ -168,7 +172,7 @@ func TestMigrationRejectedByPinsRestoresSourceAndTriesOlderCandidate(t *testing.
 		writeProxyModule(t, proxy, "k8s.io/api", version, "1.20", nil)
 	}
 	writeProxyVersionList(t, proxy, "k8s.io/api", []string{"v0.36.5", "v0.36.6"})
-	writeModule(t, root, "module fixture.test/root\n\ngo 1.26.7\nrequire (\nold.test/lib v1.0.0\nk8s.io/api v0.36.5\n)\n")
+	writeModule(t, root, "module fixture.test/root\n\ngo "+testGoVersion+"\nrequire (\nold.test/lib v1.0.0\nk8s.io/api v0.36.5\n)\n")
 	source := "package fixture\nimport (\n_ \"old.test/lib\"\n_ \"k8s.io/api\"\n)\n"
 	writeFile(t, filepath.Join(root, "fixture.go"), source)
 	setLocalProxy(t, proxy)
@@ -197,7 +201,7 @@ func TestMigrationCompileFailureRestoresSourceAndTriesOlderCandidate(t *testing.
 	writeFile(t, filepath.Join(proxy, "old.test/lib/@v/v1.1.0.mod"), "module new.test/lib\n\ngo 1.20\n")
 	writeProxyVersionList(t, proxy, "old.test/lib", []string{"v1.0.0", "v1.0.1", "v1.1.0"})
 	writeProxyModule(t, proxy, "new.test/lib", "v1.1.0", "1.20", nil)
-	writeModule(t, root, "module fixture.test/root\n\ngo 1.26.7\nrequire old.test/lib v1.0.0\n")
+	writeModule(t, root, "module fixture.test/root\n\ngo "+testGoVersion+"\nrequire old.test/lib v1.0.0\n")
 	source := "package fixture\nimport lib \"old.test/lib\"\nvar _ = lib.Value\n"
 	writeFile(t, filepath.Join(root, "fixture.go"), source)
 	setLocalProxy(t, proxy)

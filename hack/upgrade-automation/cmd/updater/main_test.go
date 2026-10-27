@@ -3,9 +3,13 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/openshift/multiarch-tuning-operator/hack/upgrade-automation/updater"
@@ -116,6 +120,101 @@ func TestExecuteInvalidArgumentsReturnOneWithoutStartingUpdater(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(defaultReportPath))); !os.IsNotExist(err) {
 		t.Fatalf("invalid invocation wrote report: stat error = %v", err)
+	}
+}
+
+func TestExecuteReportPublicationControlsDependencyCommit(t *testing.T) {
+	goBinary, err := exec.LookPath("go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, failPublication := range []bool{false, true} {
+		t.Run(fmt.Sprintf("publication failure=%t", failPublication), func(t *testing.T) {
+			root := cliFixture(t)
+			original := "module github.com/openshift/multiarch-tuning-operator\n\ngo " + strings.TrimPrefix(strings.Fields(runtime.Version())[0], "go") + "\n"
+			if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte(original), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(root, "fixture.go"), []byte("package fixture\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Mkdir(filepath.Join(root, "vendor"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			sentinel := filepath.Join(root, "vendor", "original")
+			if err := os.WriteFile(sentinel, []byte("original vendor contents"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			reportPath := filepath.Join(t.TempDir(), "report.json")
+			if failPublication {
+				if err := os.Mkdir(reportPath, 0o700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			setFakeGitStatus(t, "")
+			var stdout, stderr bytes.Buffer
+			code := execute([]string{"--mode", "pin-both", "--report", reportPath, "--go-bin", goBinary}, root, &stdout, &stderr)
+			if failPublication {
+				if code != 2 || !strings.Contains(stderr.String(), "publish report") {
+					t.Fatalf("exit=%d stderr=%s, want publication failure", code, &stderr)
+				}
+				data, err := os.ReadFile(filepath.Join(root, "go.mod"))
+				if err != nil || string(data) != original {
+					t.Fatalf("go.mod not restored: %q, error=%v", data, err)
+				}
+				data, err = os.ReadFile(sentinel)
+				if err != nil || string(data) != "original vendor contents" {
+					t.Fatalf("vendor not restored: %q, error=%v", data, err)
+				}
+				if _, err := os.Stat(filepath.Join(root, "go.sum")); !os.IsNotExist(err) {
+					t.Fatalf("unexpected go.sum after rollback: %v", err)
+				}
+				return
+			}
+			if code != 0 {
+				t.Fatalf("exit=%d stderr=%s", code, &stderr)
+			}
+			data, err := os.ReadFile(reportPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var report updater.Report
+			if err := json.Unmarshal(data, &report); err != nil || report.Status != "completed" || report.RolledBack {
+				t.Fatalf("report=%s error=%v", data, err)
+			}
+			if _, err := os.Stat(sentinel); !os.IsNotExist(err) {
+				t.Fatalf("vendor regeneration not committed: %v", err)
+			}
+		})
+	}
+}
+
+func TestLauncherUsesSelectedGoBinary(t *testing.T) {
+	realGo, err := exec.LookPath("go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bin := t.TempDir()
+	if err := os.WriteFile(filepath.Join(bin, "go"), []byte("#!/bin/sh\nexit 42\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	selected := filepath.Join(bin, "selected compiler")
+	if err := os.Symlink(realGo, selected); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	for _, option := range [][]string{{"--go-bin", selected}, {"--go-bin=" + selected}, {"-go-bin", selected}, {"-go-bin=" + selected}} {
+		args := append([]string{"../../scripts/upgrade.sh", "--mode", "pin-both"}, option...)
+		args = append(args, "--help")
+		output, err := exec.Command("bash", args...).CombinedOutput()
+		if err != nil || !bytes.Contains(output, []byte("Policy-driven Go dependency updater")) {
+			t.Fatalf("launcher %v: error=%v output=%s", option, err, output)
+		}
+	}
+	output, err := exec.Command("bash", "../../scripts/upgrade.sh", "--go-bin").CombinedOutput()
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) || exitErr.ExitCode() != 1 || !bytes.Contains(output, []byte("--go-bin requires")) {
+		t.Fatalf("missing compiler argument: error=%v output=%s", err, output)
 	}
 }
 

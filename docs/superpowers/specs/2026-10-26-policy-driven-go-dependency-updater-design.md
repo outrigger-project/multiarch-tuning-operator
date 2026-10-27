@@ -42,7 +42,7 @@ upgrade.sh --mode kubernetes-only --k8s-target k8s.io/api=v0.36.6 --k8s-target k
 upgrade.sh --mode both --go-target 1.26.8 --k8s-target k8s.io/api=v0.36.6
 ```
 
-`--go-target` requires an exact patch version. `--k8s-target` is repeatable; each value is an exact `module=version` pair. Go-only and both modes require a Go target; Kubernetes-only and both modes require at least one Kubernetes target. Targets are never inferred. `--go-bin` optionally selects the compiler executable; otherwise `go` from `PATH` is used and must match the exact compiler version required by the active policy.
+`--go-target` requires an exact patch version. `--k8s-target` is repeatable; each value is an exact `module=version` pair. Go-only and both modes require a Go target; Kubernetes-only and both modes require at least one Kubernetes target. Targets are never inferred. `--go-bin` optionally selects the compiler executable for both the shell launcher's `go run` and the updater's module commands; otherwise `go` from `PATH` is used. The selected compiler must be able to build the updater under the repository's current `go.mod` and must match the exact compiler version required by the active policy. The launcher sets `GOTOOLCHAIN=local` before invoking that compiler.
 
 The command runs from the repository root, rejects a dirty worktree, and defaults report output to `_output/dependency-upgrade-report.json`. A custom `--report` path is supported. It does not commit or publish changes.
 
@@ -86,6 +86,8 @@ This is a sequential constrained updater, not a global optimizer. The candidate 
 ## Transaction and interruption behavior
 
 Each candidate starts from the last accepted checkpoint. Rejected trials restore `go.mod` and `go.sum`; accepted checkpoints remain temporary until the entire run, final validation, and vendoring succeed. Any fatal execution error, incomplete bound/cycle, final validation failure, or interruption restores the original `go.mod`, `go.sum`, and `vendor`, while preserving the report. Signal handling restores the current trial and removes temporary files; forced process termination cannot be guaranteed cleanup and is documented. An incompatible initial Go/Kubernetes target combination restores the original dependency files completely. Prow must publish only a run that exits successfully.
+
+Publish the completed report atomically before committing the dependency transaction and deleting its backup. A report-publication failure rolls back dependency artifacts and rewritten sources and returns exit code `2`. The CLI attempts to publish the resulting failure report after rollback; if the destination remains unwritable, it reports the error on stderr.
 
 ## Report
 

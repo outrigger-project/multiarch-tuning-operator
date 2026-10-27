@@ -23,28 +23,28 @@ func TestTargetSetupEnforcesFourIndependentModes(t *testing.T) {
 	}{
 		{
 			name: "pin both",
-			mode: "pin-both", baselineGo: "1.26.7",
-			wantGo:  "1.26.7",
+			mode: "pin-both", baselineGo: testGoVersion,
+			wantGo:  testGoVersion,
 			wantK8s: map[string]string{"k8s.io/api": "v0.36.5", "k8s.io/apimachinery": "v0.36.4"},
 		},
 		{
 			name: "update Go only and keep absent toolchain absent",
-			mode: "go-only", baselineGo: "1.26.6", goTarget: "1.26.7",
-			wantGo:  "1.26.7",
+			mode: "go-only", baselineGo: "1.26.6", goTarget: testGoVersion,
+			wantGo:  testGoVersion,
 			wantK8s: map[string]string{"k8s.io/api": "v0.36.5", "k8s.io/apimachinery": "v0.36.4"},
 		},
 		{
 			name: "update Kubernetes only with independent targets",
-			mode: "kubernetes-only", baselineGo: "1.26.7",
+			mode: "kubernetes-only", baselineGo: testGoVersion,
 			k8sTargets: []string{"k8s.io/api=v0.36.6", "k8s.io/apimachinery=v0.36.6"},
-			wantGo:     "1.26.7",
+			wantGo:     testGoVersion,
 			wantK8s:    map[string]string{"k8s.io/api": "v0.36.6", "k8s.io/apimachinery": "v0.36.6"},
 		},
 		{
 			name: "update both and preserve existing toolchain presence",
-			mode: "both", baselineGo: "1.26.6", toolchain: "go1.26.6", goTarget: "1.26.7",
+			mode: "both", baselineGo: "1.26.6", toolchain: "go1.26.6", goTarget: testGoVersion,
 			k8sTargets: []string{"k8s.io/api=v0.36.6", "k8s.io/apimachinery=v0.36.6"},
-			wantGo:     "1.26.7", wantTool: "go1.26.7",
+			wantGo:     testGoVersion, wantTool: "go" + testGoVersion,
 			wantK8s: map[string]string{"k8s.io/api": "v0.36.6", "k8s.io/apimachinery": "v0.36.6"},
 		},
 	}
@@ -85,7 +85,7 @@ func TestTargetSetupEnforcesFourIndependentModes(t *testing.T) {
 }
 
 func TestTargetSetupRollsBackIncompatibleKubernetesTargets(t *testing.T) {
-	root, proxy := targetFixture(t, "1.26.7", "")
+	root, proxy := targetFixture(t, testGoVersion, "")
 	setLocalProxy(t, proxy)
 	baseline, err := CaptureSnapshot(context.Background(), root, "go")
 	if err != nil {
@@ -104,7 +104,7 @@ func TestTargetSetupRollsBackIncompatibleKubernetesTargets(t *testing.T) {
 		t.Fatalf("BeginTransaction(): %v", err)
 	}
 	_, err = ApplyTargets(context.Background(), GoRunner{Root: root, Binary: "go"}, baseline, policy, transaction)
-	if err == nil || !strings.Contains(err.Error(), "Kubernetes module") {
+	if err == nil || !strings.Contains(err.Error(), "kubernetes module") {
 		t.Fatalf("ApplyTargets() error = %v, want exact pin conflict", err)
 	}
 	if got := ExitCode(err); got != 2 {

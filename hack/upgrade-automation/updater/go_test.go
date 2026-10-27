@@ -26,14 +26,14 @@ func TestGoEnvironmentOverridesToolchainAndVendorFlags(t *testing.T) {
 
 func TestCompilerVersionRejectsMismatch(t *testing.T) {
 	runner := GoRunner{Root: t.TempDir(), Binary: "go"}
-	if err := runner.CheckCompiler(context.Background(), "1.26.8"); err == nil || !strings.Contains(err.Error(), "1.26.8") {
-		t.Fatalf("CheckCompiler() error = %v, want mismatch for 1.26.8", err)
+	if err := runner.CheckCompiler(context.Background(), futureGoVersion); err == nil || !strings.Contains(err.Error(), futureGoVersion) {
+		t.Fatalf("CheckCompiler() error = %v, want mismatch for %s", err, futureGoVersion)
 	}
 }
 
 func TestCompilerVersionAcceptsExact(t *testing.T) {
 	runner := GoRunner{Root: t.TempDir(), Binary: "go"}
-	if err := runner.CheckCompiler(context.Background(), "1.26.7"); err != nil {
+	if err := runner.CheckCompiler(context.Background(), testGoVersion); err != nil {
 		t.Fatalf("CheckCompiler() error = %v", err)
 	}
 }

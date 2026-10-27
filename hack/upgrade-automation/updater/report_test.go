@@ -140,7 +140,7 @@ func TestRetrievalFailureIsExecutionFailureAndRollsBackAcceptedTrial(t *testing.
 				writeProxyModule(t, proxy, modulePath, "v1.1.0", "1.20", nil)
 				writeProxyVersionList(t, proxy, modulePath, []string{"v1.0.0", "v1.1.0"})
 			}
-			writeModule(t, root, "module fixture.test/root\n\ngo 1.26.7\n\nrequire (\n\texample.test/a v1.0.0\n\texample.test/b v1.0.0\n)\n")
+			writeModule(t, root, "module fixture.test/root\n\ngo "+testGoVersion+"\n\nrequire (\n\texample.test/a v1.0.0\n\texample.test/b v1.0.0\n)\n")
 			writeFile(t, filepath.Join(root, "fixture.go"), "package fixture\n\nimport (\n\t_ \"example.test/a\"\n\t_ \"example.test/b\"\n)\n")
 			writeFile(t, filepath.Join(root, "vendor", "sentinel.txt"), "baseline vendor\n")
 			setLocalProxy(t, proxy)
@@ -149,18 +149,14 @@ func TestRetrievalFailureIsExecutionFailureAndRollsBackAcceptedTrial(t *testing.
 				t.Fatal(err)
 			}
 			if failureMode == "unauthorized" {
+				files := http.FileServer(http.Dir(proxy))
 				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					if r.URL.Path == "/example.test/b/@v/v1.1.0.zip" {
 						http.Error(w, "unauthorized", http.StatusUnauthorized)
 						return
 					}
-					filePath := filepath.Join(proxy, filepath.FromSlash(strings.TrimPrefix(r.URL.Path, "/")))
-					data, err := os.ReadFile(filePath)
-					if err != nil {
-						http.NotFound(w, r)
-						return
-					}
-					w.Write(data)
+					w.Header().Set("Content-Type", "application/octet-stream")
+					files.ServeHTTP(w, r)
 				}))
 				defer server.Close()
 				t.Setenv("GOPROXY", server.URL)
@@ -202,7 +198,7 @@ func TestRetrievalFailureIsExecutionFailureAndRollsBackAcceptedTrial(t *testing.
 }
 
 func TestReportContainsIncompatibleTargetEvidence(t *testing.T) {
-	root, proxy := targetFixture(t, "1.26.7", "")
+	root, proxy := targetFixture(t, testGoVersion, "")
 	setLocalProxy(t, proxy)
 	policy := mustPolicy(t, "kubernetes-only", "", []string{"k8s.io/api=v0.36.6"})
 	report, err := Run(context.Background(), Config{Root: root, Policy: policy, GoBinary: "go"})

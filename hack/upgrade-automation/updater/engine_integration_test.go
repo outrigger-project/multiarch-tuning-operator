@@ -7,18 +7,23 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"sort"
 	"strings"
 	"testing"
 )
 
+var testGoVersion = strings.TrimPrefix(strings.Fields(runtime.Version())[0], "go")
+
+const futureGoVersion = "999.0.0"
+
 func TestEngineRejectsLatestGoIncompatibleThenAcceptsOlderVersion(t *testing.T) {
 	root, proxy := engineFixture(t)
 	writeProxyModule(t, proxy, "example.test/lib", "v1.0.0", "1.20", nil)
-	writeProxyModule(t, proxy, "example.test/lib", "v1.2.0", "1.26.8", nil)
+	writeProxyModule(t, proxy, "example.test/lib", "v1.2.0", futureGoVersion, nil)
 	writeProxyModule(t, proxy, "example.test/lib", "v1.1.0", "1.20", nil)
 	writeProxyVersionList(t, proxy, "example.test/lib", []string{"v1.0.0", "v1.1.0", "v1.2.0"})
-	writeModule(t, root, "module fixture.test/root\n\ngo 1.26.7\n\nrequire example.test/lib v1.0.0\n")
+	writeModule(t, root, "module fixture.test/root\n\ngo "+testGoVersion+"\n\nrequire example.test/lib v1.0.0\n")
 	writeFile(t, filepath.Join(root, "fixture.go"), "package fixture\n\nimport _ \"example.test/lib\"\n")
 	setLocalProxy(t, proxy)
 
@@ -41,9 +46,9 @@ func TestEngineRejectsLatestGoIncompatibleThenAcceptsOlderVersion(t *testing.T) 
 func TestEngineReportsNoCompatibleUpgrade(t *testing.T) {
 	root, proxy := engineFixture(t)
 	writeProxyModule(t, proxy, "example.test/lib", "v1.0.0", "1.20", nil)
-	writeProxyModule(t, proxy, "example.test/lib", "v1.1.0", "1.26.8", nil)
+	writeProxyModule(t, proxy, "example.test/lib", "v1.1.0", futureGoVersion, nil)
 	writeProxyVersionList(t, proxy, "example.test/lib", []string{"v1.0.0", "v1.1.0"})
-	writeModule(t, root, "module fixture.test/root\n\ngo 1.26.7\n\nrequire example.test/lib v1.0.0\n")
+	writeModule(t, root, "module fixture.test/root\n\ngo "+testGoVersion+"\n\nrequire example.test/lib v1.0.0\n")
 	writeFile(t, filepath.Join(root, "fixture.go"), "package fixture\n\nimport _ \"example.test/lib\"\n")
 	setLocalProxy(t, proxy)
 
@@ -65,7 +70,7 @@ func TestEngineRejectsTransitiveKubernetesChangeWhenPinned(t *testing.T) {
 	writeProxyModule(t, proxy, "k8s.io/api", "v0.36.5", "1.20", nil)
 	writeProxyModule(t, proxy, "k8s.io/api", "v0.36.6", "1.20", nil)
 	writeProxyVersionList(t, proxy, "k8s.io/api", []string{"v0.36.5", "v0.36.6"})
-	writeModule(t, root, "module fixture.test/root\n\ngo 1.26.7\n\nrequire (\n\texample.test/lib v1.0.0\n\tk8s.io/api v0.36.5\n)\n")
+	writeModule(t, root, "module fixture.test/root\n\ngo "+testGoVersion+"\n\nrequire (\n\texample.test/lib v1.0.0\n\tk8s.io/api v0.36.5\n)\n")
 	writeFile(t, filepath.Join(root, "fixture.go"), "package fixture\n\nimport (\n\t_ \"example.test/lib\"\n\t_ \"k8s.io/api\"\n)\n")
 	setLocalProxy(t, proxy)
 
@@ -99,7 +104,7 @@ func TestEngineUpdatesIndirectModuleAndAccountsForGraphAdditionsAndRemovals(t *t
 	writeProxyModule(t, proxy, "example.test/indirect", "v1.0.0", "1.20", nil)
 	writeProxyModule(t, proxy, "example.test/indirect", "v1.1.0", "1.20", nil)
 	writeProxyVersionList(t, proxy, "example.test/indirect", []string{"v1.0.0", "v1.1.0"})
-	writeModule(t, root, "module fixture.test/root\n\ngo 1.26.7\n\nrequire example.test/lib v1.0.0\n")
+	writeModule(t, root, "module fixture.test/root\n\ngo "+testGoVersion+"\n\nrequire example.test/lib v1.0.0\n")
 	writeFile(t, filepath.Join(root, "fixture.go"), "package fixture\n\nimport _ \"example.test/lib\"\n")
 	setLocalProxy(t, proxy)
 
@@ -148,7 +153,7 @@ func TestEngineSkipsGraphOnlyModulesAndUpdatesExplicitIndirectRequirements(t *te
 		writeProxyModule(t, proxy, "example.test/indirect", version, "1.20", nil)
 	}
 	writeProxyVersionList(t, proxy, "example.test/indirect", []string{"v1.0.0", "v1.1.0"})
-	writeModule(t, root, "module fixture.test/root\n\ngo 1.26.7\n\nrequire example.test/direct v1.0.0\nrequire example.test/indirect v1.0.0 // indirect\n")
+	writeModule(t, root, "module fixture.test/root\n\ngo "+testGoVersion+"\n\nrequire example.test/direct v1.0.0\nrequire example.test/indirect v1.0.0 // indirect\n")
 	writeFile(t, filepath.Join(root, "fixture.go"), "package fixture\nimport _ \"example.test/direct\"\n")
 	setLocalProxy(t, proxy)
 	var progress bytes.Buffer
@@ -188,7 +193,7 @@ func TestEngineRespectsExcludedCandidateAndContinues(t *testing.T) {
 		writeProxyModule(t, proxy, "example.test/lib", version, "1.20", nil)
 	}
 	writeProxyVersionList(t, proxy, "example.test/lib", []string{"v1.0.0", "v1.1.0", "v1.2.0"})
-	writeModule(t, root, "module fixture.test/root\n\ngo 1.26.7\n\nrequire example.test/lib v1.0.0\n\nexclude example.test/lib v1.2.0\n")
+	writeModule(t, root, "module fixture.test/root\n\ngo "+testGoVersion+"\n\nrequire example.test/lib v1.0.0\n\nexclude example.test/lib v1.2.0\n")
 	writeFile(t, filepath.Join(root, "fixture.go"), "package fixture\n\nimport _ \"example.test/lib\"\n")
 	setLocalProxy(t, proxy)
 
@@ -207,7 +212,7 @@ func TestEngineIsIdempotentWithFrozenLocalProxy(t *testing.T) {
 	writeProxyModule(t, proxy, "example.test/lib", "v1.0.0", "1.20", nil)
 	writeProxyModule(t, proxy, "example.test/lib", "v1.1.0", "1.20", nil)
 	writeProxyVersionList(t, proxy, "example.test/lib", []string{"v1.0.0", "v1.1.0"})
-	writeModule(t, root, "module fixture.test/root\n\ngo 1.26.7\n\nrequire example.test/lib v1.0.0\n")
+	writeModule(t, root, "module fixture.test/root\n\ngo "+testGoVersion+"\n\nrequire example.test/lib v1.0.0\n")
 	writeFile(t, filepath.Join(root, "fixture.go"), "package fixture\n\nimport _ \"example.test/lib\"\n")
 	setLocalProxy(t, proxy)
 	policy := mustPolicy(t, "pin-both", "", nil)
@@ -240,7 +245,7 @@ func TestEngineProgressShowsVersionMovementAndNoUpdateReason(t *testing.T) {
 	writeProxyVersionList(t, proxy, "example.test/current", []string{"v1.0.0"})
 	writeProxyModule(t, proxy, "k8s.io/api", "v0.36.5", "1.20", nil)
 	writeProxyVersionList(t, proxy, "k8s.io/api", []string{"v0.36.5"})
-	writeModule(t, root, "module fixture.test/root\n\ngo 1.26.7\n\nrequire (\n\texample.test/lib v1.0.0\n\texample.test/current v1.0.0\n\tk8s.io/api v0.36.5\n)\n")
+	writeModule(t, root, "module fixture.test/root\n\ngo "+testGoVersion+"\n\nrequire (\n\texample.test/lib v1.0.0\n\texample.test/current v1.0.0\n\tk8s.io/api v0.36.5\n)\n")
 	writeFile(t, filepath.Join(root, "fixture.go"), "package fixture\n\nimport (\n\t_ \"example.test/lib\"\n\t_ \"example.test/current\"\n\t_ \"k8s.io/api\"\n)\n")
 	setLocalProxy(t, proxy)
 	var progress bytes.Buffer
@@ -268,7 +273,7 @@ func TestPassBoundReturnsIncompleteAndRollsBack(t *testing.T) {
 	writeProxyVersionList(t, proxy, "example.test/lib", []string{"v1.0.0", "v1.1.0"})
 	writeProxyModule(t, proxy, "example.test/new", "v1.0.0", "1.20", nil)
 	writeProxyVersionList(t, proxy, "example.test/new", []string{"v1.0.0"})
-	writeModule(t, root, "module fixture.test/root\n\ngo 1.26.7\n\nrequire example.test/lib v1.0.0\n")
+	writeModule(t, root, "module fixture.test/root\n\ngo "+testGoVersion+"\n\nrequire example.test/lib v1.0.0\n")
 	writeFile(t, filepath.Join(root, "fixture.go"), "package fixture\n\nimport _ \"example.test/lib\"\n")
 	setLocalProxy(t, proxy)
 	originalMod, err := os.ReadFile(filepath.Join(root, "go.mod"))
@@ -303,7 +308,7 @@ func TestCandidateLimitCapsEachModuleAtTwentyAcrossPasses(t *testing.T) {
 		writeProxyModule(t, proxy, "example.test/b", version, "1.20", nil)
 	}
 	writeProxyVersionList(t, proxy, "example.test/b", []string{"v1.0.0", "v1.1.0"})
-	writeModule(t, root, "module fixture.test/root\n\ngo 1.26.7\n\nrequire (\n\texample.test/a v1.0.0\n\texample.test/b v1.0.0\n)\n")
+	writeModule(t, root, "module fixture.test/root\n\ngo "+testGoVersion+"\n\nrequire (\n\texample.test/a v1.0.0\n\texample.test/b v1.0.0\n)\n")
 	writeFile(t, filepath.Join(root, "fixture.go"), "package fixture\nimport (\n_ \"example.test/a\"\n_ \"example.test/b\"\n)\n")
 	setLocalProxy(t, proxy)
 	var progress bytes.Buffer
@@ -338,7 +343,7 @@ func TestCandidateLimitAllowsAcceptanceOnTwentiethTrial(t *testing.T) {
 		versions = append(versions, version)
 	}
 	writeProxyVersionList(t, proxy, "example.test/lib", versions)
-	writeModule(t, root, "module fixture.test/root\n\ngo 1.26.7\nrequire example.test/lib v1.0.0\n")
+	writeModule(t, root, "module fixture.test/root\n\ngo "+testGoVersion+"\nrequire example.test/lib v1.0.0\n")
 	writeFile(t, filepath.Join(root, "fixture.go"), "package fixture\nimport _ \"example.test/lib\"\n")
 	setLocalProxy(t, proxy)
 	report, err := Run(context.Background(), Config{Root: root, Policy: mustPolicy(t, "pin-both", "", nil), GoBinary: "go"})
@@ -384,7 +389,7 @@ func newKubernetesIntroductionFixture(t *testing.T) (string, string) {
 		writeProxyModule(t, proxy, "k8s.io/new", version, "1.20", nil)
 	}
 	writeProxyVersionList(t, proxy, "k8s.io/new", []string{"v0.1.0", "v0.2.0"})
-	writeModule(t, root, "module fixture.test/root\n\ngo 1.26.7\n\nrequire example.test/lib v1.0.0\n")
+	writeModule(t, root, "module fixture.test/root\n\ngo "+testGoVersion+"\n\nrequire example.test/lib v1.0.0\n")
 	writeFile(t, filepath.Join(root, "fixture.go"), "package fixture\n\nimport _ \"example.test/lib\"\n")
 	return root, proxy
 }

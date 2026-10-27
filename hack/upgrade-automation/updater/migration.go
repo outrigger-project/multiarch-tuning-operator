@@ -114,7 +114,7 @@ func rewriteModuleImports(root, oldPath, newPath string, graph Snapshot, transac
 		if filepath.Ext(path) != ".go" || entry.Type()&os.ModeSymlink != 0 {
 			return nil
 		}
-		data, err := os.ReadFile(path)
+		data, err := os.ReadFile(path) // #nosec G304 -- WalkDir supplies a repository-local path; symlinks are excluded above.
 		if err != nil {
 			return err
 		}
@@ -136,7 +136,7 @@ func rewriteModuleImports(root, oldPath, newPath string, graph Snapshot, transac
 			replacement := strconv.Quote(newPath + strings.TrimPrefix(importPath, oldPath))
 			data = append(data[:start], append([]byte(replacement), data[end:]...)...)
 		}
-		original, err := os.ReadFile(path)
+		original, err := os.ReadFile(path) // #nosec G304 -- same repository-local, non-symlink source file read above.
 		if err != nil {
 			return err
 		}
