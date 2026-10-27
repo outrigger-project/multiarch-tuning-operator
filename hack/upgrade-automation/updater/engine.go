@@ -122,6 +122,8 @@ func Run(ctx context.Context, cfg Config) (report Report, runErr error) {
 	}
 	baseline := Snapshot{}
 	results := make(map[string]*ModuleResult)
+	migrations := make(map[string]migrationTrial)
+	migratedPaths := make(map[string]string)
 	committed := false
 	defer func() {
 		if committed {
@@ -137,6 +139,7 @@ func Run(ctx context.Context, cfg Config) (report Report, runErr error) {
 		}
 		if baseline.Modules != nil {
 			report.Final = baseline
+			annotateMigrations(results, migrations)
 			finalizeResults(results, baseline, cfg.Policy, true)
 			report.Modules = sortedResults(results)
 			emitRunSummary(cfg.Progress, report)
@@ -207,6 +210,10 @@ func Run(ctx context.Context, cfg Config) (report Report, runErr error) {
 			if !selected || module.Main {
 				continue
 			}
+			if target, migrated := migratedPaths[modulePath]; migrated {
+				progressf(cfg.Progress, "Skipping %s: root imports already migrated to %s", modulePath, target)
+				continue
+			}
 			if isProtectedModule(modulePath, cfg.Policy) {
 				progressf(cfg.Progress, "Pinned %s at %s (policy-pinned)", modulePath, versionLabel(module.Version))
 				continue
@@ -247,7 +254,21 @@ func Run(ctx context.Context, cfg Config) (report Report, runErr error) {
 					return report, fmt.Errorf("checkpoint %s@%s: %w", modulePath, candidate, err)
 				}
 				beforeTrial := current
-				if _, err := runner.Run(ctx, "get", modulePath+"@"+candidate); err != nil {
+				targetPath := modulePath
+				_, getErr := runner.Run(ctx, "get", modulePath+"@"+candidate)
+				if getErr != nil {
+					if newPath := renamedModulePath(getErr, modulePath); newPath != "" {
+						if err := transaction.RestoreCheckpoint(checkpoint); err != nil {
+							return report, fmt.Errorf("restore before module-path migration: %w", err)
+						}
+						targetPath = newPath
+						progressf(cfg.Progress, "Migrating %s@%s -> %s@%s: rewriting root-module imports", modulePath, module.Version, newPath, candidate)
+						files, migrationErr := migrateModule(ctx, runner, modulePath, newPath, candidate, beforeTrial, cfg.Policy, transaction, checkpoint)
+						migrations[consideredKey] = migrationTrial{TargetPath: newPath, SourceFiles: files}
+						getErr = migrationErr
+					}
+				}
+				if err := getErr; err != nil {
 					if restoreErr := transaction.RestoreCheckpoint(checkpoint); restoreErr != nil {
 						return report, errors.Join(fmt.Errorf("restore rejected candidate %s@%s: %w", modulePath, candidate, err), restoreErr)
 					}
@@ -342,8 +363,23 @@ func Run(ctx context.Context, cfg Config) (report Report, runErr error) {
 
 				changes := graphChanges(beforeTrial, after)
 				violations := ValidatePolicy(baseline, after, cfg.Policy)
-				if selected, exists := after.Modules[modulePath]; !exists || selected.Version != candidate {
-					violations = append(violations, fmt.Errorf("requested %s@%s selected %q", modulePath, candidate, selected.Version))
+				if selected, exists := after.Modules[targetPath]; !exists || selected.Version != candidate {
+					violations = append(violations, fmt.Errorf("requested %s@%s selected %q", targetPath, candidate, selected.Version))
+				}
+				if targetPath != modulePath && len(violations) == 0 {
+					progressf(cfg.Progress, "Building packages to validate module-path migration to %s", targetPath)
+					if _, err := runner.Run(ctx, "build", "-mod=readonly", "./..."); err != nil {
+						if restoreErr := transaction.RestoreCheckpoint(checkpoint); restoreErr != nil {
+							return report, errors.Join(err, restoreErr)
+						}
+						if isMigrationBuildConstraint(err) {
+							violations = append(violations, fmt.Errorf("renamed module does not compile with root packages: %w", err))
+						} else {
+							result := resultFor(results, modulePath, baseline)
+							result.Attempts = append(result.Attempts, Attempt{Version: candidate, Outcome: moduleExecutionFailure, Evidence: err.Error()})
+							return report, fmt.Errorf("build renamed module %s@%s: %w", targetPath, candidate, err)
+						}
+					}
 				}
 				result := resultFor(results, modulePath, baseline)
 				if len(violations) != 0 {
@@ -357,6 +393,10 @@ func Run(ctx context.Context, cfg Config) (report Report, runErr error) {
 					continue
 				}
 				result.Attempts = append(result.Attempts, Attempt{Version: candidate, Outcome: attemptAccepted, Changes: changes})
+				if targetPath != modulePath {
+					result.MigratedTo = targetPath
+					migratedPaths[modulePath] = targetPath
+				}
 				for _, targetPath := range sortedTargetPaths(cfg.Policy.KubernetesTargets) {
 					if targetPath == modulePath || beforeTrial.Modules[targetPath].Version == after.Modules[targetPath].Version {
 						continue
@@ -364,7 +404,7 @@ func Run(ctx context.Context, cfg Config) (report Report, runErr error) {
 					targetResult := resultFor(results, targetPath, baseline)
 					targetResult.Attempts = append(targetResult.Attempts, Attempt{Version: cfg.Policy.KubernetesTargets[targetPath], Outcome: attemptAccepted, Evidence: "explicit Kubernetes target introduced during candidate trial", Changes: changes})
 				}
-				progressf(cfg.Progress, "Accepted %s: %s -> %s (%d graph changes)", modulePath, versionLabel(module.Version), after.Modules[modulePath].Version, len(changes))
+				progressf(cfg.Progress, "Accepted %s: %s -> %s@%s (%d graph changes)", modulePath, versionLabel(module.Version), targetPath, after.Modules[targetPath].Version, len(changes))
 				observeSnapshot(results, after, baseline)
 				current = after
 				changedThisPass = true
@@ -427,6 +467,12 @@ func Run(ctx context.Context, cfg Config) (report Report, runErr error) {
 			result.Outcome = moduleBlocked
 		}
 	}
+	if len(migratedPaths) != 0 {
+		progressf(cfg.Progress, "Validating migrated packages against the final accepted dependency graph")
+		if _, err := runner.Run(ctx, "build", "-mod=readonly", "./..."); err != nil {
+			return report, fmt.Errorf("final build after module-path migrations: %w", err)
+		}
+	}
 	if _, err := runner.Run(ctx, "mod", "vendor"); err != nil {
 		return report, fmt.Errorf("vendor accepted module graph: %w", err)
 	}
@@ -443,6 +489,7 @@ func Run(ctx context.Context, cfg Config) (report Report, runErr error) {
 	committed = true
 	report.Status = runCompleted
 	report.Final = final
+	annotateMigrations(results, migrations)
 	finalizeResults(results, final, cfg.Policy, false)
 	report.Modules = sortedResults(results)
 	emitRunSummary(cfg.Progress, report)
@@ -484,8 +531,12 @@ func isProtectedModule(path string, policy Policy) bool {
 }
 
 func isConstraintFailure(err error) bool {
+	var migrationErr *migrationConstraint
+	if errors.As(err, &migrationErr) {
+		return true
+	}
 	text := strings.ToLower(err.Error())
-	return strings.Contains(text, "requires go >=") || strings.Contains(text, "excluded by go.mod") || strings.Contains(text, "excluded by the main module")
+	return strings.Contains(text, "requires go >=") || strings.Contains(text, "excluded by go.mod") || strings.Contains(text, "excluded by the main module") || modulePathMismatch.MatchString(text)
 }
 
 func graphChanges(before, after Snapshot) []Change {
@@ -629,6 +680,14 @@ func finalizeResults(results map[string]*ModuleResult, final Snapshot, policy Po
 			result.Outcome = moduleExecutionFailure
 			continue
 		}
+		if result.MigratedTo != "" {
+			if rolledBack {
+				result.Outcome = moduleExecutionFailure
+			} else {
+				result.Outcome = moduleUpdated
+			}
+			continue
+		}
 		if target, explicitlyTargeted := policy.KubernetesTargets[path]; explicitlyTargeted {
 			if !exists {
 				result.Outcome = moduleBlocked
@@ -727,6 +786,10 @@ func emitModuleSummaries(writer io.Writer, modules []ModuleResult) {
 	for _, module := range modules {
 		switch module.Outcome {
 		case moduleUpdated:
+			if module.MigratedTo != "" {
+				progressf(writer, "Migrated %s@%s -> %s (see target module for final version)", module.Path, versionLabel(module.InitialVersion), module.MigratedTo)
+				continue
+			}
 			if module.InitialVersion == "" {
 				progressf(writer, "Added %s: %s -> %s", module.Path, versionLabel(module.InitialVersion), versionLabel(module.FinalVersion))
 			} else {

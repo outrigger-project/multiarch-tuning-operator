@@ -42,6 +42,7 @@
 - `hack/upgrade-automation/updater/candidates.go`: stable newer candidate enumeration and ordering.
 - `hack/upgrade-automation/updater/engine.go`: target transaction, deterministic passes, candidate acceptance, bounds/cycle handling.
 - `hack/upgrade-automation/updater/normalize.go`: final exact two-block `go.mod` normalization using Go module syntax metadata.
+- `hack/upgrade-automation/updater/migration.go`: verified declared-path rename detection, exact-version migration, import rewriting, and migration attempt metadata.
 - `hack/upgrade-automation/updater/report.go`: report types, outcomes, stable JSON serialization.
 - `hack/upgrade-automation/updater/*_test.go`: focused unit tests and local-proxy integration fixtures.
 - `hack/upgrade-automation/README.md`: invocation, policy, report, rollback, limitations, exit codes.
@@ -231,3 +232,11 @@ func WriteReport(path string, report Report) error
 - [ ] **Step 4: Snapshot the Go module proxy cache from the first run as a local file proxy, rerun from a clean worktree at the accepted result, and compare dependency output for idempotence against the frozen candidate list.**
 - [ ] **Step 5: Run `make vendor`, generation targets, formatting, lint, build, unit tests, and applicable CI checks** in a disposable validation worktree; capture unavailable checks explicitly.
 - [ ] **Step 6: Review `git diff --check`, implementation diff, and separate dependency-refresh diff**; verify the untracked `rpms.in.yaml` in the user's worktree remains untouched.
+
+## Approved follow-up: declared module-path migrations
+
+- Add deterministic fixture coverage for declared-path mismatch detection, import-only rewriting, policy/compiler rejection fallback, and source rollback at candidate and whole-run boundaries.
+- Extend transaction checkpoints with lazily backed-up source files so accepted import changes survive subsequent candidate rejections and all run changes are restored on fatal failures.
+- On an exact candidate's declared-path mismatch, verify the new path at the same version, rewrite root imports, replace the root requirement, tidy, validate exact pins, and build root packages in readonly module mode. Do not migrate protected paths or override an existing differently versioned new-path requirement.
+- Record `targetPath` and `sourceFiles` on attempts and `migratedTo` on accepted original-path results. Existing upstream references to the old path may remain transitively.
+- Respect the user's instruction not to run tests; added migration test execution is deferred until authorized.
