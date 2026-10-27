@@ -19,7 +19,7 @@ func NormalizeRequireBlocks(root string) error {
 	if err != nil {
 		return fmt.Errorf("stat go.mod: %w", err)
 	}
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) // #nosec G304 -- fixed go.mod path under the maintainer-selected repository root.
 	if err != nil {
 		return fmt.Errorf("read go.mod: %w", err)
 	}
@@ -54,12 +54,12 @@ func NormalizeRequireBlocks(root string) error {
 				line.InBlock = true
 				if indirectByPath[modulePath] {
 					indirectLines = append(indirectLines, line)
-					appendModfileComments(&indirectComments, modfile.Comments{After: line.Comments.After})
-					line.Comments.After = nil
+					appendModfileComments(&indirectComments, modfile.Comments{After: line.After})
+					line.After = nil
 				} else {
 					directLines = append(directLines, line)
-					appendModfileComments(&directComments, modfile.Comments{After: line.Comments.After})
-					line.Comments.After = nil
+					appendModfileComments(&directComments, modfile.Comments{After: line.After})
+					line.After = nil
 				}
 				continue
 			}
@@ -130,9 +130,9 @@ func NormalizeRequireBlocks(root string) error {
 func cloneModLine(line *modfile.Line) *modfile.Line {
 	copy := *line
 	copy.Token = append([]string(nil), line.Token...)
-	copy.Comments.Before = append([]modfile.Comment(nil), line.Comments.Before...)
-	copy.Comments.Suffix = append([]modfile.Comment(nil), line.Comments.Suffix...)
-	copy.Comments.After = append([]modfile.Comment(nil), line.Comments.After...)
+	copy.Before = append([]modfile.Comment(nil), line.Before...)
+	copy.Suffix = append([]modfile.Comment(nil), line.Suffix...)
+	copy.After = append([]modfile.Comment(nil), line.After...)
 	return &copy
 }
 

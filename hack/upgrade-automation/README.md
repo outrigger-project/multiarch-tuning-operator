@@ -48,7 +48,7 @@ Each eligible module has a maximum of **20 candidate trials across the entire ru
 
 ## Go compiler and directive rules
 
-The compiler used for module commands must match the pinned baseline compiler (the baseline `toolchain` directive when present, otherwise the Go directive) or the requested Go target. Use `--go-bin /path/to/go` to select the compiler. Module commands run with `GOTOOLCHAIN=local`, so Go cannot silently switch compilers to satisfy a candidate.
+The compiler used for module commands must match the pinned baseline compiler (the baseline `toolchain` directive when present, otherwise the Go directive) or the requested Go target. Use `--go-bin /path/to/go` to select the compiler for both the launcher's `go run` and subsequent module commands; otherwise both use `go` from `PATH`. The selected compiler must also be able to build the updater under the repository's current `go.mod`. The launcher and module commands run with `GOTOOLCHAIN=local`, so Go cannot silently switch compilers to satisfy a candidate.
 
 - When Go is pinned, the exact baseline Go directive and toolchain presence/value are preserved.
 - When Go is updated, the directive becomes the requested exact target. If a toolchain directive existed, its value becomes `go<target>`; if it was absent, it stays absent.
@@ -56,7 +56,7 @@ The compiler used for module commands must match the pinned baseline compiler (t
 
 ## Transaction and interruption behavior
 
-Each rejected candidate is restored to the last accepted checkpoint before the next candidate. The whole run remains transactional until exact validation and vendoring succeed. A failed retrieval, incompatible target set, final validation failure, pass-bound/cycle result, or handled interrupt restores the original `go.mod`, `go.sum`, `vendor`, and any Go source files rewritten by a module-path migration; the report remains in the workspace. Accepted trial details remain in the report even when the overall transaction is rolled back. A forced process termination such as `SIGKILL` cannot run cleanup.
+Each rejected candidate is restored to the last accepted checkpoint before the next candidate. The whole run remains transactional until exact validation, vendoring, and atomic publication of the completed report succeed. A failed retrieval, incompatible target set, final validation or report-publication failure, pass-bound/cycle result, or handled interrupt restores the original `go.mod`, `go.sum`, `vendor`, and any Go source files rewritten by a module-path migration. The CLI writes the failure report after rollback; if the destination is unwritable, it reports the error on stderr and returns exit code `2`. Accepted trial details remain in the report even when the overall transaction is rolled back. A forced process termination such as `SIGKILL` cannot run cleanup.
 
 The updater never commits or pushes. For Prow use, configure the periodic job to provide the explicit target flags, run this command, and only on exit code `0` publish the updated workspace and report as the job's single pull request. Scheduling, credentials, branch naming, and pull-request create/update are owned by the external Prow configuration.
 

@@ -77,16 +77,16 @@ func parseArgs(args []string) (cliOptions, error) {
 func execute(args []string, root string, stdout, stderr io.Writer) int {
 	options, err := parseArgs(args)
 	if errors.Is(err, flag.ErrHelp) {
-		fmt.Fprint(stdout, usage)
+		_, _ = fmt.Fprint(stdout, usage)
 		return 0
 	}
 	if err != nil {
-		fmt.Fprintf(stderr, "invalid invocation: %v\n%s", err, usage)
+		_, _ = fmt.Fprintf(stderr, "invalid invocation: %v\n%s", err, usage)
 		return 1
 	}
 	absoluteRoot, err := filepath.Abs(root)
 	if err != nil {
-		fmt.Fprintf(stderr, "invalid repository root: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "invalid repository root: %v\n", err)
 		return 1
 	}
 	reportPath := options.reportPath
@@ -96,23 +96,24 @@ func execute(args []string, root string, stdout, stderr io.Writer) int {
 	if err := validateRepository(absoluteRoot); err != nil {
 		report := updater.Report{Status: "failed", Policy: options.policy, Failure: err.Error(), Modules: []updater.ModuleResult{}}
 		if writeErr := updater.WriteReport(reportPath, report); writeErr != nil {
-			fmt.Fprintf(stderr, "cannot write report: %v\n", writeErr)
+			_, _ = fmt.Fprintf(stderr, "cannot write report: %v\n", writeErr)
 		}
-		fmt.Fprintf(stderr, "precondition failed: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "precondition failed: %v\n", err)
 		return updater.ExitCode(err)
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	report, runErr := updater.Run(ctx, updater.Config{Root: absoluteRoot, Policy: options.policy, GoBinary: options.goBinary, Progress: stderr})
-	writeErr := updater.WriteReport(reportPath, report)
-	if writeErr != nil {
-		fmt.Fprintf(stderr, "cannot write report: %v\n", writeErr)
-		return 2
-	}
-	fmt.Fprintf(stdout, "status: %s\nreport: %s\n", report.Status, reportPath)
+	report, runErr := updater.Run(ctx, updater.Config{Root: absoluteRoot, Policy: options.policy, GoBinary: options.goBinary, ReportPath: reportPath, Progress: stderr})
 	if runErr != nil {
-		fmt.Fprintf(stderr, "dependency update failed: %s\n", runErr.Error())
+		if writeErr := updater.WriteReport(reportPath, report); writeErr != nil {
+			_, _ = fmt.Fprintf(stderr, "dependency update failed: %v\ncannot write report: %v\n", runErr, writeErr)
+			return 2
+		}
+	}
+	_, _ = fmt.Fprintf(stdout, "status: %s\nreport: %s\n", report.Status, reportPath)
+	if runErr != nil {
+		_, _ = fmt.Fprintf(stderr, "dependency update failed: %s\n", runErr.Error())
 		return updater.ExitCode(runErr)
 	}
 	return 0
@@ -120,7 +121,7 @@ func execute(args []string, root string, stdout, stderr io.Writer) int {
 
 func validateRepository(root string) error {
 	modulePath := ""
-	goMod, err := os.ReadFile(filepath.Join(root, "go.mod"))
+	goMod, err := os.ReadFile(filepath.Join(root, "go.mod")) // #nosec G304 -- fixed filename under the maintainer-selected repository root.
 	if err != nil {
 		return &updater.PreconditionError{Err: fmt.Errorf("repository root must contain go.mod: %w", err)}
 	}

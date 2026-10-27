@@ -44,7 +44,7 @@ func BeginTransaction(root string) (*Transaction, error) {
 	for _, name := range dependencyArtifactPaths {
 		backup := artifactBackup{path: filepath.Join(backupDir, "original", name)}
 		if err := backupArtifact(filepath.Join(root, name), backup.path, &backup.existed); err != nil {
-			os.RemoveAll(backupDir)
+			_ = os.RemoveAll(backupDir)
 			return nil, fmt.Errorf("backup %s: %w", name, err)
 		}
 		transaction.originals[name] = backup
@@ -235,12 +235,12 @@ func copyArtifact(source, destination string, info os.FileInfo) error {
 	if err := os.MkdirAll(filepath.Dir(destination), 0o700); err != nil {
 		return err
 	}
-	in, err := os.Open(source)
+	in, err := os.Open(source) // #nosec G304 -- source is a repository artifact or an updater-owned transaction backup.
 	if err != nil {
 		return err
 	}
-	defer in.Close()
-	out, err := os.OpenFile(destination, os.O_CREATE|os.O_EXCL|os.O_WRONLY, info.Mode().Perm())
+	defer func() { _ = in.Close() }()
+	out, err := os.OpenFile(destination, os.O_CREATE|os.O_EXCL|os.O_WRONLY, info.Mode().Perm()) // #nosec G304 -- destination is a repository artifact or an updater-owned transaction backup.
 	if err != nil {
 		return err
 	}
