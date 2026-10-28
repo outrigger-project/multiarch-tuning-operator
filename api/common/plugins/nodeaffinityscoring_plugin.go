@@ -25,6 +25,7 @@ const (
 
 // NodeAffinityScoring is the plugin that implements the ScorePlugin interface.
 type NodeAffinityScoring struct {
+	// BasePlugin controls whether node affinity scoring is enabled.
 	BasePlugin `json:",inline"`
 
 	// Platforms is a required field and must contain at least one entry.
@@ -47,7 +48,11 @@ func (n *NodeAffinityScoring) ValidateArchitecturesSet() (bool, error) {
 
 // NodeAffinityScoringPlatformTerm holds configuration for specific platforms, with required fields validated.
 type NodeAffinityScoringPlatformTerm struct {
-	// Architecture must be a list of non-empty string of arch names.
+	// Architecture identifies the node architecture to which the weight applies.
+	// When set to arm64, the weight applies to ARM64 nodes.
+	// When set to amd64, the weight applies to AMD64 nodes.
+	// When set to ppc64le, the weight applies to little-endian PowerPC 64-bit nodes.
+	// When set to s390x, the weight applies to IBM Z nodes.
 	// +kubebuilder:validation:Enum=arm64;amd64;ppc64le;s390x
 	Architecture string `json:"architecture" protobuf:"bytes,1,rep,name=architecture"`
 

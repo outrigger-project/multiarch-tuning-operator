@@ -236,15 +236,21 @@ spec:
                 type: string
             type: object
           spec:
-            description: ClusterPodPlacementConfigSpec defines the desired state of
-              ClusterPodPlacementConfig
+            description: Spec defines the desired configuration. If omitted, the default
+              configuration is used.
             properties:
               fallbackArchitecture:
                 default: ""
                 description: |-
                   FallbackArchitecture defines the architecture to use if the image inspector cannot determine the image's architecture.
                   If configured, the PodPlacementController will set the node affinity of the pod to the fallback architecture
-                  if the image inspector cannot determine the image's architecture.
+                  after image inspection fails and the maximum number of retries is reached.
+                  When set to arm64, the fallback restricts the pod to ARM64 nodes.
+                  When set to amd64, the fallback restricts the pod to AMD64 nodes.
+                  When set to ppc64le, the fallback restricts the pod to little-endian PowerPC 64-bit nodes.
+                  When set to s390x, the fallback restricts the pod to IBM Z nodes.
+                  When set to "", no fallback architecture affinity is added.
+                  If omitted, defaults to "" and no fallback architecture affinity is added.
                 enum:
                 - arm64
                 - amd64
@@ -256,8 +262,11 @@ spec:
                 default: Normal
                 description: |-
                   LogVerbosity is the log level for the pod placement components.
-                  Valid values are: "Normal", "Debug", "Trace", "TraceAll".
-                  Defaults to "Normal".
+                  When set to Normal, informational, warning, and error messages are logged.
+                  When set to Debug, messages at verbosity level 1 are also logged.
+                  When set to Trace, messages at verbosity levels 1 and 2 are also logged.
+                  When set to TraceAll, messages at verbosity levels 1 through 3 are also logged.
+                  If omitted, defaults to Normal.
                 enum:
                 - Normal
                 - Debug
@@ -267,7 +276,8 @@ spec:
               namespaceSelector:
                 description: |-
                   NamespaceSelector selects the namespaces where the pod placement operand can process the nodeAffinity
-                  of the pods. If left empty, all the namespaces are considered.
+                  of the pods. If omitted or set to an empty selector, all namespaces are selected,
+                  subject to the operand's namespace exclusions.
                   The default sample allows to exclude all the namespaces where the
                   label "multiarch.openshift.io/exclude-pod-placement" exists.
                 properties:
@@ -317,11 +327,12 @@ spec:
               plugins:
                 description: |-
                   Plugins defines the configurable plugins for this component.
-                  This field is optional and will be omitted from the output if not set.
+                  If omitted, no cluster-level plugins are enabled.
                 properties:
                   execFormatErrorMonitor:
-                    description: ExecFormatErrorMonitor is a plugin that provides
-                      Exec Format Errors events reporting and monitoring
+                    description: |-
+                      ExecFormatErrorMonitor configures exec format error monitoring and reporting.
+                      If omitted, exec format error monitoring is disabled.
                     properties:
                       enabled:
                         description: Enabled indicates whether the plugin is enabled.
@@ -330,8 +341,9 @@ spec:
                     - enabled
                     type: object
                   nodeAffinityScoring:
-                    description: NodeAffinityScoring is the plugin that implements
-                      the ScorePlugin interface.
+                    description: |-
+                      NodeAffinityScoring configures cluster-level architecture-based preferred node affinity.
+                      If omitted, cluster-level node affinity scoring is disabled.
                     properties:
                       enabled:
                         description: Enabled indicates whether the plugin is enabled.
@@ -344,8 +356,12 @@ spec:
                             for specific platforms, with required fields validated.
                           properties:
                             architecture:
-                              description: Architecture must be a list of non-empty
-                                string of arch names.
+                              description: |-
+                                Architecture identifies the node architecture to which the weight applies.
+                                When set to arm64, the weight applies to ARM64 nodes.
+                                When set to amd64, the weight applies to AMD64 nodes.
+                                When set to ppc64le, the weight applies to little-endian PowerPC 64-bit nodes.
+                                When set to s390x, the weight applies to IBM Z nodes.
                               enum:
                               - arm64
                               - amd64
@@ -373,12 +389,13 @@ spec:
                 type: object
             type: object
           status:
-            description: ClusterPodPlacementConfigStatus defines the observed state
-              of ClusterPodPlacementConfig
+            description: Status reports the observed state. If omitted, no state has
+              been reported yet.
             properties:
               conditions:
-                description: Conditions represents the latest available observations
-                  of a ClusterPodPlacementConfig's current state.
+                description: |-
+                  Conditions represents the latest available observations of a ClusterPodPlacementConfig's current state.
+                  If omitted, no conditions have been reported yet.
                 items:
                   description: Condition contains details for one aspect of the current
                     state of this API Resource.

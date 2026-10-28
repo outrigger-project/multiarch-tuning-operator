@@ -27,12 +27,14 @@ import (
 
 // PodPlacementConfigSpec defines the desired state of PodPlacementConfig
 type PodPlacementConfigSpec struct {
-	// labelSelector selects the pods that the pod placement operand should process according to the other specs provided in the PodPlacementConfig object.
-	// of the pods. If left empty, all the pods are considered.
+	// LabelSelector selects the pods in this namespace that the pod placement operand
+	// should process according to this PodPlacementConfig.
+	// If omitted or set to an empty selector, all pods in the namespace are selected.
 	// +optional
 	LabelSelector *metav1.LabelSelector `json:"labelSelector,omitempty"`
 
 	// Plugins defines the configurable plugins for this component.
+	// If omitted, this PodPlacementConfig enables no plugins.
 	// +optional
 	Plugins *plugins.LocalPlugins `json:"plugins,omitempty"`
 
@@ -51,10 +53,14 @@ type PodPlacementConfigSpec struct {
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:path=podplacementconfigs,scope=Namespaced
 type PodPlacementConfig struct {
-	metav1.TypeMeta   `json:",inline"`
+	// TypeMeta identifies the API version and kind of this resource.
+	metav1.TypeMeta `json:",inline"`
+	// ObjectMeta contains the standard resource metadata.
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Spec   PodPlacementConfigSpec   `json:"spec"`
+	// Spec defines the desired pod placement configuration.
+	Spec PodPlacementConfigSpec `json:"spec"`
+	// Status reports the observed state. If omitted, no state has been reported yet.
 	Status PodPlacementConfigStatus `json:"status,omitempty"`
 }
 
@@ -121,9 +127,12 @@ func (p *PodPlacementConfig) ValidatePriorityNew(list runtime.Object) (bool, err
 
 // PodPlacementConfigList contains a list of PodPlacementConfig
 type PodPlacementConfigList struct {
+	// TypeMeta identifies the API version and kind of this list.
 	metav1.TypeMeta `json:",inline"`
+	// ListMeta contains the standard list metadata.
 	metav1.ListMeta `json:"metadata,omitempty"`
-	Items           []PodPlacementConfig `json:"items"`
+	// Items contains the PodPlacementConfig resources in this list.
+	Items []PodPlacementConfig `json:"items"`
 }
 
 // PodPlacementConfigStatus defines the observed state of PodPlacementConfig
