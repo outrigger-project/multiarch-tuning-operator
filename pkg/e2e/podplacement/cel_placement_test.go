@@ -422,6 +422,20 @@ var _ = Describe("CEL Architecture Placement E2E", func() {
 				WithNamespace(ns.Name).
 				WithContainersImages(helloOpenshiftPublicMultiarchImage).
 				Build()
+			pod.Spec.SecurityContext = &corev1.PodSecurityContext{
+				RunAsNonRoot: new(true),
+				SeccompProfile: &corev1.SeccompProfile{
+					Type: corev1.SeccompProfileTypeRuntimeDefault,
+				},
+			}
+			for i := range pod.Spec.Containers {
+				pod.Spec.Containers[i].SecurityContext = &corev1.SecurityContext{
+					AllowPrivilegeEscalation: new(false),
+					Capabilities: &corev1.Capabilities{
+						Drop: []corev1.Capability{"ALL"},
+					},
+				}
+			}
 			err = client.Create(ctx, pod)
 			Expect(err).NotTo(HaveOccurred())
 			DeferCleanup(func() {
