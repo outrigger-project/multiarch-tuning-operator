@@ -21,6 +21,8 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/openshift/multiarch-tuning-operator/api/common"
+
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
@@ -63,6 +65,9 @@ func (v *ClusterPodPlacementConfigValidator) ValidateDelete(ctx context.Context,
 }
 
 func (v *ClusterPodPlacementConfigValidator) validate(cppc *ClusterPodPlacementConfig) (warnings admission.Warnings, err error) {
+	if cppc.Name != common.SingletonResourceObjectName {
+		return nil, fmt.Errorf("ClusterPodPlacementConfig must be named %q", common.SingletonResourceObjectName)
+	}
 	if cppc.Spec.Plugins == nil || cppc.Spec.Plugins.NodeAffinityScoring == nil {
 		return nil, nil
 	}
