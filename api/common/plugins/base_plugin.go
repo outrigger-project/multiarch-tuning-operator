@@ -23,8 +23,12 @@ import "github.com/openshift/multiarch-tuning-operator/api/common"
 // LocalPlugins represents the plugins configuration for podplacementconfigs resource.
 // +kubebuilder:object:generate=true
 type LocalPlugins struct {
+	// NodeAffinityScoring configures architecture-based preferred node affinity.
+	// If omitted, node affinity scoring is not enabled by this configuration.
 	NodeAffinityScoring *NodeAffinityScoring `json:"nodeAffinityScoring,omitempty"`
 
+	// CelArchitecturePlacement configures CEL-based architecture selection.
+	// If omitted, CEL architecture placement is not enabled by this configuration.
 	CelArchitecturePlacement *CelArchitecturePlacement `json:"celArchitecturePlacement,omitempty"`
 }
 
@@ -51,8 +55,12 @@ func (lp *LocalPlugins) PluginEnabled(plugin common.Plugin) bool {
 // Plugins represents the plugins configuration for cluster pod placement config.
 // +kubebuilder:object:generate=true
 type Plugins struct {
+	// NodeAffinityScoring configures cluster-level architecture-based preferred node affinity.
+	// If omitted, cluster-level node affinity scoring is disabled.
 	NodeAffinityScoring *NodeAffinityScoring `json:"nodeAffinityScoring,omitempty"`
 
+	// ExecFormatErrorMonitor configures exec format error monitoring and reporting.
+	// If omitted, exec format error monitoring is disabled.
 	ExecFormatErrorMonitor *ExecFormatErrorMonitor `json:"execFormatErrorMonitor,omitempty"`
 }
 

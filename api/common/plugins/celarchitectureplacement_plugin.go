@@ -93,9 +93,10 @@ const (
 // When a rule matches, the plugin removes any existing architecture constraints from the pod's
 // nodeSelector and nodeAffinity, then sets new architecture constraints based on the rule.
 type CelArchitecturePlacement struct {
+	// BasePlugin controls whether CEL architecture placement is enabled.
 	BasePlugin `json:",inline"`
 
-	// fallbackArchitectures is a required list of architectures to use when no rules match.
+	// FallbackArchitectures is a required list of 1 to 4 architectures to use when no rules match.
 	// This limits the explosion of possible rules by providing a sensible default.
 	// When applied, existing architecture constraints are removed and replaced with these architectures.
 	// +kubebuilder:validation:Required
@@ -104,7 +105,8 @@ type CelArchitecturePlacement struct {
 	FallbackArchitectures []string `json:"fallbackArchitectures" protobuf:"bytes,2,rep,name=fallbackArchitectures"`
 
 	// Rules is a list of architecture selection rules evaluated in order.
-	// The first matching rule determines the target architecture.
+	// If omitted, the fallback architectures are used for all selected pods.
+	// The first matching rule determines the target architectures.
 	// When a rule matches, existing architecture constraints are removed and replaced.
 	// Maximum of 1000 rules per configuration to prevent excessive evaluation time during
 	// pod admission. This limit balances flexibility with performance, ensuring CEL
@@ -117,21 +119,22 @@ type CelArchitecturePlacement struct {
 
 // ArchitectureRule defines a single CEL-based rule for architecture selection
 type ArchitectureRule struct {
-	// Name is a descriptive name for this rule
+	// Name is a descriptive name for this rule, with a length of 1 to 253 characters.
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=253
 	Name string `json:"name" protobuf:"bytes,1,opt,name=name"`
 
 	// Expression is a CEL expression that evaluates against a Pod resource.
-	// The expression must return a boolean value.
+	// It must contain 1 to 1024 characters.
+	// A true result selects this rule's architectures; a false result advances to the next rule.
 	// The expression has access to the pod via the 'self' variable.
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=1024
 	Expression string `json:"expression" protobuf:"bytes,2,opt,name=expression"`
 
-	// Architectures is the list of target architectures to use when this rule matches.
+	// Architectures is a list of 1 to 4 target architectures to use when this rule matches.
 	// When applied, any existing architecture constraints in the pod's nodeSelector
 	// and nodeAffinity are removed and replaced with these architectures.
 	// +kubebuilder:validation:Required

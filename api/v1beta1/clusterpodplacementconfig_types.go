@@ -31,27 +31,37 @@ import (
 // ClusterPodPlacementConfigSpec defines the desired state of ClusterPodPlacementConfig
 type ClusterPodPlacementConfigSpec struct {
 	// LogVerbosity is the log level for the pod placement components.
-	// Valid values are: "Normal", "Debug", "Trace", "TraceAll".
-	// Defaults to "Normal".
+	// When set to Normal, informational, warning, and error messages are logged.
+	// When set to Debug, messages at verbosity level 1 are also logged.
+	// When set to Trace, messages at verbosity levels 1 and 2 are also logged.
+	// When set to TraceAll, messages at verbosity levels 1 through 3 are also logged.
+	// If omitted, defaults to Normal.
 	// +optional
 	// +kubebuilder:default=Normal
 	LogVerbosity common.LogVerbosityLevel `json:"logVerbosity,omitempty"`
 
 	// NamespaceSelector selects the namespaces where the pod placement operand can process the nodeAffinity
-	// of the pods. If left empty, all the namespaces are considered.
+	// of the pods. If omitted or set to an empty selector, all namespaces are selected,
+	// subject to the operand's namespace exclusions.
 	// The default sample allows to exclude all the namespaces where the
 	// label "multiarch.openshift.io/exclude-pod-placement" exists.
 	// +optional
 	NamespaceSelector *metav1.LabelSelector `json:"namespaceSelector,omitempty"`
 
 	// Plugins defines the configurable plugins for this component.
-	// This field is optional and will be omitted from the output if not set.
+	// If omitted, no cluster-level plugins are enabled.
 	// +optional
 	Plugins *plugins.Plugins `json:"plugins,omitempty"`
 
 	// FallbackArchitecture defines the architecture to use if the image inspector cannot determine the image's architecture.
 	// If configured, the PodPlacementController will set the node affinity of the pod to the fallback architecture
-	// if the image inspector cannot determine the image's architecture.
+	// after image inspection fails and the maximum number of retries is reached.
+	// When set to arm64, the fallback restricts the pod to ARM64 nodes.
+	// When set to amd64, the fallback restricts the pod to AMD64 nodes.
+	// When set to ppc64le, the fallback restricts the pod to little-endian PowerPC 64-bit nodes.
+	// When set to s390x, the fallback restricts the pod to IBM Z nodes.
+	// When set to "", no fallback architecture affinity is added.
+	// If omitted, defaults to "" and no fallback architecture affinity is added.
 	// +optional
 	// +kubebuilder:default=""
 	// +kubebuilder:validation:Enum=arm64;amd64;ppc64le;s390x;""
@@ -61,6 +71,7 @@ type ClusterPodPlacementConfigSpec struct {
 // ClusterPodPlacementConfigStatus defines the observed state of ClusterPodPlacementConfig
 type ClusterPodPlacementConfigStatus struct {
 	// Conditions represents the latest available observations of a ClusterPodPlacementConfig's current state.
+	// If omitted, no conditions have been reported yet.
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 
 	// The following fields are used to derive the conditions. They are not exposed to the user.
@@ -216,10 +227,14 @@ func (s *ClusterPodPlacementConfigStatus) buildConditions() {
 // +kubebuilder:printcolumn:name=Since,JSONPath=.status.conditions[?(@.type=="Progressing")].lastTransitionTime,type=date
 // +kubebuilder:printcolumn:name=Status,JSONPath=.status.conditions[?(@.type=="Available")].reason,type=string
 type ClusterPodPlacementConfig struct {
-	metav1.TypeMeta   `json:",inline"`
+	// TypeMeta identifies the API version and kind of this resource.
+	metav1.TypeMeta `json:",inline"`
+	// ObjectMeta contains the standard resource metadata.
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Spec   ClusterPodPlacementConfigSpec   `json:"spec,omitempty"`
+	// Spec defines the desired configuration. If omitted, the default configuration is used.
+	Spec ClusterPodPlacementConfigSpec `json:"spec,omitempty"`
+	// Status reports the observed state. If omitted, no state has been reported yet.
 	Status ClusterPodPlacementConfigStatus `json:"status,omitempty"`
 }
 
@@ -234,9 +249,12 @@ func (c *ClusterPodPlacementConfig) PluginsEnabled(plugin common.Plugin) bool {
 
 // ClusterPodPlacementConfigList contains a list of ClusterPodPlacementConfig
 type ClusterPodPlacementConfigList struct {
+	// TypeMeta identifies the API version and kind of this list.
 	metav1.TypeMeta `json:",inline"`
+	// ListMeta contains the standard list metadata.
 	metav1.ListMeta `json:"metadata,omitempty"`
-	Items           []ClusterPodPlacementConfig `json:"items"`
+	// Items contains the ClusterPodPlacementConfig resources in this list.
+	Items []ClusterPodPlacementConfig `json:"items"`
 }
 
 func conditionFromBool(b bool) metav1.ConditionStatus {

@@ -39,12 +39,13 @@ spec:
           metadata:
             type: object
           spec:
-            description: PodPlacementConfigSpec defines the desired state of PodPlacementConfig
+            description: Spec defines the desired pod placement configuration.
             properties:
               labelSelector:
                 description: |-
-                  labelSelector selects the pods that the pod placement operand should process according to the other specs provided in the PodPlacementConfig object.
-                  of the pods. If left empty, all the pods are considered.
+                  LabelSelector selects the pods in this namespace that the pod placement operand
+                  should process according to this PodPlacementConfig.
+                  If omitted or set to an empty selector, all pods in the namespace are selected.
                 properties:
                   matchExpressions:
                     description: matchExpressions is a list of label selector requirements.
@@ -92,21 +93,19 @@ spec:
               plugins:
                 description: |-
                   Plugins defines the configurable plugins for this component.
-                  This field is required.
+                  If omitted, this PodPlacementConfig enables no plugins.
                 properties:
                   celArchitecturePlacement:
                     description: |-
-                      CelArchitecturePlacement is a plugin that provides CEL-based architecture selection rules.
-                      This plugin is only available in namespace-scoped PodPlacementConfig resources.
-                      When a rule matches, the plugin removes any existing architecture constraints from the pod's
-                      nodeSelector and nodeAffinity, then sets new architecture constraints based on the rule.
+                      CelArchitecturePlacement configures CEL-based architecture selection.
+                      If omitted, CEL architecture placement is not enabled by this configuration.
                     properties:
                       enabled:
                         description: Enabled indicates whether the plugin is enabled.
                         type: boolean
                       fallbackArchitectures:
                         description: |-
-                          fallbackArchitectures is a required list of architectures to use when no rules match.
+                          FallbackArchitectures is a required list of 1 to 4 architectures to use when no rules match.
                           This limits the explosion of possible rules by providing a sensible default.
                           When applied, existing architecture constraints are removed and replaced with these architectures.
                         items:
@@ -117,7 +116,8 @@ spec:
                       rules:
                         description: |-
                           Rules is a list of architecture selection rules evaluated in order.
-                          The first matching rule determines the target architecture.
+                          If omitted, the fallback architectures are used for all selected pods.
+                          The first matching rule determines the target architectures.
                           When a rule matches, existing architecture constraints are removed and replaced.
                           Maximum of 1000 rules per configuration to prevent excessive evaluation time during
                           pod admission. This limit balances flexibility with performance, ensuring CEL
@@ -129,7 +129,7 @@ spec:
                           properties:
                             architectures:
                               description: |-
-                                Architectures is the list of target architectures to use when this rule matches.
+                                Architectures is a list of 1 to 4 target architectures to use when this rule matches.
                                 When applied, any existing architecture constraints in the pod's nodeSelector
                                 and nodeAffinity are removed and replaced with these architectures.
                               items:
@@ -140,13 +140,15 @@ spec:
                             expression:
                               description: |-
                                 Expression is a CEL expression that evaluates against a Pod resource.
-                                The expression must return a boolean value.
+                                It must contain 1 to 1024 characters.
+                                A true result selects this rule's architectures; a false result advances to the next rule.
                                 The expression has access to the pod via the 'self' variable.
                               maxLength: 1024
                               minLength: 1
                               type: string
                             name:
-                              description: Name is a descriptive name for this rule
+                              description: Name is a descriptive name for this rule,
+                                with a length of 1 to 253 characters.
                               maxLength: 253
                               minLength: 1
                               type: string
@@ -162,8 +164,9 @@ spec:
                     - fallbackArchitectures
                     type: object
                   nodeAffinityScoring:
-                    description: NodeAffinityScoring is the plugin that implements
-                      the ScorePlugin interface.
+                    description: |-
+                      NodeAffinityScoring configures architecture-based preferred node affinity.
+                      If omitted, node affinity scoring is not enabled by this configuration.
                     properties:
                       enabled:
                         description: Enabled indicates whether the plugin is enabled.
@@ -176,8 +179,12 @@ spec:
                             for specific platforms, with required fields validated.
                           properties:
                             architecture:
-                              description: Architecture must be a list of non-empty
-                                string of arch names.
+                              description: |-
+                                Architecture identifies the node architecture to which the weight applies.
+                                When set to arm64, the weight applies to ARM64 nodes.
+                                When set to amd64, the weight applies to AMD64 nodes.
+                                When set to ppc64le, the weight applies to little-endian PowerPC 64-bit nodes.
+                                When set to s390x, the weight applies to IBM Z nodes.
                               enum:
                               - arm64
                               - amd64
@@ -211,11 +218,10 @@ spec:
                 maximum: 255
                 minimum: 0
                 type: integer
-            required:
-            - plugins
             type: object
           status:
-            description: PodPlacementConfigStatus defines the observed state of PodPlacementConfig
+            description: Status reports the observed state. If omitted, no state has
+              been reported yet.
             type: object
         required:
         - spec

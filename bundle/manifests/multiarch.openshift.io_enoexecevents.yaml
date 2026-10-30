@@ -50,14 +50,20 @@ spec:
           metadata:
             type: object
           spec:
-            description: ENoExecEventSpec defines the desired state of ENoExecEvent
+            description: |-
+              Spec is reserved for future configuration and currently has no fields.
+              If omitted, event processing is unchanged.
             type: object
           status:
-            description: ENoExecEventStatus defines the observed state of ENoExecEvent
+            description: |-
+              Status identifies the observed exec format error.
+              If omitted, no event details have been reported yet.
             properties:
               containerID:
                 description: |-
-                  ContainerID must be a runtime-prefixed 64-character hexadecimal string.
+                  ContainerID identifies the container where the exec format error occurred.
+                  If omitted, the container ID has not been reported; no default is assigned.
+                  When provided, it must be a non-empty runtime prefix followed by :// and 64 lowercase hexadecimal characters.
                   Example: containerd://<64-hex-chars>
                   Ref: https://github.com/kubernetes/kubernetes/blob/02eb7d424ad5ccf4f00863fe861f165be0d491da/pkg/apis/core/types.go#L2875
                        https://github.com/elastic/apm/blob/c7655441bb5f15db5ddbd7f4b60cb0735758d44d/specs/agents/metadata.md?plain=1#L111
@@ -65,7 +71,9 @@ spec:
                 type: string
               nodeName:
                 description: |-
-                  NodeName must follow the RFC 1123 DNS subdomain format.
+                  NodeName identifies the node where the exec format error occurred.
+                  If omitted, the node has not been reported; no default is assigned.
+                  When provided, it must follow the RFC 1123 DNS subdomain format.
                   - Max length: 253 characters
                   - Consists of lowercase letters, digits, hyphens (`-`), and dots (`.`)
                   - Must start and end with an alphanumeric character
@@ -76,7 +84,9 @@ spec:
                 type: string
               podName:
                 description: |-
-                  PodName must follow the RFC 1123 DNS subdomain format:
+                  PodName identifies the pod where the exec format error occurred.
+                  If omitted, the pod name has not been reported; no default is assigned.
+                  When provided, it must follow the RFC 1123 DNS subdomain format:
                   - Max length: 253 characters
                   - Characters: lowercase letters, digits, hyphens (`-`), and dots (`.`)
                   - Must start and end with an alphanumeric character
@@ -87,7 +97,9 @@ spec:
                 type: string
               podNamespace:
                 description: |-
-                  PodNamespace must follow the RFC 1123 DNS label format.
+                  PodNamespace identifies the namespace of the pod where the exec format error occurred.
+                  If omitted, the pod namespace has not been reported; no default is assigned.
+                  When provided, it must follow the RFC 1123 DNS label format.
                   - Max length: 63 characters
                   - Characters: lowercase letters, digits, and hyphens ('-')
                   - Must start and end with an alphanumeric character
