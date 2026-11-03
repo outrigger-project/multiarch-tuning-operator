@@ -10,7 +10,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
-	"k8s.io/client-go/tools/record"
+	clientgoevents "k8s.io/client-go/tools/events"
 
 	. "github.com/onsi/gomega"
 
@@ -982,7 +982,7 @@ func TestPod_shouldIgnorePod(t *testing.T) {
 	type fields struct {
 		Pod      *v1.Pod
 		ctx      context.Context
-		recorder record.EventRecorder
+		recorder clientgoevents.EventRecorderLogger
 	}
 	tests := []struct {
 		name   string
@@ -1083,7 +1083,7 @@ func TestPod_shouldIgnorePodWithPluginsEnabledInCPPC(t *testing.T) {
 	type fields struct {
 		Pod      *v1.Pod
 		ctx      context.Context
-		recorder record.EventRecorder
+		recorder clientgoevents.EventRecorderLogger
 	}
 	tests := []struct {
 		name   string
@@ -1143,7 +1143,7 @@ func TestPod_shouldIgnorePodWithPluginsDisabledInCPPC(t *testing.T) {
 	type fields struct {
 		Pod      *v1.Pod
 		ctx      context.Context
-		recorder record.EventRecorder
+		recorder clientgoevents.EventRecorderLogger
 	}
 	tests := []struct {
 		name   string

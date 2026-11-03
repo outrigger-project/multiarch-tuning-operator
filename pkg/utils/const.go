@@ -8,6 +8,17 @@ import (
 )
 
 const (
+	EventActionSchedulingGateAdd      = "SchedulingGateAdd"
+	EventActionSchedulingGateRemove   = "SchedulingGateRemove"
+	EventActionNodeAffinityUpdate     = "NodeAffinityUpdate"
+	EventActionNodeAffinitySkip       = "NodeAffinitySkip"
+	EventActionImageArchitectureCheck = "ImageArchitectureCheck"
+	EventActionImageInspectionFailed  = "ImageInspectionFailed"
+	EventActionCELEvaluation          = "CELEvaluation"
+	EventActionExecFormatErrorReport  = "ExecFormatErrorReport"
+)
+
+const (
 	ControllerNameKey = "controller"
 	OperandLabelKey   = "multiarch.openshift.io/operand"
 	OperatorName      = "multiarch-tuning-operator"

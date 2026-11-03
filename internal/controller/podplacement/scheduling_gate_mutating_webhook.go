@@ -30,7 +30,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/json"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/tools/record"
+	clientgoevents "k8s.io/client-go/tools/events"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	ctrllog "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
@@ -53,13 +53,20 @@ type PodSchedulingGateMutatingWebHook struct {
 	// ppcCacheSynced returns true once the PodPlacementConfig informer cache has
 	// completed its initial list/sync.  When nil it is treated as "not yet synced"
 	// so the apiReader fallback is always permitted in that case.
-	ppcCacheSynced func() bool
-	clientSet      *kubernetes.Clientset
-	decoder        admission.Decoder
-	once           sync.Once
-	scheme         *runtime.Scheme
-	recorder       record.EventRecorder
-	workerPool     *ants.MultiPool
+	ppcCacheSynced  func() bool
+	clientSet       *kubernetes.Clientset
+	decoder         admission.Decoder
+	once            sync.Once
+	scheme          *runtime.Scheme
+	recorder        clientgoevents.EventRecorderLogger
+	workerPool      *ants.MultiPool
+	eventJobsCtx    context.Context
+	cancelEventJobs context.CancelFunc
+	eventJobsMu     sync.Mutex
+	eventJobsClosed bool
+	eventJobs       sync.WaitGroup
+	shutdownOnce    sync.Once
+	shutdownErr     error
 }
 
 func (a *PodSchedulingGateMutatingWebHook) patchedPodResponse(pod *corev1.Pod, req admission.Request) admission.Response {
@@ -140,9 +147,7 @@ func (a *PodSchedulingGateMutatingWebHook) Handle(ctx context.Context, req admis
 	// an indication that the pod is waiting for processing and can support kubectl queries to find out which pods are
 	// waiting for processing, for example when the operator is being uninstalled.
 	pod.Labels[utils.SchedulingGateLabel] = utils.SchedulingGateLabelValueGated
-	// we don't care about this goroutine, it's informational,
-	// we know it will finish eventually by design, and we don't need to block the response as we
-	// are right in the admission pipeline, before the pod is persisted.
+	// Publish after persistence without blocking admission; shutdown joins these jobs.
 	log.V(3).Info("Scheduling gate added to the pod, launching the event creation goroutine")
 	a.delayedSchedulingGatedEvent(ctx, pod.DeepCopy())
 	metrics.GatedPods.Inc()
@@ -156,13 +161,22 @@ func (a *PodSchedulingGateMutatingWebHook) delayedSchedulingGatedEvent(ctx conte
 		// The scheduling-gated event is informational-only.
 		return
 	}
+	a.eventJobsMu.Lock()
+	if a.eventJobsClosed {
+		a.eventJobsMu.Unlock()
+		return
+	}
+	a.eventJobs.Add(1)
+	a.eventJobsMu.Unlock()
+	jobCtx := ctrllog.IntoContext(a.eventJobsCtx, ctrllog.FromContext(ctx))
 	err := a.workerPool.Submit(func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer a.eventJobs.Done()
+		ctx, cancel := context.WithTimeout(jobCtx, 2*time.Minute)
 		defer cancel()
 		log := ctrllog.FromContext(ctx).WithValues("namespace", pod.Namespace, "name", pod.Name,
 			"function", "delayedSchedulingGatedEvent")
 		// We try to get the pod from the API with exponential backoff until we find it or a timeout is reached
-		err := wait.ExponentialBackoff(wait.Backoff{
+		err := wait.ExponentialBackoffWithContext(ctx, wait.Backoff{
 			// The maximum time, excluding the time for the execution of the request,
 			// is the sum of a geometric series with factor != 1.
 			// maxTime = duration * (factor^steps - 1) / (factor - 1)
@@ -170,11 +184,13 @@ func (a *PodSchedulingGateMutatingWebHook) delayedSchedulingGatedEvent(ctx conte
 			Duration: 2 * time.Millisecond,
 			Factor:   2,
 			Steps:    15,
-		}, func() (bool, error) {
+		}, func(ctx context.Context) (bool, error) {
 			createdPod, err := a.clientSet.CoreV1().Pods(pod.Namespace).Get(ctx, pod.Name, metav1.GetOptions{})
 			if err == nil {
 				log.V(2).Info("Pod was found", "namespace", pod.Namespace, "name", pod.Name)
-				a.recorder.Event(createdPod, corev1.EventTypeNormal, ArchitectureAwareSchedulingGateAdded, SchedulingGateAddedMsg)
+				if a.recorder != nil {
+					a.recorder.WithLogger(log).Eventf(createdPod, nil, corev1.EventTypeNormal, ArchitectureAwareSchedulingGateAdded, utils.EventActionSchedulingGateAdd, "%s", SchedulingGateAddedMsg)
+				}
 				// Pod was found, return true to stop retrying
 				return true, nil
 			}
@@ -193,9 +209,30 @@ func (a *PodSchedulingGateMutatingWebHook) delayedSchedulingGatedEvent(ctx conte
 		}
 	})
 	if err != nil {
+		a.eventJobs.Done()
 		ctrllog.FromContext(ctx).WithValues("namespace", pod.Namespace, "name", pod.Name,
 			"function", "delayedSchedulingGatedEvent").Error(err, "Failed to submit the delayedSchedulingGatedEvent job")
 	}
+}
+
+// ShutdownEventJobs closes admission and joins all producers before recorder cleanup.
+func (a *PodSchedulingGateMutatingWebHook) ShutdownEventJobs(timeout time.Duration) error {
+	a.shutdownOnce.Do(func() {
+		a.eventJobsMu.Lock()
+		a.eventJobsClosed = true
+		a.eventJobsMu.Unlock()
+		if a.workerPool != nil {
+			a.shutdownErr = a.workerPool.ReleaseTimeout(timeout)
+		}
+		if a.shutdownErr != nil && a.cancelEventJobs != nil {
+			a.cancelEventJobs()
+		}
+		a.eventJobs.Wait()
+		if a.cancelEventJobs != nil {
+			a.cancelEventJobs()
+		}
+	})
+	return a.shutdownErr
 }
 
 // applyCELInWebhook evaluates and applies CEL architecture placement during pod admission.
@@ -291,16 +328,19 @@ func (a *PodSchedulingGateMutatingWebHook) applyCELInWebhook(ctx context.Context
 // has completed its initial sync; pass nil to always allow the apiReader fallback
 // (safe for unit tests that do not wire an informer).
 func NewPodSchedulingGateMutatingWebHook(client client.Client, apiReader client.Reader, ppcCacheSynced func() bool,
-	clientSet *kubernetes.Clientset, scheme *runtime.Scheme, recorder record.EventRecorder,
+	clientSet *kubernetes.Clientset, scheme *runtime.Scheme, recorder clientgoevents.EventRecorderLogger,
 	workerPool *ants.MultiPool) *PodSchedulingGateMutatingWebHook {
+	eventJobsCtx, cancelEventJobs := context.WithCancel(context.Background())
 	a := &PodSchedulingGateMutatingWebHook{
-		client:         client,
-		apiReader:      apiReader,
-		ppcCacheSynced: ppcCacheSynced,
-		clientSet:      clientSet,
-		scheme:         scheme,
-		recorder:       recorder,
-		workerPool:     workerPool,
+		client:          client,
+		apiReader:       apiReader,
+		ppcCacheSynced:  ppcCacheSynced,
+		clientSet:       clientSet,
+		scheme:          scheme,
+		recorder:        recorder,
+		workerPool:      workerPool,
+		eventJobsCtx:    eventJobsCtx,
+		cancelEventJobs: cancelEventJobs,
 	}
 	metrics.InitWebhookMetrics()
 	return a
