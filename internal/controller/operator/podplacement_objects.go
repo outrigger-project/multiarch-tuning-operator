@@ -187,9 +187,9 @@ func buildControllerDeployment(clusterPodPlacementConfig *v1beta1.ClusterPodPlac
 func buildClusterRoleWebhook() *rbacv1.ClusterRole {
 	return buildClusterRole(utils.PodPlacementWebhookName, []rbacv1.PolicyRule{
 		{
-			APIGroups: []string{""},
+			APIGroups: []string{"events.k8s.io"},
 			Resources: []string{"events"},
-			Verbs:     []string{CREATE, PATCH},
+			Verbs:     []string{CREATE, PATCH, UPDATE},
 		},
 		{
 			APIGroups: []string{v1beta1.GroupVersion.Group},
@@ -236,6 +236,11 @@ func buildClusterRoleController() *rbacv1.ClusterRole {
 			APIGroups: []string{""},
 			Resources: []string{"events"},
 			Verbs:     []string{CREATE, PATCH},
+		},
+		{
+			APIGroups: []string{"events.k8s.io"},
+			Resources: []string{"events"},
+			Verbs:     []string{CREATE, PATCH, UPDATE},
 		},
 		{
 			APIGroups: []string{""},
