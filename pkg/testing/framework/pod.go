@@ -9,9 +9,9 @@ import (
 	. "github.com/onsi/gomega"
 
 	v1 "k8s.io/api/core/v1"
+	eventsv1 "k8s.io/api/events/v1"
 	"k8s.io/client-go/kubernetes"
 
-	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/selection"
 	"k8s.io/apimachinery/pkg/types"
@@ -270,20 +270,18 @@ func VerifyPodsEvents(ctx context.Context, client runtimeclient.Client, ns *v1.N
 		}
 
 		// List all events in the namespace
-		events := &v1.EventList{}
+		events := &eventsv1.EventList{}
 		err = client.List(ctx, events, &runtimeclient.ListOptions{
 			Namespace: ns.Name,
-			FieldSelector: fields.AndSelectors(
-				fields.OneTermEqualSelector("involvedObject.kind", "Pod"),
-				fields.OneTermEqualSelector("reason", eventReason),
-			),
 		})
 		g.Expect(err).NotTo(HaveOccurred())
 
 		// Create a map for faster event lookup
 		eventMap := make(map[types.UID]bool)
 		for _, e := range events.Items {
-			eventMap[e.InvolvedObject.UID] = true
+			if e.Regarding.Kind == "Pod" && e.Regarding.Namespace == ns.Name && e.Reason == eventReason {
+				eventMap[e.Regarding.UID] = true
+			}
 		}
 		// Verify each pod has at least one matching event
 		g.Expect(pods.Items).Should(HaveEach(

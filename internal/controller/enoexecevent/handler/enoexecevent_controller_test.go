@@ -42,9 +42,12 @@ func ensureEvent(podName string, message string) AsyncAssertion {
 		found := false
 		for _, event := range events {
 			if event.Reason == utils.ExecFormatErrorEventReason &&
-				event.Message == message &&
-				event.InvolvedObject.Namespace == testNamespace &&
-				event.InvolvedObject.Name == podName {
+				event.Note == message &&
+				event.Regarding.Namespace == testNamespace &&
+				event.Regarding.Name == podName && event.Regarding.UID == pod.UID &&
+				event.Regarding.Kind == "Pod" && event.Related == nil &&
+				event.Type == v1.EventTypeWarning && event.Action == "ExecFormatErrorReport" &&
+				event.ReportingController == utils.EnoexecControllerName {
 				found = true
 				break
 			}
