@@ -6,7 +6,7 @@ import (
 
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/tools/record"
+	clientgoevents "k8s.io/client-go/tools/events"
 
 	"github.com/openshift/multiarch-tuning-operator/pkg/testing/builder"
 	"github.com/openshift/multiarch-tuning-operator/pkg/utils"
@@ -82,7 +82,7 @@ func TestPod_HasGate(t *testing.T) {
 	type fields struct {
 		Pod      *v1.Pod
 		ctx      context.Context
-		recorder record.EventRecorder
+		recorder clientgoevents.EventRecorderLogger
 	}
 	type args struct {
 		gateName string
@@ -158,7 +158,7 @@ func TestPod_RemoveGate(t *testing.T) {
 	type fields struct {
 		Pod      *v1.Pod
 		ctx      context.Context
-		recorder record.EventRecorder
+		recorder clientgoevents.EventRecorderLogger
 	}
 	type args struct {
 		gateName string
@@ -381,7 +381,7 @@ func TestPod_HasControlPlaneNodeSelector(t *testing.T) {
 	type fields struct {
 		Pod      *v1.Pod
 		ctx      context.Context
-		recorder record.EventRecorder
+		recorder clientgoevents.EventRecorderLogger
 	}
 	tests := []struct {
 		name   string
@@ -438,7 +438,7 @@ func TestPod_EnsureAndIncrementLabel(t *testing.T) {
 	type fields struct {
 		Pod      *v1.Pod
 		ctx      context.Context
-		recorder record.EventRecorder
+		recorder clientgoevents.EventRecorderLogger
 	}
 	type args struct {
 		label string
@@ -499,7 +499,7 @@ func TestPod_IsFromDaemonSet(t *testing.T) {
 	type fields struct {
 		Pod      *v1.Pod
 		ctx      context.Context
-		recorder record.EventRecorder
+		recorder clientgoevents.EventRecorderLogger
 	}
 	tests := []struct {
 		name   string
@@ -550,7 +550,7 @@ func TestPod_ContainerNameFor(t *testing.T) {
 	type fields struct {
 		Pod      v1.Pod
 		ctx      context.Context
-		recorder record.EventRecorder
+		recorder clientgoevents.EventRecorderLogger
 	}
 	type args struct {
 		containerID string

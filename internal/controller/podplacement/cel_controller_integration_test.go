@@ -26,9 +26,10 @@ import (
 	imgspecv1 "github.com/opencontainers/image-spec/specs-go/v1"
 
 	corev1 "k8s.io/api/core/v1"
+	eventsv1 "k8s.io/api/events/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/tools/record"
+	"k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
 	crclient "sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -37,6 +38,7 @@ import (
 	"github.com/openshift/multiarch-tuning-operator/api/v1beta1"
 	"github.com/openshift/multiarch-tuning-operator/pkg/e2e"
 	. "github.com/openshift/multiarch-tuning-operator/pkg/testing/builder"
+	"github.com/openshift/multiarch-tuning-operator/pkg/testing/framework"
 	"github.com/openshift/multiarch-tuning-operator/pkg/testing/image/fake/registry"
 	"github.com/openshift/multiarch-tuning-operator/pkg/utils"
 )
@@ -1254,7 +1256,7 @@ var _ = Describe("CEL Architecture Placement Controller Integration", func() {
 					WithCelArchitecturePlacement(true, []string{utils.ArchitecturePpc64le},
 						[]plugins.ArchitectureRule{NewRule("match-all", "true", utils.ArchitecturePpc64le)}).
 					Build()
-				recorder := record.NewFakeRecorder(32)
+				recorder := newNativeRecorder()
 				pod := NewPod().WithName("pending-pod").WithNamespace(ns.Name).
 					WithSchedulingGates(utils.SchedulingGateName).
 					WithContainersImages(fmt.Sprintf("%s/%s/%s:latest", registryAddress,
@@ -1296,7 +1298,9 @@ var _ = Describe("CEL Architecture Placement Controller Integration", func() {
 
 	Context("Event Publishing", func() {
 		It("should publish CELArchitecturePlacementApplied event when a CEL rule matches", func() {
-			recorder := record.NewFakeRecorder(8)
+			recorder, recordedEvents, cleanup, err := framework.NewTestEventRecorder(ctx, scheme.Scheme, utils.OperatorName)
+			Expect(err).NotTo(HaveOccurred())
+			DeferCleanup(cleanup)
 			reconciler := &PodReconciler{Recorder: recorder}
 
 			ppc := *NewPodPlacementConfig().
@@ -1310,28 +1314,27 @@ var _ = Describe("CEL Architecture Placement Controller Integration", func() {
 				Build()
 
 			pod := NewPod().WithName("event-pod").WithNamespace("default").Build()
+			pod.UID = "event-pod-uid"
 			wrappedPod := newPod(pod, context.Background(), recorder)
 
 			handled := reconciler.applyCELArchitecturePlacement(context.Background(), ppc, wrappedPod)
 			Expect(handled).To(BeTrue(), "applyCELArchitecturePlacement should return true when a rule matches")
 
-			var events []string
-			done := false
-			for !done {
-				select {
-				case e := <-recorder.Events:
-					events = append(events, e)
-				default:
-					done = true
-				}
-			}
-			Expect(events).To(HaveLen(1))
-			Expect(events[0]).To(ContainSubstring("CELArchitecturePlacementApplied"))
-			Expect(events[0]).To(ContainSubstring("match-rule"))
+			var event *eventsv1.Event
+			Eventually(recordedEvents, 2*time.Second).Should(Receive(&event))
+			Expect(event.Reason).To(Equal("CELArchitecturePlacementApplied"))
+			Expect(event.Action).To(Equal("NodeAffinityUpdate"))
+			Expect(event.Note).To(ContainSubstring("match-rule"))
+			Expect(event.Regarding).To(Equal(corev1.ObjectReference{APIVersion: "v1", Kind: "Pod", Name: "event-pod", Namespace: "default", UID: "event-pod-uid"}))
+			Expect(event.Related).To(BeNil())
+			Expect(event.Type).To(Equal(corev1.EventTypeNormal))
+			Expect(event.ReportingController).To(Equal(utils.OperatorName))
 		})
 
 		It("should publish CELArchitecturePlacementFallback event when no CEL rules match", func() {
-			recorder := record.NewFakeRecorder(8)
+			recorder, recordedEvents, cleanup, err := framework.NewTestEventRecorder(ctx, scheme.Scheme, utils.OperatorName)
+			Expect(err).NotTo(HaveOccurred())
+			DeferCleanup(cleanup)
 			reconciler := &PodReconciler{Recorder: recorder}
 
 			ppc := *NewPodPlacementConfig().
@@ -1345,27 +1348,27 @@ var _ = Describe("CEL Architecture Placement Controller Integration", func() {
 				Build()
 
 			pod := NewPod().WithName("fallback-pod").WithNamespace("default").Build()
+			pod.UID = "fallback-pod-uid"
 			wrappedPod := newPod(pod, context.Background(), recorder)
 
 			handled := reconciler.applyCELArchitecturePlacement(context.Background(), ppc, wrappedPod)
 			Expect(handled).To(BeTrue(), "applyCELArchitecturePlacement should return true when fallback is applied")
 
-			var events []string
-			done := false
-			for !done {
-				select {
-				case e := <-recorder.Events:
-					events = append(events, e)
-				default:
-					done = true
-				}
-			}
-			Expect(events).To(HaveLen(1))
-			Expect(events[0]).To(ContainSubstring("CELArchitecturePlacementFallback"))
+			var event *eventsv1.Event
+			Eventually(recordedEvents, 2*time.Second).Should(Receive(&event))
+			Expect(event.Reason).To(Equal("CELArchitecturePlacementFallback"))
+			Expect(event.Action).To(Equal("NodeAffinityUpdate"))
+			Expect(event.Note).To(ContainSubstring("event-fallback-ppc"))
+			Expect(event.Regarding).To(Equal(corev1.ObjectReference{APIVersion: "v1", Kind: "Pod", Name: "fallback-pod", Namespace: "default", UID: "fallback-pod-uid"}))
+			Expect(event.Related).To(BeNil())
+			Expect(event.Type).To(Equal(corev1.EventTypeNormal))
+			Expect(event.ReportingController).To(Equal(utils.OperatorName))
 		})
 
 		It("should publish CELEvaluationError event when CEL evaluation fails", func() {
-			recorder := record.NewFakeRecorder(8)
+			recorder, recordedEvents, cleanup, err := framework.NewTestEventRecorder(ctx, scheme.Scheme, utils.OperatorName)
+			Expect(err).NotTo(HaveOccurred())
+			DeferCleanup(cleanup)
 			reconciler := &PodReconciler{Recorder: recorder}
 
 			ppc := *NewPodPlacementConfig().
@@ -1376,23 +1379,21 @@ var _ = Describe("CEL Architecture Placement Controller Integration", func() {
 				Build()
 
 			pod := NewPod().WithName("error-pod").WithNamespace("default").Build()
+			pod.UID = "error-pod-uid"
 			wrappedPod := newPod(pod, context.Background(), recorder)
 
 			handled := reconciler.applyCELArchitecturePlacement(context.Background(), ppc, wrappedPod)
 			Expect(handled).To(BeFalse(), "applyCELArchitecturePlacement should return false on evaluation error")
 
-			var events []string
-			done := false
-			for !done {
-				select {
-				case e := <-recorder.Events:
-					events = append(events, e)
-				default:
-					done = true
-				}
-			}
-			Expect(events).To(HaveLen(1))
-			Expect(events[0]).To(ContainSubstring("CELEvaluationError"))
+			var event *eventsv1.Event
+			Eventually(recordedEvents, 2*time.Second).Should(Receive(&event))
+			Expect(event.Reason).To(Equal("CELEvaluationError"))
+			Expect(event.Action).To(Equal("CELEvaluation"))
+			Expect(event.Note).To(ContainSubstring("Failed to evaluate CEL rules:"))
+			Expect(event.Regarding).To(Equal(corev1.ObjectReference{APIVersion: "v1", Kind: "Pod", Name: "error-pod", Namespace: "default", UID: "error-pod-uid"}))
+			Expect(event.Related).To(BeNil())
+			Expect(event.Type).To(Equal(corev1.EventTypeWarning))
+			Expect(event.ReportingController).To(Equal(utils.OperatorName))
 		})
 	})
 })

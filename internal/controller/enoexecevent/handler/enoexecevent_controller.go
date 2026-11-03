@@ -23,7 +23,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/tools/record"
+	clientgoevents "k8s.io/client-go/tools/events"
 
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -42,10 +42,10 @@ type Reconciler struct {
 	client.Client
 	clientSet *kubernetes.Clientset
 	Scheme    *runtime.Scheme
-	recorder  record.EventRecorder
+	recorder  clientgoevents.EventRecorderLogger
 }
 
-func NewReconciler(client client.Client, clientSet *kubernetes.Clientset, scheme *runtime.Scheme, recorder record.EventRecorder) *Reconciler {
+func NewReconciler(client client.Client, clientSet *kubernetes.Clientset, scheme *runtime.Scheme, recorder clientgoevents.EventRecorderLogger) *Reconciler {
 	return &Reconciler{
 		Client:    client,
 		clientSet: clientSet,
@@ -158,7 +158,7 @@ func (r *Reconciler) reconcile(ctx context.Context, eNoExecEvent *ENoExecEvent) 
 	}
 
 	logger.Info("Publishing event for ENoExecEvent", "podName", pod.Name, "namespace", pod.Namespace)
-	pod.PublishEvent(v1.EventTypeWarning, utils.ExecFormatErrorEventReason,
+	pod.PublishEvent(v1.EventTypeWarning, utils.ExecFormatErrorEventReason, utils.EventActionExecFormatErrorReport,
 		utils.ExecFormatErrorEventMessage(containerName, node.Labels[utils.ArchLabel]))
 
 	// Label the pod with the ENoExecEvent label.

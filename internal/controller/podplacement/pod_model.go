@@ -27,7 +27,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/sets"
-	"k8s.io/client-go/tools/record"
+	clientgoevents "k8s.io/client-go/tools/events"
 	ctrllog "sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/openshift/multiarch-tuning-operator/api/common"
@@ -55,7 +55,7 @@ type Pod struct {
 	models.Pod
 }
 
-func newPod(pod *corev1.Pod, ctx context.Context, recorder record.EventRecorder) *Pod {
+func newPod(pod *corev1.Pod, ctx context.Context, recorder clientgoevents.EventRecorderLogger) *Pod {
 	return &Pod{
 		Pod: *models.NewPod(pod, ctx, recorder),
 	}
@@ -108,7 +108,7 @@ func (pod *Pod) SetNodeAffinityArchRequirement(pullSecretDataList [][]byte) (boo
 	}
 	pod.EnsureNoLabel(utils.ImageInspectionErrorLabel)
 	if len(requirement.Values) == 0 {
-		pod.PublishEvent(corev1.EventTypeNormal, NoSupportedArchitecturesFound, NoSupportedArchitecturesFoundMsg)
+		pod.PublishEvent(corev1.EventTypeNormal, NoSupportedArchitecturesFound, utils.EventActionImageArchitectureCheck, NoSupportedArchitecturesFoundMsg)
 	}
 	pod.ensureArchitectureLabels(requirement)
 
@@ -125,7 +125,7 @@ func (pod *Pod) SetNodeAffinityArchRequirement(pullSecretDataList [][]byte) (boo
 	}
 
 	pod.setRequiredArchNodeAffinity(requirement)
-	pod.PublishEvent(corev1.EventTypeNormal, ArchitectureAwareNodeAffinitySet,
+	pod.PublishEvent(corev1.EventTypeNormal, ArchitectureAwareNodeAffinitySet, utils.EventActionNodeAffinityUpdate,
 		ArchitecturePredicateSetupMsg+fmt.Sprintf("{%s}", strings.Join(requirement.Values, ", ")))
 	return true, nil
 }
@@ -221,17 +221,17 @@ func (pod *Pod) SetPreferredArchNodeAffinity(nodeAffinity *plugins.NodeAffinityS
 	switch {
 	// Case 1: All architectures from this config were successfully added (no duplicates)
 	case preferredSchedulingTerms != nil && skippedArchitectures == nil:
-		pod.PublishEvent(corev1.EventTypeNormal, ArchitectureAwareNodeAffinitySet, fmt.Sprintf("%s source: %s", ArchitecturePreferredPredicateSetupMsg, configSource))
+		pod.PublishEvent(corev1.EventTypeNormal, ArchitectureAwareNodeAffinitySet, utils.EventActionNodeAffinityUpdate, fmt.Sprintf("%s source: %s", ArchitecturePreferredPredicateSetupMsg, configSource))
 		log.V(2).Info("Applied all architecture preferences from configuration", "ConfigSource", configSource)
 
 	// Case 2: Some architectures were added, but some were skipped due to duplicates
 	case preferredSchedulingTerms != nil && skippedArchitectures != nil:
-		pod.PublishEvent(corev1.EventTypeNormal, ArchitectureAwareNodeAffinitySet, fmt.Sprintf("%s source: %s, skipped: %s", ArchitecturePreferredAffinityWithDuplicatesMsg, configSource, strings.Join(skippedArchitectures, ", ")))
+		pod.PublishEvent(corev1.EventTypeNormal, ArchitectureAwareNodeAffinitySet, utils.EventActionNodeAffinityUpdate, fmt.Sprintf("%s source: %s, skipped: %s", ArchitecturePreferredAffinityWithDuplicatesMsg, configSource, strings.Join(skippedArchitectures, ", ")))
 		log.V(2).Info("Applied some architecture preferences from configuration", "ConfigSource", configSource, "SkippedArchitectures", skippedArchitectures)
 
 	// Case 3: All architectures from this config were already set
 	case preferredSchedulingTerms == nil && skippedArchitectures != nil:
-		pod.PublishEvent(corev1.EventTypeNormal, ArchitecturePreferredAffinityDuplicates, fmt.Sprintf("%s source: %s, architectures: %s", ArchitecturePreferredAffinityAllDuplicatesMsg, configSource, strings.Join(skippedArchitectures, ", ")))
+		pod.PublishEvent(corev1.EventTypeNormal, ArchitecturePreferredAffinityDuplicates, utils.EventActionNodeAffinitySkip, fmt.Sprintf("%s source: %s, architectures: %s", ArchitecturePreferredAffinityAllDuplicatesMsg, configSource, strings.Join(skippedArchitectures, ", ")))
 		log.V(2).Info("All architectures from configuration were already set", "ConfigSource", configSource, "SkippedArchitectures", skippedArchitectures)
 
 	// Case 4: No architectures were provided in the config
@@ -318,7 +318,7 @@ func (pod *Pod) setRequiredNodeAffinityToFallbackArchitecture(architecture strin
 
 	pod.setRequiredArchNodeAffinity(requirement)
 	pod.EnsureLabel(utils.FallbackArchitectureLabel, architecture)
-	pod.PublishEvent(corev1.EventTypeWarning, ArchitectureAwareFallbackNodeAffinitySet,
+	pod.PublishEvent(corev1.EventTypeWarning, ArchitectureAwareFallbackNodeAffinitySet, utils.EventActionNodeAffinityUpdate,
 		ArchitectureFallbackSetupMsg+fmt.Sprintf("{%s}", architecture))
 }
 
@@ -626,7 +626,7 @@ func (pod *Pod) publishIgnorePod() {
 	log := ctrllog.FromContext(pod.Ctx())
 	log.V(1).Info("The pod has the nodeSelector or all the nodeAffinityTerms set for the kubernetes.io/arch label. Ignoring the pod...")
 	pod.EnsureLabel(utils.NodeAffinityLabel, utils.LabelValueNotSet)
-	pod.PublishEvent(corev1.EventTypeNormal, ArchitecturePredicatesConflict, ArchitecturePredicatesConflictMsg)
+	pod.PublishEvent(corev1.EventTypeNormal, ArchitecturePredicatesConflict, utils.EventActionNodeAffinitySkip, ArchitecturePredicatesConflictMsg)
 }
 
 func (pod *Pod) handleError(err error, s string) {
@@ -643,7 +643,7 @@ func (pod *Pod) handleError(err error, s string) {
 	pod.EnsureLabel(utils.ImageInspectionErrorLabel, "")
 	pod.EnsureAnnotation(utils.ImageInspectionErrorLabel, errMsg)
 	pod.EnsureAndIncrementLabel(utils.ImageInspectionErrorCountLabel)
-	pod.PublishEvent(corev1.EventTypeWarning, ImageArchitectureInspectionError, ImageArchitectureInspectionErrorMsg+errMsg)
+	pod.PublishEvent(corev1.EventTypeWarning, ImageArchitectureInspectionError, utils.EventActionImageInspectionFailed, ImageArchitectureInspectionErrorMsg+errMsg)
 	log.Error(err, s)
 }
 

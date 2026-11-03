@@ -30,7 +30,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/tools/record"
+	clientgoevents "k8s.io/client-go/tools/events"
 	crclient "sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/openshift/multiarch-tuning-operator/api/common/plugins"
@@ -369,13 +369,13 @@ var _ = Describe("Finding #6: CEL LRU cache eviction", func() {
 
 var _ = Describe("Malformed PPC does not block lower priority valid PPC", func() {
 	var (
-		recorder     *record.FakeRecorder
+		recorder     clientgoevents.EventRecorderLogger
 		r            *PodReconciler
 		malformedPPC multiarchv1beta1.PodPlacementConfig
 	)
 
 	BeforeEach(func() {
-		recorder = record.NewFakeRecorder(8)
+		recorder = newNativeRecorder()
 		r = &PodReconciler{Recorder: recorder}
 
 		// High-priority PPC with all malformed CEL rules.

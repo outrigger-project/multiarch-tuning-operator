@@ -7,7 +7,8 @@ import (
 	"strconv"
 
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/client-go/tools/record"
+	clientgoevents "k8s.io/client-go/tools/events"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/openshift/multiarch-tuning-operator/pkg/utils"
 )
@@ -15,10 +16,10 @@ import (
 type Pod struct {
 	corev1.Pod
 	ctx      context.Context
-	recorder record.EventRecorder
+	recorder clientgoevents.EventRecorderLogger
 }
 
-func NewPod(pod *corev1.Pod, ctx context.Context, recorder record.EventRecorder) *Pod {
+func NewPod(pod *corev1.Pod, ctx context.Context, recorder clientgoevents.EventRecorderLogger) *Pod {
 	return &Pod{
 		Pod:      *pod,
 		ctx:      ctx,
@@ -32,7 +33,7 @@ func (pod *Pod) Ctx() context.Context {
 }
 
 // Recorder returns the EventRecorder associated with the Pod.
-func (pod *Pod) Recorder() record.EventRecorder {
+func (pod *Pod) Recorder() clientgoevents.EventRecorderLogger {
 	return pod.recorder
 }
 
@@ -41,9 +42,9 @@ func (pod *Pod) PodObject() *corev1.Pod {
 }
 
 // PublishEvent publishes an event for the pod using the EventRecorder.
-func (pod *Pod) PublishEvent(eventType, reason, message string) {
+func (pod *Pod) PublishEvent(eventType, reason, action, message string) {
 	if pod.recorder != nil {
-		pod.recorder.Event(&pod.Pod, eventType, reason, message)
+		pod.recorder.WithLogger(log.FromContext(pod.ctx)).Eventf(&pod.Pod, nil, eventType, reason, action, "%s", message)
 	}
 }
 
