@@ -31,7 +31,8 @@ import (
 func (c *ClusterPodPlacementConfig) SetupWebhookWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewWebhookManagedBy(mgr, &ClusterPodPlacementConfig{}).
 		WithValidator(&ClusterPodPlacementConfigValidator{
-			Client: mgr.GetClient(),
+			Client:    mgr.GetClient(),
+			APIReader: mgr.GetAPIReader(),
 		}).
 		Complete()
 }
@@ -39,7 +40,8 @@ func (c *ClusterPodPlacementConfig) SetupWebhookWithManager(mgr ctrl.Manager) er
 // ClusterPodPlacementConfigValidator validates ClusterPodPlacementConfig resources
 // +kubebuilder:object:generate=false
 type ClusterPodPlacementConfigValidator struct {
-	Client client.Client
+	Client    client.Client
+	APIReader client.Reader
 }
 
 func (v *ClusterPodPlacementConfigValidator) ValidateCreate(ctx context.Context, obj *ClusterPodPlacementConfig) (warnings admission.Warnings, err error) {
@@ -55,6 +57,12 @@ func (v *ClusterPodPlacementConfigValidator) ValidateDelete(ctx context.Context,
 	existingPPCs := &PodPlacementConfigList{}
 	if err := v.Client.List(ctx, existingPPCs); err != nil {
 		return nil, fmt.Errorf("failed to list existing PodPlacementConfigs: %w", err)
+	}
+	// Confirm an empty cache result before allowing irreversible deletion.
+	if len(existingPPCs.Items) == 0 {
+		if err := v.APIReader.List(ctx, existingPPCs); err != nil {
+			return nil, fmt.Errorf("failed to list existing PodPlacementConfigs from API server: %w", err)
+		}
 	}
 	if len(existingPPCs.Items) != 0 {
 		return nil, fmt.Errorf("cannot delete ClusterPodPlacementConfig while local PodPlacementConfigs still exist")
