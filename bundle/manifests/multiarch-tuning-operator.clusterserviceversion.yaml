@@ -617,6 +617,25 @@ spec:
     containerPort: 443
     deploymentName: multiarch-tuning-operator-controller-manager
     failurePolicy: Fail
+    generateName: mutate-clusterpodplacementconfig.multiarch.openshift.io
+    rules:
+    - apiGroups:
+      - multiarch.openshift.io
+      apiVersions:
+      - v1beta1
+      operations:
+      - CREATE
+      resources:
+      - clusterpodplacementconfigs
+    sideEffects: None
+    targetPort: 9443
+    type: MutatingAdmissionWebhook
+    webhookPath: /mutate-multiarch-openshift-io-v1beta1-clusterpodplacementconfig
+  - admissionReviewVersions:
+    - v1
+    containerPort: 443
+    deploymentName: multiarch-tuning-operator-controller-manager
+    failurePolicy: Fail
     generateName: validate-clusterpodplacementconfig.multiarch.openshift.io
     rules:
     - apiGroups:
