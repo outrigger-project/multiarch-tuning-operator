@@ -9,7 +9,42 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+
+	"github.com/openshift/multiarch-tuning-operator/pkg/utils"
 )
+
+func TestClusterPodPlacementConfigDefaultProtectsCreation(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		finalizers []string
+	}{
+		{name: "new object"},
+		{name: "preserves another finalizer", finalizers: []string{"example.com/cleanup"}},
+		{name: "already protected", finalizers: []string{utils.PodPlacementFinalizerName}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cppc := &ClusterPodPlacementConfig{ObjectMeta: metav1.ObjectMeta{Name: "cluster", Finalizers: append([]string(nil), tc.finalizers...)}}
+			defaulter := &ClusterPodPlacementConfigDefaulter{}
+			for i := 0; i < 2; i++ {
+				if err := defaulter.Default(t.Context(), cppc); err != nil {
+					t.Fatal(err)
+				}
+			}
+			count := 0
+			for _, finalizer := range cppc.Finalizers {
+				if finalizer == utils.PodPlacementFinalizerName {
+					count++
+				}
+			}
+			if count != 1 {
+				t.Fatalf("expected exactly one cleanup finalizer, got %v", cppc.Finalizers)
+			}
+			if tc.name == "preserves another finalizer" && (len(cppc.Finalizers) != 2 || cppc.Finalizers[0] != "example.com/cleanup") {
+				t.Fatalf("other finalizers were changed: %v", cppc.Finalizers)
+			}
+		})
+	}
+}
 
 type deleteValidationClient struct {
 	client.Client
