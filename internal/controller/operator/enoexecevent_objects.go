@@ -31,6 +31,11 @@ func buildClusterRoleENoExecEventsController() *rbacv1.ClusterRole {
 			Verbs:     []string{CREATE, PATCH},
 		},
 		{
+			APIGroups: []string{"events.k8s.io"},
+			Resources: []string{"events"},
+			Verbs:     []string{CREATE, PATCH, UPDATE},
+		},
+		{
 			APIGroups: []string{""},
 			Resources: []string{"pods", "pods/status"},
 			Verbs:     []string{UPDATE},

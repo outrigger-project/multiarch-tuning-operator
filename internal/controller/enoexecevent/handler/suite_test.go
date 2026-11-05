@@ -46,6 +46,7 @@ import (
 	"go.uber.org/zap/zapcore"
 
 	"github.com/openshift/multiarch-tuning-operator/pkg/e2e"
+	operandevents "github.com/openshift/multiarch-tuning-operator/pkg/events"
 	"github.com/openshift/multiarch-tuning-operator/pkg/testing/builder"
 	testingutils "github.com/openshift/multiarch-tuning-operator/pkg/testing/framework"
 	"github.com/openshift/multiarch-tuning-operator/pkg/utils"
@@ -59,14 +60,15 @@ import (
 // http://onsi.github.io/ginkgo/ to learn more about Ginkgo.
 
 var (
-	cfg          *rest.Config
-	k8sClient    client.Client
-	k8sClientSet *kubernetes.Clientset
-	stopMgr      context.CancelFunc
-	mgrStopped   chan struct{}
-	testEnv      *envtest.Environment
-	ctx          context.Context
-	suiteLog     = ctrl.Log.WithName("setup")
+	cfg             *rest.Config
+	k8sClient       client.Client
+	k8sClientSet    *kubernetes.Clientset
+	stopMgr         context.CancelFunc
+	mgrStopped      chan struct{}
+	cleanupRecorder func()
+	testEnv         *envtest.Environment
+	ctx             context.Context
+	suiteLog        = ctrl.Log.WithName("setup")
 )
 
 const (
@@ -140,8 +142,11 @@ var _ = SynchronizedAfterSuite(func() {}, func() {
 		case <-mgrStopped:
 			suiteLog.Info("Manager stopped successfully")
 		case <-time.After(10 * time.Second):
-			suiteLog.Error(nil, "Timeout waiting for manager to stop")
+			Fail("Timeout waiting for manager to stop")
 		}
+	}
+	if cleanupRecorder != nil {
+		cleanupRecorder()
 	}
 	err := testEnv.Stop()
 	Expect(err).NotTo(HaveOccurred())
@@ -239,18 +244,32 @@ func runManager() {
 	err = mgr.AddReadyzCheck("readyz", healthz.Ping)
 	Expect(err).NotTo(HaveOccurred())
 
-	reconciler := NewReconciler(mgr.GetClient(), k8sClientSet, mgr.GetScheme(), mgr.GetEventRecorderFor("enoexecevent-controller")) //nolint:staticcheck // MULTIARCH-6087: will be fixed with events API migration
-	if err = reconciler.SetupWithManager(mgr); err != nil {
-		suiteLog.Error(err, "unable to create controller", "controller", "ENoExecEvent")
-	}
+	recordingCtx, cancelRecording := context.WithCancel(logf.IntoContext(context.Background(), suiteLog))
+	recorder, cleanup, err := operandevents.NewRecorder(recordingCtx, k8sClientSet, mgr.GetScheme(), utils.EnoexecControllerName)
+	Expect(err).NotTo(HaveOccurred())
+	cleanupRecorder = func() { cleanup(); cancelRecording() }
+	setupComplete := false
+	defer func() {
+		if !setupComplete {
+			if stopMgr != nil {
+				stopMgr()
+				if mgrStopped != nil {
+					<-mgrStopped
+				}
+			}
+			cleanupRecorder()
+		}
+	}()
+	reconciler := NewReconciler(mgr.GetClient(), k8sClientSet, mgr.GetScheme(), recorder)
+	Expect(reconciler.SetupWithManager(mgr)).To(Succeed())
 	By("Starting the manager")
 	mgrStopped = make(chan struct{})
+	mgrCtx, cancelMgr := context.WithCancel(ctx)
+	stopMgr = cancelMgr
 	go func() {
+		defer GinkgoRecover()
 		defer close(mgrStopped)
-		var mgrCtx context.Context
-		mgrCtx, stopMgr = context.WithCancel(ctx)
-		err = mgr.Start(mgrCtx)
-		Expect(err).NotTo(HaveOccurred())
+		Expect(mgr.Start(mgrCtx)).To(Succeed())
 	}()
 
 	By("Waiting for the manager to be ready...")
@@ -261,6 +280,7 @@ func runManager() {
 	}).MustPassRepeatedly(3).Should(
 		Succeed(), "manager is not ready yet")
 	suiteLog.Info("Manager is ready")
+	setupComplete = true
 }
 
 // getFirstFoundEnvTestBinaryDir returns the first envtest asset directory under bin/k8s.

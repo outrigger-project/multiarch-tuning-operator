@@ -27,9 +27,7 @@ import (
 
 	"sigs.k8s.io/kustomize/api/resmap"
 
-	v1 "k8s.io/api/admissionregistration/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/klog/v2"
 
 	"sigs.k8s.io/kustomize/api/krusty"
@@ -148,7 +146,7 @@ func startTestEnv() {
 		ErrorIfCRDPathMissing: true,
 		BinaryAssetsDirectory: getFirstFoundEnvTestBinaryDir(),
 		WebhookInstallOptions: envtest.WebhookInstallOptions{
-			ValidatingWebhooks: []*v1.ValidatingWebhookConfiguration{getValidatingWebHook()},
+			Paths: []string{filepath.Join("..", "..", "..", "config", "webhook", "manifests.yaml")},
 		},
 	}
 	var err error
@@ -276,70 +274,6 @@ func runManager() {
 	}).MustPassRepeatedly(3).Should(
 		Succeed(), "manager is not ready yet")
 	suiteLog.Info("Manager is ready")
-}
-
-func getValidatingWebHook() *v1.ValidatingWebhookConfiguration {
-	return &v1.ValidatingWebhookConfiguration{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: "validating-webhook-configuration",
-		},
-		Webhooks: []v1.ValidatingWebhook{
-			{
-				Name:                    "validate-clusterpodplacementconfig.multiarch.openshift.io",
-				AdmissionReviewVersions: []string{"v1"},
-				ClientConfig: v1.WebhookClientConfig{
-					Service: &v1.ServiceReference{
-						Name:      "webhook-service",
-						Namespace: "system",
-						Path:      utils.NewPtr("/validate-multiarch-openshift-io-v1beta1-clusterpodplacementconfig"),
-					},
-				},
-				FailurePolicy: utils.NewPtr(v1.Fail),
-				SideEffects:   utils.NewPtr(v1.SideEffectClassNone),
-				Rules: []v1.RuleWithOperations{
-					{
-						Operations: []v1.OperationType{
-							v1.Create,
-							v1.Update,
-							v1.Delete,
-						},
-						Rule: v1.Rule{
-							APIGroups:   []string{"multiarch.openshift.io"},
-							APIVersions: []string{"v1beta1"},
-							Resources:   []string{"clusterpodplacementconfigs"},
-						},
-					},
-				},
-			},
-			{
-				Name:                    "validate-podplacementconfig.multiarch.openshift.io",
-				AdmissionReviewVersions: []string{"v1"},
-				ClientConfig: v1.WebhookClientConfig{
-					Service: &v1.ServiceReference{
-						Name:      "webhook-service",
-						Namespace: "system",
-						Path:      utils.NewPtr("/validate-multiarch-openshift-io-v1beta1-podplacementconfig"),
-					},
-				},
-				FailurePolicy: utils.NewPtr(v1.Fail),
-				SideEffects:   utils.NewPtr(v1.SideEffectClassNone),
-				Rules: []v1.RuleWithOperations{
-					{
-						Operations: []v1.OperationType{
-							v1.Create,
-							v1.Update,
-							v1.Delete,
-						},
-						Rule: v1.Rule{
-							APIGroups:   []string{"multiarch.openshift.io"},
-							APIVersions: []string{"v1beta1"},
-							Resources:   []string{"podplacementconfigs"},
-						},
-					},
-				},
-			},
-		},
-	}
 }
 
 // getFirstFoundEnvTestBinaryDir returns the first envtest asset directory under bin/k8s.

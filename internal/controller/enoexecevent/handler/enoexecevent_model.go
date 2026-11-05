@@ -20,7 +20,8 @@ import (
 	"context"
 
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/client-go/tools/record"
+	clientgoevents "k8s.io/client-go/tools/events"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	multiarchv1beta1 "github.com/openshift/multiarch-tuning-operator/api/v1beta1"
 	"github.com/openshift/multiarch-tuning-operator/pkg/utils"
@@ -30,11 +31,11 @@ import (
 type ENoExecEvent struct {
 	multiarchv1beta1.ENoExecEvent
 	ctx      context.Context
-	recorder record.EventRecorder
+	recorder clientgoevents.EventRecorderLogger
 }
 
 // NewENoExecEvent creates a new ENoExecEvent wrapper
-func NewENoExecEvent(event *multiarchv1beta1.ENoExecEvent, ctx context.Context, recorder record.EventRecorder) *ENoExecEvent {
+func NewENoExecEvent(event *multiarchv1beta1.ENoExecEvent, ctx context.Context, recorder clientgoevents.EventRecorderLogger) *ENoExecEvent {
 	return &ENoExecEvent{
 		ENoExecEvent: *event,
 		ctx:          ctx,
@@ -48,7 +49,7 @@ func (e *ENoExecEvent) Ctx() context.Context {
 }
 
 // Recorder returns the EventRecorder associated with the ENoExecEvent
-func (e *ENoExecEvent) Recorder() record.EventRecorder {
+func (e *ENoExecEvent) Recorder() clientgoevents.EventRecorderLogger {
 	return e.recorder
 }
 
@@ -98,16 +99,16 @@ func (e *ENoExecEvent) HasErrorLabel() bool {
 }
 
 // PublishEvent publishes a Kubernetes event for the ENoExecEvent CR
-func (e *ENoExecEvent) PublishEvent(eventType, reason, message string) {
+func (e *ENoExecEvent) PublishEvent(eventType, reason, action, message string) {
 	if e.recorder != nil {
-		e.recorder.Event(&e.ENoExecEvent, eventType, reason, message)
+		e.recorder.WithLogger(log.FromContext(e.ctx)).Eventf(&e.ENoExecEvent, nil, eventType, reason, action, "%s", message)
 	}
 }
 
 // PublishEventOnPod publishes a Kubernetes event on the source pod referenced by this ENoExecEvent
 // This provides visibility of the reconciliation error in the pod's event log
-func (e *ENoExecEvent) PublishEventOnPod(pod *corev1.Pod, eventType, reason, message string) {
+func (e *ENoExecEvent) PublishEventOnPod(pod *corev1.Pod, eventType, reason, action, message string) {
 	if e.recorder != nil && pod != nil {
-		e.recorder.Event(pod, eventType, reason, message)
+		e.recorder.WithLogger(log.FromContext(e.ctx)).Eventf(pod, nil, eventType, reason, action, "%s", message)
 	}
 }

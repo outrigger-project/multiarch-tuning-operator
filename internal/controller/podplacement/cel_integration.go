@@ -51,7 +51,7 @@ func (r *PodReconciler) applyCELArchitecturePlacement(ctx context.Context, ppc m
 	result, err := evaluateCELArchitecturePlacement(celPlugin.Rules, celPlugin.FallbackArchitectures, pod.PodObject())
 	if err != nil {
 		log.Error(err, "Failed to evaluate CEL rules", "PodPlacementConfig", ppc.Name, "pod", pod.Name)
-		pod.PublishEvent(corev1.EventTypeWarning, "CELEvaluationError", fmt.Sprintf("Failed to evaluate CEL rules: %v", err))
+		pod.PublishEvent(corev1.EventTypeWarning, "CELEvaluationError", utils.EventActionCELEvaluation, fmt.Sprintf("Failed to evaluate CEL rules: %v", err))
 		return false
 	}
 
@@ -104,10 +104,10 @@ func (r *PodReconciler) applyCELArchitecturePlacement(ctx context.Context, ppc m
 	// Publish event
 	configSource := fmt.Sprintf("%s-%s", multiarchv1beta1.PodPlacementConfigKind, ppc.Name)
 	if result.matched {
-		pod.PublishEvent(corev1.EventTypeNormal, "CELArchitecturePlacementApplied",
+		pod.PublishEvent(corev1.EventTypeNormal, "CELArchitecturePlacementApplied", utils.EventActionNodeAffinityUpdate,
 			fmt.Sprintf("Applied CEL rule '%s' from %s, architectures: %v", result.ruleName, configSource, result.architectures))
 	} else {
-		pod.PublishEvent(corev1.EventTypeNormal, "CELArchitecturePlacementFallback",
+		pod.PublishEvent(corev1.EventTypeNormal, "CELArchitecturePlacementFallback", utils.EventActionNodeAffinityUpdate,
 			fmt.Sprintf("No CEL rules matched, using fallback architectures from %s: %v", configSource, result.architectures))
 	}
 

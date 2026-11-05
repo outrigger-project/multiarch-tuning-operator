@@ -28,7 +28,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/tools/record"
+	clientgoevents "k8s.io/client-go/tools/events"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	ctrl2 "sigs.k8s.io/controller-runtime/pkg/controller"
@@ -49,7 +49,7 @@ type PodReconciler struct {
 	APIReader client.Reader
 	Scheme    *runtime.Scheme
 	ClientSet *kubernetes.Clientset
-	Recorder  record.EventRecorder
+	Recorder  clientgoevents.EventRecorderLogger
 }
 
 // Note: The operand (pod-placement-controller) RBAC is defined programmatically in
@@ -106,7 +106,7 @@ func (r *PodReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 		log.Error(err, "Unable to update the pod",
 			"pod", pod.Name,
 			"namespace", pod.Namespace)
-		pod.PublishEvent(corev1.EventTypeWarning, ArchitectureAwareSchedulingGateRemovalFailure, SchedulingGateRemovalFailureMsg)
+		pod.PublishEvent(corev1.EventTypeWarning, ArchitectureAwareSchedulingGateRemovalFailure, utils.EventActionSchedulingGateRemove, SchedulingGateRemovalFailureMsg)
 		return ctrl.Result{}, err
 	}
 
@@ -115,7 +115,7 @@ func (r *PodReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 		"namespace", pod.Namespace)
 	if !pod.HasSchedulingGate() {
 		// Only publish the event if the scheduling gate has been removed and the pod has been updated successfully.
-		pod.PublishEvent(corev1.EventTypeNormal, ArchitectureAwareSchedulingGateRemovalSuccess, SchedulingGateRemovalSuccessMsg)
+		pod.PublishEvent(corev1.EventTypeNormal, ArchitectureAwareSchedulingGateRemovalSuccess, utils.EventActionSchedulingGateRemove, SchedulingGateRemovalSuccessMsg)
 		metrics.GatedPodsGauge.Dec()
 	}
 	return ctrl.Result{}, nil
@@ -157,7 +157,7 @@ func (r *PodReconciler) processPod(ctx context.Context, pod *Pod) {
 		// In both cases, we should just remove the scheduling gate.
 		log.V(1).Info("Removing the scheduling gate from pod.")
 		pod.RemoveSchedulingGate()
-		pod.PublishEvent(corev1.EventTypeWarning, ArchitectureAwareGatedPodIgnored, ArchitectureAwareGatedPodIgnoredMsg)
+		pod.PublishEvent(corev1.EventTypeWarning, ArchitectureAwareGatedPodIgnored, utils.EventActionSchedulingGateRemove, ArchitectureAwareGatedPodIgnoredMsg)
 		return
 	}
 
@@ -185,7 +185,7 @@ func (r *PodReconciler) processPod(ctx context.Context, pod *Pod) {
 	if celApplied {
 		// If no preferred node affinity was set by any config, log and publish an event
 		if pod.Labels[utils.PreferredNodeAffinityLabel] == utils.LabelValueNotSet {
-			pod.PublishEvent(corev1.EventTypeNormal, ArchitectureAwareNodeAffinitySet,
+			pod.PublishEvent(corev1.EventTypeNormal, ArchitectureAwareNodeAffinitySet, utils.EventActionNodeAffinitySkip,
 				ArchitecturePreferredPredicateSkippedMsg)
 			log.V(2).Info("No preferred node affinity was set")
 		}
@@ -212,7 +212,7 @@ func (r *PodReconciler) processPod(ctx context.Context, pod *Pod) {
 		// the counter is equal to the maxRetries value and the pod should not be processed again.
 		// Publish this event and remove the scheduling gate.
 		log.Info("Max retries Reached. The pod will not have the nodeAffinity set.")
-		pod.PublishEvent(corev1.EventTypeWarning, ImageArchitectureInspectionError, fmt.Sprintf("%s: %s", ImageInspectionErrorMaxRetriesMsg, err.Error()))
+		pod.PublishEvent(corev1.EventTypeWarning, ImageArchitectureInspectionError, utils.EventActionImageInspectionFailed, fmt.Sprintf("%s: %s", ImageInspectionErrorMaxRetriesMsg, err.Error()))
 
 		if cppc != nil && cppc.Spec.FallbackArchitecture != "" {
 			log.Info("Setting the nodeAffinity to the fallback architecture", "fallbackArchitecture", cppc.Spec.FallbackArchitecture)
@@ -223,7 +223,7 @@ func (r *PodReconciler) processPod(ctx context.Context, pod *Pod) {
 	if err == nil || pod.maxRetries() {
 		// If no preferred node affinity was set by any config, log and publish an event
 		if pod.Labels[utils.PreferredNodeAffinityLabel] == utils.LabelValueNotSet {
-			pod.PublishEvent(corev1.EventTypeNormal, ArchitectureAwareNodeAffinitySet,
+			pod.PublishEvent(corev1.EventTypeNormal, ArchitectureAwareNodeAffinitySet, utils.EventActionNodeAffinitySkip,
 				ArchitecturePreferredPredicateSkippedMsg)
 			log.V(2).Info("No preferred node affinity was set")
 		}

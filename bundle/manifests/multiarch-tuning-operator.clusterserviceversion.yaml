@@ -303,6 +303,14 @@ spec:
           verbs:
           - get
         - apiGroups:
+          - events.k8s.io
+          resources:
+          - events
+          verbs:
+          - create
+          - patch
+          - update
+        - apiGroups:
           - monitoring.coreos.com
           resources:
           - prometheusrules
@@ -604,6 +612,25 @@ spec:
     targetPort: 9443
     type: ConversionWebhook
     webhookPath: /convert
+  - admissionReviewVersions:
+    - v1
+    containerPort: 443
+    deploymentName: multiarch-tuning-operator-controller-manager
+    failurePolicy: Fail
+    generateName: mutate-clusterpodplacementconfig.multiarch.openshift.io
+    rules:
+    - apiGroups:
+      - multiarch.openshift.io
+      apiVersions:
+      - v1beta1
+      operations:
+      - CREATE
+      resources:
+      - clusterpodplacementconfigs
+    sideEffects: None
+    targetPort: 9443
+    type: MutatingAdmissionWebhook
+    webhookPath: /mutate-multiarch-openshift-io-v1beta1-clusterpodplacementconfig
   - admissionReviewVersions:
     - v1
     containerPort: 443

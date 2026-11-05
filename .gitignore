@@ -33,6 +33,7 @@ go.work
 # Kubernetes Generated files - skip generated files, except for vendored files
 
 !vendor/**/zz_generated.*
+!vendor/**/AGENTS.md
 
 # editor and IDE paraphernalia
 .idea
@@ -217,4 +218,3 @@ Sessionx.vim
 tags
 # Persistent undo
 [._]*.un~
-

@@ -6,6 +6,19 @@ patches:
   - target:
       group: "admissionregistration.k8s.io"
       version: v1
+      kind: MutatingWebhookConfiguration
+      name: mutating-webhook-configuration
+    patch: |-
+      - op: replace
+        path: /webhooks/0/clientConfig/service/name
+        value: controller-manager-service
+      - op: add
+        path: /metadata/annotations
+        value:
+          "service.beta.openshift.io/inject-cabundle": "true"
+  - target:
+      group: "admissionregistration.k8s.io"
+      version: v1
       kind: ValidatingWebhookConfiguration
       name: validating-webhook-configuration
     patch: |-
@@ -19,4 +32,3 @@ patches:
         path: /metadata/annotations
         value:
           "service.beta.openshift.io/inject-cabundle": "true"
-

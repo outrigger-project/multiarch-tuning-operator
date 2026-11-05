@@ -122,6 +122,14 @@ rules:
   verbs:
   - get
 - apiGroups:
+  - events.k8s.io
+  resources:
+  - events
+  verbs:
+  - create
+  - patch
+  - update
+- apiGroups:
   - monitoring.coreos.com
   resources:
   - prometheusrules
