@@ -17,14 +17,25 @@ limitations under the License.
 package podplacement
 
 import (
+	"context"
+
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/client-go/kubernetes/scheme"
+	clientgoevents "k8s.io/client-go/tools/events"
 
 	"github.com/openshift/multiarch-tuning-operator/pkg/testing/framework"
 	"github.com/openshift/multiarch-tuning-operator/pkg/utils"
 )
+
+func newNativeRecorder() clientgoevents.EventRecorderLogger {
+	recorder, _, cleanup, err := framework.NewTestEventRecorder(context.Background(), scheme.Scheme, utils.OperatorName)
+	Expect(err).NotTo(HaveOccurred())
+	DeferCleanup(cleanup)
+	return recorder
+}
 
 // newEphemeralTestNamespace creates a uniquely-named Namespace suitable for a
 // single Ginkgo It block, registers its deletion with DeferCleanup, and returns

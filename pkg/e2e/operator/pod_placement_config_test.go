@@ -13,9 +13,9 @@ import (
 	"github.com/openshift/multiarch-tuning-operator/api/v1beta1"
 	"github.com/openshift/multiarch-tuning-operator/internal/controller/podplacement"
 	corev1 "k8s.io/api/core/v1"
+	eventsv1 "k8s.io/api/events/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/fields"
 	runtimeclient "sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/openshift/multiarch-tuning-operator/pkg/e2e"
@@ -893,21 +893,32 @@ var _ = Describe("The Multiarch Tuning Operator", Serial, func() {
 				By("Verify ExecFormatError events are being generated")
 				Eventually(func(g Gomega) {
 					// List all ExecFormatError events in the namespace
-					events := &corev1.EventList{}
+					events := &eventsv1.EventList{}
 					err := client.List(ctx, events, &runtimeclient.ListOptions{
 						Namespace: ns.Name,
-						FieldSelector: fields.AndSelectors(
-							fields.OneTermEqualSelector("involvedObject.kind", "Pod"),
-							fields.OneTermEqualSelector("reason", "ExecFormatError"),
-						),
 					})
 					g.Expect(err).NotTo(HaveOccurred(), "failed to list ExecFormatError events")
+					matching := 0
+					for _, event := range events.Items {
+						if event.Regarding.Kind == "Pod" && event.Regarding.Namespace == ns.Name && event.Reason == "ExecFormatError" &&
+							event.Type == corev1.EventTypeWarning && event.Action == "ExecFormatErrorReport" && event.ReportingController == utils.EnoexecControllerName {
+							matching++
+						}
+					}
 					// Verify that ExecFormatError events are being published
 					// We expect at least 1 event to confirm the feature is working
 					// Note: Not all pods may receive events due to pod rescheduling race conditions
 					// where ENoExecEvents are created for old node assignments
-					g.Expect(len(events.Items)).Should(BeNumerically(">=", 1),
-						"expected at least 1 ExecFormatError event to verify the feature is working, found %d", len(events.Items))
+					g.Expect(matching).Should(BeNumerically(">=", 1),
+						"expected at least 1 ExecFormatError event to verify the feature is working, found %d", matching)
+
+					By("Verify the runbook's core/v1 event field selectors")
+					coreEvents := &corev1.EventList{}
+					g.Expect(client.List(ctx, coreEvents, runtimeclient.InNamespace(ns.Name), runtimeclient.MatchingFields{
+						"reportingComponent": utils.EnoexecControllerName,
+						"reason":             "ExecFormatError",
+					})).To(Succeed())
+					g.Expect(coreEvents.Items).NotTo(BeEmpty(), "runbook selectors must find native ENoExec events through core/v1")
 				}, e2e.WaitMedium).Should(Succeed())
 				By("Deleting the deployment to avoid new pods being recreated")
 				err = client.Delete(ctx, d)

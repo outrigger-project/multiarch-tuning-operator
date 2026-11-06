@@ -69,6 +69,7 @@ import (
 	"github.com/openshift/multiarch-tuning-operator/internal/controller/operator"
 	"github.com/openshift/multiarch-tuning-operator/internal/controller/podplacement"
 	"github.com/openshift/multiarch-tuning-operator/internal/controller/podplacementconfig"
+	operandevents "github.com/openshift/multiarch-tuning-operator/pkg/events"
 	"github.com/openshift/multiarch-tuning-operator/pkg/informers/clusterpodplacementconfig"
 	"github.com/openshift/multiarch-tuning-operator/pkg/utils"
 )
@@ -96,7 +97,6 @@ var (
 	enableCPPCInformer bool
 	enableOperator     bool
 	initialLogLevel    int
-	postFuncs          []func()
 )
 
 func init() {
@@ -191,24 +191,41 @@ func main() {
 		RunOperator(mgr)
 		RunPodPlacementConfigWebHook(mgr)
 	}
+	var operandSetup func(context.Context, ctrl.Manager) ([]func(), error)
 	if enableClusterPodPlacementConfigOperandControllers {
-		RunClusterPodPlacementConfigOperandControllers(mgr)
+		operandSetup = RunClusterPodPlacementConfigOperandControllers
 	}
 	if enableClusterPodPlacementConfigOperandWebHook {
-		RunClusterPodPlacementConfigOperandWebHook(mgr)
+		operandSetup = RunClusterPodPlacementConfigOperandWebHook
 	}
 	if enableENoExecEventControllers {
-		RunENoExecEventControllers(mgr)
+		operandSetup = RunENoExecEventControllers
 	}
 
 	setupLog.Info("starting manager")
-	must(mgr.Start(ctrl.SetupSignalHandler()), "unable to start the manager")
-	setupLog.Info("the manager has stopped")
-	setupLog.Info("running post functions")
-	for _, f := range postFuncs {
-		f()
+	ctx := ctrl.SetupSignalHandler()
+	if operandSetup != nil {
+		must(runOperand(ctx, mgr, operandSetup), "unable to run the operand")
+	} else {
+		must(mgr.Start(ctx), "unable to start the manager")
 	}
 	setupLog.Info("exiting")
+}
+
+func runOperand(ctx context.Context, mgr ctrl.Manager, setup func(context.Context, ctrl.Manager) ([]func(), error)) error {
+	// Recording outlives manager cancellation so delayed producers can drain.
+	recordingCtx, cancel := context.WithCancel(ctrllog.IntoContext(context.Background(), mgr.GetLogger()))
+	defer cancel()
+	postFuncs, err := setup(recordingCtx, mgr)
+	defer func() {
+		for _, cleanup := range postFuncs {
+			cleanup()
+		}
+	}()
+	if err != nil {
+		return err
+	}
+	return mgr.Start(ctx)
 }
 
 func RunOperator(mgr ctrl.Manager) {
@@ -241,36 +258,43 @@ func RunOperator(mgr ctrl.Manager) {
 		controllerKey, "ClusterPodPlacementConfigConversionWebhook")
 }
 
-func RunClusterPodPlacementConfigOperandControllers(mgr ctrl.Manager) {
-	config := ctrl.GetConfigOrDie()
-	clientset := kubernetes.NewForConfigOrDie(config)
-
-	must((&podplacement.PodReconciler{
+func RunClusterPodPlacementConfigOperandControllers(ctx context.Context, mgr ctrl.Manager) ([]func(), error) {
+	clientset, err := kubernetes.NewForConfig(mgr.GetConfig())
+	if err != nil {
+		return nil, err
+	}
+	recorder, cleanup, err := operandevents.NewRecorder(ctx, clientset, mgr.GetScheme(), utils.OperatorName)
+	if err != nil {
+		return nil, err
+	}
+	postFuncs := []func(){cleanup}
+	err = (&podplacement.PodReconciler{
 		Client:    mgr.GetClient(),
 		APIReader: mgr.GetAPIReader(),
 		Scheme:    mgr.GetScheme(),
 		ClientSet: clientset,
-		Recorder:  mgr.GetEventRecorderFor(utils.OperatorName), //nolint:staticcheck // MULTIARCH-6087: will be fixed with events API migration
-	}).SetupWithManager(mgr),
-		unableToCreateController, controllerKey, "PodReconciler")
-
-	must(mgr.Add(podplacement.NewGlobalPullSecretSyncer(clientset, globalPullSecretNamespace, globalPullSecretName)),
-		unableToAddRunnable, runnableKey, "GlobalPullSecretSyncer")
+		Recorder:  recorder,
+	}).SetupWithManager(mgr)
+	if err != nil {
+		return postFuncs, err
+	}
+	return postFuncs, mgr.Add(podplacement.NewGlobalPullSecretSyncer(clientset, globalPullSecretNamespace, globalPullSecretName))
 }
 
-func RunClusterPodPlacementConfigOperandWebHook(mgr ctrl.Manager) {
-	config := ctrl.GetConfigOrDie()
-	clientset := kubernetes.NewForConfigOrDie(config)
+func RunClusterPodPlacementConfigOperandWebHook(ctx context.Context, mgr ctrl.Manager) ([]func(), error) {
+	clientset, err := kubernetes.NewForConfig(mgr.GetConfig())
+	if err != nil {
+		return nil, err
+	}
+	recorder, cleanup, err := operandevents.NewRecorder(ctx, clientset, mgr.GetScheme(), utils.OperatorName)
+	if err != nil {
+		return nil, err
+	}
 	pool, err := ants.NewMultiPool(16, 16, ants.LeastTasks,
 		ants.WithPreAlloc(true))
-	must(err, "unable to create multi pool for the webhook's event messages")
-	postFuncs = append(postFuncs, func() {
-		err = pool.ReleaseTimeout(30 * time.Second)
-		if err != nil {
-			setupLog.Error(err, "failed to release the worker pool")
-		}
-		ants.Release()
-	})
+	if err != nil {
+		return []func(){cleanup}, err
+	}
 
 	// ppcCacheSynced returns true once the PodPlacementConfig informer cache has
 	// completed its initial list/sync.
@@ -310,9 +334,14 @@ func RunClusterPodPlacementConfigOperandWebHook(mgr ctrl.Manager) {
 		return informer.HasSynced()
 	}
 
-	handler := podplacement.NewPodSchedulingGateMutatingWebHook(mgr.GetClient(), mgr.GetAPIReader(), ppcCacheSynced, clientset, mgr.GetScheme(),
-		mgr.GetEventRecorderFor(utils.OperatorName), pool) //nolint:staticcheck // MULTIARCH-6087: will be fixed with events API migration
+	handler := podplacement.NewPodSchedulingGateMutatingWebHook(ctx, mgr.GetClient(), mgr.GetAPIReader(), ppcCacheSynced, clientset, mgr.GetScheme(),
+		recorder, pool)
 	mgr.GetWebhookServer().Register("/add-pod-scheduling-gate", &webhook.Admission{Handler: handler})
+	return []func(){func() {
+		if err := handler.ShutdownEventJobs(30 * time.Second); err != nil {
+			setupLog.Error(err, "timed out draining webhook event jobs; outstanding jobs were canceled and joined")
+		}
+	}, cleanup}, nil
 }
 
 func RunPodPlacementConfigWebHook(mgr ctrl.Manager) {
@@ -320,15 +349,22 @@ func RunPodPlacementConfigWebHook(mgr ctrl.Manager) {
 		&webhook.Admission{Handler: podplacementconfig.NewPodPlacementConfigWebhook(mgr.GetAPIReader(), mgr.GetScheme())})
 }
 
-func RunENoExecEventControllers(mgr ctrl.Manager) {
-	config := ctrl.GetConfigOrDie()
-	clientset := kubernetes.NewForConfigOrDie(config)
-	must(enoexeceventhandler.NewReconciler(
+func RunENoExecEventControllers(ctx context.Context, mgr ctrl.Manager) ([]func(), error) {
+	clientset, err := kubernetes.NewForConfig(mgr.GetConfig())
+	if err != nil {
+		return nil, err
+	}
+	recorder, cleanup, err := operandevents.NewRecorder(ctx, clientset, mgr.GetScheme(), utils.EnoexecControllerName)
+	if err != nil {
+		return nil, err
+	}
+	err = enoexeceventhandler.NewReconciler(
 		mgr.GetClient(),
 		clientset,
 		mgr.GetScheme(),
-		mgr.GetEventRecorderFor(utils.EnoexecControllerName), //nolint:staticcheck // MULTIARCH-6087: will be fixed with events API migration
-	).SetupWithManager(mgr), unableToCreateController, controllerKey, "ENoExecEventController")
+		recorder,
+	).SetupWithManager(mgr)
+	return []func(){cleanup}, err
 }
 
 func validateFlags() error {

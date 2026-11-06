@@ -3,19 +3,21 @@ package framework
 import (
 	"context"
 
-	corev1 "k8s.io/api/core/v1"
+	eventsv1 "k8s.io/api/events/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 )
 
-func GetEventsForObject(ctx context.Context, client *kubernetes.Clientset, objectName string, objectNamespace string) ([]corev1.Event, error) {
-	var events *corev1.EventList
-	var err error
-
-	if events, err = client.CoreV1().Events(objectNamespace).List(ctx, metav1.ListOptions{
-		FieldSelector: "involvedObject.name=" + objectName,
-	}); err == nil {
-		return events.Items, nil
+func GetEventsForObject(ctx context.Context, client kubernetes.Interface, objectName string, objectNamespace string) ([]eventsv1.Event, error) {
+	events, err := client.EventsV1().Events(objectNamespace).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return nil, err
 	}
-	return nil, err
+	var matching []eventsv1.Event
+	for _, event := range events.Items {
+		if event.Regarding.Name == objectName && event.Regarding.Namespace == objectNamespace {
+			matching = append(matching, event)
+		}
+	}
+	return matching, nil
 }

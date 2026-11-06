@@ -37,6 +37,7 @@ import (
 	"fmt"
 	"slices"
 	"sync"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -47,7 +48,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
-	"k8s.io/client-go/tools/record"
+	clientgoevents "k8s.io/client-go/tools/events"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
@@ -88,7 +89,9 @@ func newHandleWebhook() *PodSchedulingGateMutatingWebHook {
 	// clientSet nil is safe: delayedSchedulingGatedEvent skips the goroutine when
 	// clientSet is nil (informational-only path, not required for admission logic).
 	// apiReader nil is safe: the webhook falls back to the informer-backed client only when apiReader != nil.
-	return NewPodSchedulingGateMutatingWebHook(fakeClient, nil, nil, nil, s, record.NewFakeRecorder(32), pool)
+	wh := NewPodSchedulingGateMutatingWebHook(context.Background(), fakeClient, nil, nil, nil, s, newNativeRecorder(), pool)
+	DeferCleanup(func() { Expect(wh.ShutdownEventJobs(time.Second)).To(Succeed()) })
+	return wh
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -340,7 +343,7 @@ var _ = Describe("CEL Webhook", func() {
 		// TestHandleAdmission_CELAppliedViaApplyCELInWebhook
 		It("should apply CEL architecture constraints and add the scheduling gate in the correct order", func() {
 			ctx := context.Background()
-			recorder := record.NewFakeRecorder(8)
+			recorder := newNativeRecorder()
 
 			raw := NewPod().WithName("my-pod").WithNamespace("test-wh").WithLabels("app", "myapp").WithContainersImages("nginx:latest").Build()
 			pod := newPod(raw, ctx, recorder)
@@ -391,7 +394,8 @@ var _ = Describe("CEL Webhook", func() {
 			}
 
 			cacheSynced := func() bool { return true }
-			wh := NewPodSchedulingGateMutatingWebHook(fakeClient, &mockAPIReader, cacheSynced, nil, s, record.NewFakeRecorder(32), pool)
+			wh := NewPodSchedulingGateMutatingWebHook(context.Background(), fakeClient, &mockAPIReader, cacheSynced, nil, s, newNativeRecorder(), pool)
+			DeferCleanup(func() { Expect(wh.ShutdownEventJobs(time.Second)).To(Succeed()) })
 
 			pod := NewPod().WithName("plain-pod").WithNamespace("test-wh").WithContainersImages("nginx:latest").Build()
 			_ = wh.Handle(context.Background(), buildHandleRequest(pod))
@@ -418,7 +422,8 @@ var _ = Describe("CEL Webhook", func() {
 			}
 
 			cacheSynced := func() bool { return false }
-			wh := NewPodSchedulingGateMutatingWebHook(fakeClient, &mockAPIReader, cacheSynced, nil, s, record.NewFakeRecorder(32), pool)
+			wh := NewPodSchedulingGateMutatingWebHook(context.Background(), fakeClient, &mockAPIReader, cacheSynced, nil, s, newNativeRecorder(), pool)
+			DeferCleanup(func() { Expect(wh.ShutdownEventJobs(time.Second)).To(Succeed()) })
 
 			pod := NewPod().WithName("plain-pod").WithNamespace("test-wh").WithContainersImages("nginx:latest").Build()
 			_ = wh.Handle(context.Background(), buildHandleRequest(pod))
@@ -444,7 +449,8 @@ var _ = Describe("CEL Webhook", func() {
 				return nil
 			}
 
-			wh := NewPodSchedulingGateMutatingWebHook(fakeClient, &mockAPIReader, nil, nil, s, record.NewFakeRecorder(32), pool)
+			wh := NewPodSchedulingGateMutatingWebHook(context.Background(), fakeClient, &mockAPIReader, nil, nil, s, newNativeRecorder(), pool)
+			DeferCleanup(func() { Expect(wh.ShutdownEventJobs(time.Second)).To(Succeed()) })
 
 			pod := NewPod().WithName("plain-pod").WithNamespace("test-wh").WithContainersImages("nginx:latest").Build()
 			_ = wh.Handle(context.Background(), buildHandleRequest(pod))
@@ -468,12 +474,12 @@ var _ = Describe("CEL Webhook", func() {
 		Describe("applies architecture constraints from the matching PPC", func() {
 			var (
 				ctx      context.Context
-				recorder *record.FakeRecorder
+				recorder clientgoevents.EventRecorderLogger
 			)
 
 			BeforeEach(func() {
 				ctx = context.Background()
-				recorder = record.NewFakeRecorder(10)
+				recorder = newNativeRecorder()
 			})
 
 			DescribeTable("should apply (or skip) architectures based on PPC configuration",
@@ -551,7 +557,7 @@ var _ = Describe("CEL Webhook", func() {
 		// TestApplyCELInWebhook_MalformedPPCDoesNotBlockLowerPriority
 		It("should not block lower-priority PPCs when the higher-priority PPC has malformed CEL", func() {
 			ctx := context.Background()
-			recorder := record.NewFakeRecorder(10)
+			recorder := newNativeRecorder()
 
 			pod := NewPod().WithName("test-pod").WithNamespace("default").Build()
 			matchingPPCs := []v1beta1.PodPlacementConfig{
@@ -588,7 +594,7 @@ var _ = Describe("CEL Webhook", func() {
 		// TestApplyCELInWebhook_RespectsPPCPriority
 		It("should sort PPCs by priority and apply only the highest-priority matching PPC", func() {
 			ctx := context.Background()
-			recorder := record.NewFakeRecorder(10)
+			recorder := newNativeRecorder()
 
 			pod := NewPod().WithName("test-pod").WithNamespace("default").Build()
 			matchingPPCs := []v1beta1.PodPlacementConfig{
@@ -624,7 +630,7 @@ var _ = Describe("CEL Webhook", func() {
 		// TestApplyCELInWebhook_RemovesNodeSelectorArchBeforeAdmission
 		It("should remove kubernetes.io/arch from nodeSelector and set NodeAffinity before admission", func() {
 			ctx := context.Background()
-			recorder := record.NewFakeRecorder(10)
+			recorder := newNativeRecorder()
 
 			pod := NewPod().WithName("test-pod-with-nodeselector").WithNamespace("default").
 				WithNodeSelectors(utils.ArchLabel, "amd64", "other-key", "other-value").Build()
@@ -664,7 +670,7 @@ var _ = Describe("CEL Webhook", func() {
 		// TestApplyCELInWebhook_ControllerIdempotencyAfterWebhookMutation
 		It("should not change NodeSelectorTerms count when re-applying the same constraints (KEP-3838 idempotency)", func() {
 			ctx := context.Background()
-			recorder := record.NewFakeRecorder(10)
+			recorder := newNativeRecorder()
 
 			pod := NewPod().WithName("post-webhook-pod").WithNamespace("default").
 				WithNodeSelectorTermsMatchExpressions(
@@ -722,7 +728,7 @@ var _ = Describe("CEL Webhook", func() {
 		// KEP-3838 immutability requirement).
 		It("should preserve both NodeSelectorTerms when one term is arch-only (KEP-3838 webhook regression)", func() {
 			ctx := context.Background()
-			recorder := record.NewFakeRecorder(10)
+			recorder := newNativeRecorder()
 
 			// Pod with 2 terms: Term 1 = arch-only, Term 2 = zone-only.
 			// This mirrors the exact scenario from the failing integration test.
@@ -780,7 +786,7 @@ var _ = Describe("CEL Webhook", func() {
 
 		It("should match pods by generateName in CEL expressions", func() {
 			ctx := context.Background()
-			recorder := record.NewFakeRecorder(8)
+			recorder := newNativeRecorder()
 
 			pod := NewPod().WithGenerateName("myapp-").WithNamespace("default").Build()
 			ppcs := []v1beta1.PodPlacementConfig{
@@ -809,7 +815,7 @@ var _ = Describe("CEL Webhook", func() {
 
 		It("should not modify pod affinity or nodeSelector when the CEL plugin is disabled (Enabled: false)", func() {
 			ctx := context.Background()
-			recorder := record.NewFakeRecorder(8)
+			recorder := newNativeRecorder()
 
 			original := NewPod().
 				WithName("test-pod").
@@ -843,7 +849,7 @@ var _ = Describe("CEL Webhook", func() {
 
 		It("should not touch existing pod affinity when the CEL plugin is disabled", func() {
 			ctx := context.Background()
-			recorder := record.NewFakeRecorder(8)
+			recorder := newNativeRecorder()
 
 			existingTerm := corev1.NodeSelectorTerm{
 				MatchExpressions: []corev1.NodeSelectorRequirement{
@@ -888,7 +894,7 @@ var _ = Describe("CEL Webhook", func() {
 
 		It("should not add a duplicate scheduling gate when it is already present", func() {
 			ctx := context.Background()
-			recorder := record.NewFakeRecorder(8)
+			recorder := newNativeRecorder()
 
 			raw := NewPod().
 				WithName("pre-gated").
@@ -911,7 +917,7 @@ var _ = Describe("CEL Webhook", func() {
 
 		It("should add the scheduling gate when the pod does not have it", func() {
 			ctx := context.Background()
-			recorder := record.NewFakeRecorder(8)
+			recorder := newNativeRecorder()
 
 			raw := NewPod().
 				WithName("ungated").
@@ -933,7 +939,7 @@ var _ = Describe("CEL Webhook", func() {
 
 		It("should preserve pre-existing gates from other controllers when adding the MTO gate", func() {
 			ctx := context.Background()
-			recorder := record.NewFakeRecorder(8)
+			recorder := newNativeRecorder()
 
 			raw := NewPod().
 				WithName("multi-gated").
@@ -964,7 +970,7 @@ var _ = Describe("CEL Webhook", func() {
 
 		It("should still add the scheduling gate even when the CEL plugin is disabled", func() {
 			ctx := context.Background()
-			recorder := record.NewFakeRecorder(8)
+			recorder := newNativeRecorder()
 
 			raw := NewPod().
 				WithName("disabled-gate-test").
@@ -1032,7 +1038,7 @@ var _ = Describe("CEL Webhook", func() {
 					// Each admission needs its own backing array, as in Handle().
 					localPPCs := slices.Clone(ppcs)
 					<-start
-					recorder := record.NewFakeRecorder(8)
+					recorder := newNativeRecorder()
 					pod := NewPod().
 						WithName(fmt.Sprintf("concurrent-pod-%d", idx)).
 						WithNamespace("default").Build()
@@ -1052,7 +1058,7 @@ var _ = Describe("CEL Webhook", func() {
 	Context("Equal Priority PPCs", func() {
 		It("should apply one of the equal-priority PPCs without panicking", func() {
 			ctx := context.Background()
-			recorder := record.NewFakeRecorder(8)
+			recorder := newNativeRecorder()
 
 			pod := NewPod().WithName("equal-prio-pod").WithNamespace("default").Build()
 
