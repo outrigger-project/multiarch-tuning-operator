@@ -327,10 +327,10 @@ func (a *PodSchedulingGateMutatingWebHook) applyCELInWebhook(ctx context.Context
 // ppcCacheSynced should return true once the PodPlacementConfig informer cache
 // has completed its initial sync; pass nil to always allow the apiReader fallback
 // (safe for unit tests that do not wire an informer).
-func NewPodSchedulingGateMutatingWebHook(client client.Client, apiReader client.Reader, ppcCacheSynced func() bool,
+func NewPodSchedulingGateMutatingWebHook(ctx context.Context, client client.Client, apiReader client.Reader, ppcCacheSynced func() bool,
 	clientSet *kubernetes.Clientset, scheme *runtime.Scheme, recorder clientgoevents.EventRecorderLogger,
 	workerPool *ants.MultiPool) *PodSchedulingGateMutatingWebHook {
-	eventJobsCtx, cancelEventJobs := context.WithCancel(context.Background())
+	eventJobsCtx, cancelEventJobs := context.WithCancel(ctx)
 	a := &PodSchedulingGateMutatingWebHook{
 		client:          client,
 		apiReader:       apiReader,

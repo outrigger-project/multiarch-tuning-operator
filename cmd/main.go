@@ -334,14 +334,13 @@ func RunClusterPodPlacementConfigOperandWebHook(ctx context.Context, mgr ctrl.Ma
 		return informer.HasSynced()
 	}
 
-	handler := podplacement.NewPodSchedulingGateMutatingWebHook(mgr.GetClient(), mgr.GetAPIReader(), ppcCacheSynced, clientset, mgr.GetScheme(),
+	handler := podplacement.NewPodSchedulingGateMutatingWebHook(ctx, mgr.GetClient(), mgr.GetAPIReader(), ppcCacheSynced, clientset, mgr.GetScheme(),
 		recorder, pool)
 	mgr.GetWebhookServer().Register("/add-pod-scheduling-gate", &webhook.Admission{Handler: handler})
 	return []func(){func() {
 		if err := handler.ShutdownEventJobs(30 * time.Second); err != nil {
 			setupLog.Error(err, "timed out draining webhook event jobs; outstanding jobs were canceled and joined")
 		}
-		ants.Release()
 	}, cleanup}, nil
 }
 

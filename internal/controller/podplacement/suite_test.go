@@ -394,7 +394,7 @@ func runManager() {
 	pool, err := ants.NewMultiPool(10, 10, ants.LeastTasks, ants.WithPreAlloc(true),
 		ants.WithNonblocking(true))
 	Expect(err).NotTo(HaveOccurred())
-	eventWebhook = NewPodSchedulingGateMutatingWebHook(mgr.GetClient(), mgr.GetAPIReader(), nil, clientset, mgr.GetScheme(), recorder, pool)
+	eventWebhook = NewPodSchedulingGateMutatingWebHook(recordingCtx, mgr.GetClient(), mgr.GetAPIReader(), nil, clientset, mgr.GetScheme(), recorder, pool)
 	mgr.GetWebhookServer().Register("/add-pod-scheduling-gate", &webhook.Admission{Handler: eventWebhook})
 
 	policyConfig := []byte(`{"default":[{"type":"insecureAcceptAnything"}],"transports":{"atomic":{},"docker":{},"docker-daemon":{"":[{"type":"insecureAcceptAnything"}]}}}`)

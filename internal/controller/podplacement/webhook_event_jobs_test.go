@@ -25,6 +25,11 @@ import (
 
 func eventJobWebhook(t *testing.T, handler http.HandlerFunc) *PodSchedulingGateMutatingWebHook {
 	t.Helper()
+	return eventJobWebhookWithContext(t, t.Context(), handler)
+}
+
+func eventJobWebhookWithContext(t *testing.T, ctx context.Context, handler http.HandlerFunc) *PodSchedulingGateMutatingWebHook {
+	t.Helper()
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
 	clientset, err := kubernetes.NewForConfig(&rest.Config{Host: server.URL})
@@ -35,7 +40,7 @@ func eventJobWebhook(t *testing.T, handler http.HandlerFunc) *PodSchedulingGateM
 	if err != nil {
 		t.Fatal(err)
 	}
-	wh := NewPodSchedulingGateMutatingWebHook(nil, nil, nil, clientset, scheme.Scheme, nil, pool)
+	wh := NewPodSchedulingGateMutatingWebHook(ctx, nil, nil, nil, clientset, scheme.Scheme, nil, pool)
 	t.Cleanup(func() { _ = wh.ShutdownEventJobs(time.Second) })
 	return wh
 }
@@ -188,15 +193,17 @@ func TestWebhookEventJobsAdmissionShutdownRace(t *testing.T) {
 	}
 }
 
-func TestWebhookEventJobsShutdownIsIdempotent(t *testing.T) {
-	wh := eventJobWebhook(t, func(http.ResponseWriter, *http.Request) {})
-	var shutdowns sync.WaitGroup
-	for i := 0; i < 8; i++ {
-		shutdowns.Go(func() {
-			if err := wh.ShutdownEventJobs(time.Second); err != nil {
-				t.Error(err)
-			}
-		})
-	}
-	shutdowns.Wait()
+func TestWebhookEventJobsParentCancellationCancelsAPIRead(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	started, canceled := make(chan struct{}), make(chan struct{})
+	wh := eventJobWebhookWithContext(t, ctx, func(w http.ResponseWriter, r *http.Request) {
+		close(started)
+		<-r.Context().Done()
+		close(canceled)
+	})
+	wh.delayedSchedulingGatedEvent(t.Context(), eventJobPod())
+	awaitJobSignal(t, started)
+	cancel()
+	awaitJobSignal(t, canceled)
 }

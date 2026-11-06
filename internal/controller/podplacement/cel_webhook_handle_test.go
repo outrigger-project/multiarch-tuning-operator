@@ -89,7 +89,7 @@ func newHandleWebhook() *PodSchedulingGateMutatingWebHook {
 	// clientSet nil is safe: delayedSchedulingGatedEvent skips the goroutine when
 	// clientSet is nil (informational-only path, not required for admission logic).
 	// apiReader nil is safe: the webhook falls back to the informer-backed client only when apiReader != nil.
-	wh := NewPodSchedulingGateMutatingWebHook(fakeClient, nil, nil, nil, s, newNativeRecorder(), pool)
+	wh := NewPodSchedulingGateMutatingWebHook(context.Background(), fakeClient, nil, nil, nil, s, newNativeRecorder(), pool)
 	DeferCleanup(func() { Expect(wh.ShutdownEventJobs(time.Second)).To(Succeed()) })
 	return wh
 }
@@ -394,7 +394,7 @@ var _ = Describe("CEL Webhook", func() {
 			}
 
 			cacheSynced := func() bool { return true }
-			wh := NewPodSchedulingGateMutatingWebHook(fakeClient, &mockAPIReader, cacheSynced, nil, s, newNativeRecorder(), pool)
+			wh := NewPodSchedulingGateMutatingWebHook(context.Background(), fakeClient, &mockAPIReader, cacheSynced, nil, s, newNativeRecorder(), pool)
 			DeferCleanup(func() { Expect(wh.ShutdownEventJobs(time.Second)).To(Succeed()) })
 
 			pod := NewPod().WithName("plain-pod").WithNamespace("test-wh").WithContainersImages("nginx:latest").Build()
@@ -422,7 +422,7 @@ var _ = Describe("CEL Webhook", func() {
 			}
 
 			cacheSynced := func() bool { return false }
-			wh := NewPodSchedulingGateMutatingWebHook(fakeClient, &mockAPIReader, cacheSynced, nil, s, newNativeRecorder(), pool)
+			wh := NewPodSchedulingGateMutatingWebHook(context.Background(), fakeClient, &mockAPIReader, cacheSynced, nil, s, newNativeRecorder(), pool)
 			DeferCleanup(func() { Expect(wh.ShutdownEventJobs(time.Second)).To(Succeed()) })
 
 			pod := NewPod().WithName("plain-pod").WithNamespace("test-wh").WithContainersImages("nginx:latest").Build()
@@ -449,7 +449,7 @@ var _ = Describe("CEL Webhook", func() {
 				return nil
 			}
 
-			wh := NewPodSchedulingGateMutatingWebHook(fakeClient, &mockAPIReader, nil, nil, s, newNativeRecorder(), pool)
+			wh := NewPodSchedulingGateMutatingWebHook(context.Background(), fakeClient, &mockAPIReader, nil, nil, s, newNativeRecorder(), pool)
 			DeferCleanup(func() { Expect(wh.ShutdownEventJobs(time.Second)).To(Succeed()) })
 
 			pod := NewPod().WithName("plain-pod").WithNamespace("test-wh").WithContainersImages("nginx:latest").Build()
