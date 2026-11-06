@@ -911,6 +911,14 @@ var _ = Describe("The Multiarch Tuning Operator", Serial, func() {
 					// where ENoExecEvents are created for old node assignments
 					g.Expect(matching).Should(BeNumerically(">=", 1),
 						"expected at least 1 ExecFormatError event to verify the feature is working, found %d", matching)
+
+					By("Verify the runbook's core/v1 event field selectors")
+					coreEvents := &corev1.EventList{}
+					g.Expect(client.List(ctx, coreEvents, runtimeclient.InNamespace(ns.Name), runtimeclient.MatchingFields{
+						"reportingComponent": utils.EnoexecControllerName,
+						"reason":             "ExecFormatError",
+					})).To(Succeed())
+					g.Expect(coreEvents.Items).NotTo(BeEmpty(), "runbook selectors must find native ENoExec events through core/v1")
 				}, e2e.WaitMedium).Should(Succeed())
 				By("Deleting the deployment to avoid new pods being recreated")
 				err = client.Delete(ctx, d)

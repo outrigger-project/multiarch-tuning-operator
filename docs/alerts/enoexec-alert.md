@@ -20,7 +20,7 @@ Affected pods are trying to execute a binary that is not built for the host node
 1. **List recent events** reported by the Multiarch Tuning Operator:
    
 ```bash
-kubectl get events --field-selector involvedObject.kind=Pod,reportingController=multiarch-tuning-operator
+kubectl get events -A --field-selector reportingComponent=enoexec-event-handler-controller,reason=ExecFormatError
 ```
 
 2. **Inspect and check the logs of the affected pods**:
