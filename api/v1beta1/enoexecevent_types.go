@@ -30,7 +30,9 @@ type ENoExecEventStatus struct {
 	// For validating the fields of NodeName and PodName we mimic the functionality of IsDNS1123Subdomain (https://github.com/kubernetes/kubernetes/blob/5be5fd022920e0aa77e29792fffbb5f3690547b3/staging/src/k8s.io/apimachinery/pkg/util/validation/validation.go#L219)
 	// For validating the fields of PodNamespace we  mimic the functionality of IsDNS1123Label (https://github.com/kubernetes/kubernetes/blob/5be5fd022920e0aa77e29792fffbb5f3690547b3/staging/src/k8s.io/apimachinery/pkg/util/validation/validation.go#L188)
 
-	// NodeName must follow the RFC 1123 DNS subdomain format.
+	// NodeName identifies the node where the exec format error occurred.
+	// If omitted, the node has not been reported; no default is assigned.
+	// When provided, it must follow the RFC 1123 DNS subdomain format.
 	// - Max length: 253 characters
 	// - Consists of lowercase letters, digits, hyphens (`-`), and dots (`.`)
 	// - Must start and end with an alphanumeric character
@@ -40,7 +42,9 @@ type ENoExecEventStatus struct {
 	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$`
 	NodeName string `json:"nodeName,omitempty"`
 
-	// PodName must follow the RFC 1123 DNS subdomain format:
+	// PodName identifies the pod where the exec format error occurred.
+	// If omitted, the pod name has not been reported; no default is assigned.
+	// When provided, it must follow the RFC 1123 DNS subdomain format:
 	// - Max length: 253 characters
 	// - Characters: lowercase letters, digits, hyphens (`-`), and dots (`.`)
 	// - Must start and end with an alphanumeric character
@@ -50,7 +54,9 @@ type ENoExecEventStatus struct {
 	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$`
 	PodName string `json:"podName,omitempty"`
 
-	// PodNamespace must follow the RFC 1123 DNS label format.
+	// PodNamespace identifies the namespace of the pod where the exec format error occurred.
+	// If omitted, the pod namespace has not been reported; no default is assigned.
+	// When provided, it must follow the RFC 1123 DNS label format.
 	// - Max length: 63 characters
 	// - Characters: lowercase letters, digits, and hyphens ('-')
 	// - Must start and end with an alphanumeric character
@@ -60,7 +66,9 @@ type ENoExecEventStatus struct {
 	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
 	PodNamespace string `json:"podNamespace,omitempty"`
 
-	// ContainerID must be a runtime-prefixed 64-character hexadecimal string.
+	// ContainerID identifies the container where the exec format error occurred.
+	// If omitted, the container ID has not been reported; no default is assigned.
+	// When provided, it must be a non-empty runtime prefix followed by :// and 64 lowercase hexadecimal characters.
 	// Example: containerd://<64-hex-chars>
 	// Ref: https://github.com/kubernetes/kubernetes/blob/02eb7d424ad5ccf4f00863fe861f165be0d491da/pkg/apis/core/types.go#L2875
 	//      https://github.com/elastic/apm/blob/c7655441bb5f15db5ddbd7f4b60cb0735758d44d/specs/agents/metadata.md?plain=1#L111
@@ -77,10 +85,16 @@ type ENoExecEventStatus struct {
 // +kubebuilder:printcolumn:name=PodNamespace,JSONPath=.status.podNamespace,type=string
 // +kubebuilder:printcolumn:name=ContainerID,JSONPath=.status.containerID,type=string
 type ENoExecEvent struct {
-	metav1.TypeMeta   `json:",inline"`
+	// TypeMeta identifies the API version and kind of this resource.
+	metav1.TypeMeta `json:",inline"`
+	// ObjectMeta contains the standard resource metadata.
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Spec   ENoExecEventSpec   `json:"spec,omitempty"`
+	// Spec is reserved for future configuration and currently has no fields.
+	// If omitted, event processing is unchanged.
+	Spec ENoExecEventSpec `json:"spec,omitempty"`
+	// Status identifies the observed exec format error.
+	// If omitted, no event details have been reported yet.
 	Status ENoExecEventStatus `json:"status,omitempty"`
 }
 
@@ -88,7 +102,10 @@ type ENoExecEvent struct {
 
 // ENoExecEventList contains a list of ENoExecEvent
 type ENoExecEventList struct {
+	// TypeMeta identifies the API version and kind of this list.
 	metav1.TypeMeta `json:",inline"`
+	// ListMeta contains the standard list metadata.
 	metav1.ListMeta `json:"metadata,omitempty"`
-	Items           []ENoExecEvent `json:"items"`
+	// Items contains the ENoExecEvent resources in this list.
+	Items []ENoExecEvent `json:"items"`
 }

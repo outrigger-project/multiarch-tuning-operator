@@ -24,6 +24,7 @@ const (
 
 // ExecFormatErrorMonitor is a plugin that provides Exec Format Errors events reporting and monitoring
 type ExecFormatErrorMonitor struct {
+	// BasePlugin controls whether exec format error monitoring is enabled.
 	BasePlugin `json:",inline"`
 }
 

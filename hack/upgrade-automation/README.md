@@ -48,7 +48,6 @@ Updates all container image references with Go minor version (e.g., 1.24.11 → 
 - `.tekton/*.yaml` - Konflux pipelines: `rhel_9_{go}`
 - `Dockerfile` - Base image: `FROM golang:{go}`
 - `Makefile` - BUILD_IMAGE variable
-- `bundle.konflux.Dockerfile`, `konflux.Dockerfile` - Konflux builders
 
 **Commit:** `Update Makefile and Dockerfiles to use the new Golang version base image to {go_minor}`
 
