@@ -643,7 +643,7 @@ func (pod *Pod) handleError(err error, s string) {
 	pod.EnsureLabel(utils.ImageInspectionErrorLabel, "")
 	pod.EnsureAnnotation(utils.ImageInspectionErrorLabel, errMsg)
 	pod.EnsureAndIncrementLabel(utils.ImageInspectionErrorCountLabel)
-	pod.PublishEvent(corev1.EventTypeWarning, ImageArchitectureInspectionError, utils.EventActionImageInspectionFailed, ImageArchitectureInspectionErrorMsg+errMsg)
+	pod.PublishEvent(corev1.EventTypeWarning, ImageArchitectureInspectionError, utils.EventActionImageArchitectureCheck, ImageArchitectureInspectionErrorMsg+errMsg)
 	log.Error(err, s)
 }
 

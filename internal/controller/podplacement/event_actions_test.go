@@ -75,8 +75,8 @@ func TestPod_EventActions(t *testing.T) {
 			_, err := p.SetNodeAffinityArchRequirement(nil)
 			g.Expect(err).NotTo(HaveOccurred())
 		}},
-		{"inspection error", "ArchAwareInspectionError", "ImageInspectionFailed", "Warning", ImageArchitectureInspectionErrorMsg + "image failed at 100% %s", func(p *Pod) { p.handleError(errors.New("image failed at 100% %s"), "inspection") }},
-		{"max retries", "ArchAwareInspectionError", "ImageInspectionFailed", "Warning", ImageInspectionErrorMaxRetriesMsg + ": image failed at 100% %s", func(p *Pod) {
+		{"inspection error", "ArchAwareInspectionError", "ImageArchitectureCheck", "Warning", ImageArchitectureInspectionErrorMsg + "image failed at 100% %s", func(p *Pod) { p.handleError(errors.New("image failed at 100% %s"), "inspection") }},
+		{"max retries", "ArchAwareInspectionError", "ImageArchitectureCheck", "Warning", ImageInspectionErrorMaxRetriesMsg + ": image failed at 100% %s", func(p *Pod) {
 			imageInspectionCache = failingEventImageCache{}
 			defer func() { imageInspectionCache = imagefake.FacadeSingleton() }()
 			p.Labels = map[string]string{utils.ImageInspectionErrorCountLabel: "4"}
@@ -159,7 +159,7 @@ func TestPod_GateRemovalEventActions(t *testing.T) {
 			g.Expect(ignored).NotTo(BeNil())
 			g.Expect(removed).NotTo(BeNil())
 			g.Expect(ignored.Reason).To(Equal("ArchAwareGatedPodIgnored"))
-			g.Expect(ignored.Action).To(Equal("SchedulingGateRemove"))
+			g.Expect(ignored.Action).To(Equal("PodIgnore"))
 			g.Expect(ignored.Note).To(Equal(ArchitectureAwareGatedPodIgnoredMsg))
 			g.Expect(removed.Action).To(Equal("SchedulingGateRemove"))
 			if updateFails {

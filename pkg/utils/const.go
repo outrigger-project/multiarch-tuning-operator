@@ -7,13 +7,14 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 )
 
+// Event actions name operations; reasons distinguish their outcomes.
 const (
+	EventActionPodIgnore              = "PodIgnore"
 	EventActionSchedulingGateAdd      = "SchedulingGateAdd"
 	EventActionSchedulingGateRemove   = "SchedulingGateRemove"
 	EventActionNodeAffinityUpdate     = "NodeAffinityUpdate"
 	EventActionNodeAffinitySkip       = "NodeAffinitySkip"
 	EventActionImageArchitectureCheck = "ImageArchitectureCheck"
-	EventActionImageInspectionFailed  = "ImageInspectionFailed"
 	EventActionCELEvaluation          = "CELEvaluation"
 	EventActionExecFormatErrorReport  = "ExecFormatErrorReport"
 )

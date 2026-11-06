@@ -157,7 +157,7 @@ func (r *PodReconciler) processPod(ctx context.Context, pod *Pod) {
 		// In both cases, we should just remove the scheduling gate.
 		log.V(1).Info("Removing the scheduling gate from pod.")
 		pod.RemoveSchedulingGate()
-		pod.PublishEvent(corev1.EventTypeWarning, ArchitectureAwareGatedPodIgnored, utils.EventActionSchedulingGateRemove, ArchitectureAwareGatedPodIgnoredMsg)
+		pod.PublishEvent(corev1.EventTypeWarning, ArchitectureAwareGatedPodIgnored, utils.EventActionPodIgnore, ArchitectureAwareGatedPodIgnoredMsg)
 		return
 	}
 
@@ -212,7 +212,7 @@ func (r *PodReconciler) processPod(ctx context.Context, pod *Pod) {
 		// the counter is equal to the maxRetries value and the pod should not be processed again.
 		// Publish this event and remove the scheduling gate.
 		log.Info("Max retries Reached. The pod will not have the nodeAffinity set.")
-		pod.PublishEvent(corev1.EventTypeWarning, ImageArchitectureInspectionError, utils.EventActionImageInspectionFailed, fmt.Sprintf("%s: %s", ImageInspectionErrorMaxRetriesMsg, err.Error()))
+		pod.PublishEvent(corev1.EventTypeWarning, ImageArchitectureInspectionError, utils.EventActionImageArchitectureCheck, fmt.Sprintf("%s: %s", ImageInspectionErrorMaxRetriesMsg, err.Error()))
 
 		if cppc != nil && cppc.Spec.FallbackArchitecture != "" {
 			log.Info("Setting the nodeAffinity to the fallback architecture", "fallbackArchitecture", cppc.Spec.FallbackArchitecture)
