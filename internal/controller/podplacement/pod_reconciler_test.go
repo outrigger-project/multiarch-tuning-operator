@@ -120,6 +120,20 @@ var _ = Describe("Internal/Controller/Podplacement/PodReconciler", func() {
 				cppc := &v1beta1.ClusterPodPlacementConfig{}
 				err := k8sClient.Get(ctx, crclient.ObjectKey{Name: common.SingletonResourceObjectName}, cppc)
 				Expect(err).NotTo(HaveOccurred(), "failed to get ClusterPodPlacementConfig")
+				originalFallback := cppc.Spec.FallbackArchitecture
+				DeferCleanup(func() {
+					latest := &v1beta1.ClusterPodPlacementConfig{}
+					Expect(k8sClient.Get(ctx, crclient.ObjectKey{Name: common.SingletonResourceObjectName}, latest)).To(Succeed())
+					latest.Spec.FallbackArchitecture = originalFallback
+					Expect(k8sClient.Update(ctx, latest)).To(Succeed())
+					Eventually(func() string {
+						cppc := clusterpodplacementconfig.GetClusterPodPlacementConfig()
+						if cppc == nil {
+							return "nil"
+						}
+						return cppc.Spec.FallbackArchitecture
+					}).Should(Equal(originalFallback), "cache did not update with reverted ClusterPodPlacementConfig")
+				})
 				cppc.Spec.FallbackArchitecture = utils.ArchitectureAmd64
 				err = k8sClient.Update(ctx, cppc)
 				Expect(err).NotTo(HaveOccurred(), "failed to update ClusterPodPlacementConfig")
@@ -173,26 +187,14 @@ var _ = Describe("Internal/Controller/Podplacement/PodReconciler", func() {
 					g.Expect(pod.Labels).To(HaveKeyWithValue(utils.NodeAffinityLabel, utils.NodeAffinityLabelValueSet),
 						"node affinity label not found")
 				}).WithTimeout(e2e.WaitShort).Should(Succeed(), "failed to process fallback architecture")
-
-				// Cleanup: Revert CPPC changes
-				cppc.Spec.FallbackArchitecture = ""
-				err = k8sClient.Update(ctx, cppc)
-				Expect(err).NotTo(HaveOccurred(), "failed to revert ClusterPodPlacementConfig")
-				Eventually(func() string {
-					cppc := clusterpodplacementconfig.GetClusterPodPlacementConfig()
-					if cppc == nil {
-						return "nil"
-					}
-					return cppc.Spec.FallbackArchitecture
-				}).Should(Equal(""), "cache did not update with reverted ClusterPodPlacementConfig")
 			})
 		})
 		Context("with different pull secrets", func() {
-			It("handles images with global pull secrets correctly", func() {
+			PIt("handles images with global pull secrets correctly", func() {
 				// TODO: Test logic for handling a Pod with one container and image using global pull secret
 			})
 
-			It("handles images with local pull secrets correctly", func() {
+			PIt("handles images with local pull secrets correctly", func() {
 				// TODO: Test logic for handling a Pod with one container and image using local pull secret
 			})
 		})
@@ -417,11 +419,11 @@ var _ = Describe("Internal/Controller/Podplacement/PodReconciler", func() {
 	})
 	When("Handling Multi-container Pods", func() {
 		Context("with different image types and different auth credentials sources", func() {
-			It("handles node affinity as the intersection of the compatible architectures of each multi-arch image", func() {
+			PIt("handles node affinity as the intersection of the compatible architectures of each multi-arch image", func() {
 				// TODO: Test logic for handling a Pod with multiple multi-arch image-based containers
 			})
 
-			It("handles node affinity of multi-arch images and single-arch image setting the only one possible", func() {
+			PIt("handles node affinity of multi-arch images and single-arch image setting the only one possible", func() {
 				// TODO: Test logic for handling a Pod with multiple multi-arch image-based containers
 			})
 
