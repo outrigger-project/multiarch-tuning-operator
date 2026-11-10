@@ -26,7 +26,7 @@ import (
 	. "github.com/onsi/gomega"
 
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/client-go/tools/record"
+	clientgoevents "k8s.io/client-go/tools/events"
 
 	"github.com/openshift/multiarch-tuning-operator/api/common/plugins"
 	"github.com/openshift/multiarch-tuning-operator/api/v1beta1"
@@ -840,11 +840,11 @@ var _ = Describe("CEL Evaluator", func() {
 
 	Describe("applyCELInWebhook -- malformed CEL and fallback interaction", func() {
 		var ctx context.Context
-		var recorder *record.FakeRecorder
+		var recorder clientgoevents.EventRecorderLogger
 
 		BeforeEach(func() {
 			ctx = context.Background()
-			recorder = record.NewFakeRecorder(8)
+			recorder = newNativeRecorder()
 		})
 
 		It("should skip malformed high-priority PPC and apply valid lower-priority PPC", func() {
@@ -1017,11 +1017,11 @@ var _ = Describe("CEL Evaluator", func() {
 
 	Describe("NodeAffinityLabel after applyCELInWebhook", func() {
 		var ctx context.Context
-		var recorder *record.FakeRecorder
+		var recorder clientgoevents.EventRecorderLogger
 
 		BeforeEach(func() {
 			ctx = context.Background()
-			recorder = record.NewFakeRecorder(8)
+			recorder = newNativeRecorder()
 		})
 
 		It("should set NodeAffinityLabel to 'overriden' when CEL successfully applies constraints", func() {
@@ -1091,7 +1091,7 @@ var _ = Describe("CEL Evaluator", func() {
 
 		It("should return false and not modify the pod when the CEL plugin is disabled (Enabled: false)", func() {
 			// Verify the guard at cel_integration.go: !ppc.PluginsEnabled(...)
-			recorder := record.NewFakeRecorder(8)
+			recorder := newNativeRecorder()
 			reconciler := &PodReconciler{Recorder: recorder}
 
 			ppc := *NewPodPlacementConfig().
@@ -1118,7 +1118,7 @@ var _ = Describe("CEL Evaluator", func() {
 
 		It("should not add architecture NodeAffinity when plugin is disabled", func() {
 			// No architecture constraint must be added; existing unrelated affinity unchanged.
-			recorder := record.NewFakeRecorder(8)
+			recorder := newNativeRecorder()
 			reconciler := &PodReconciler{Recorder: recorder}
 
 			pod := NewPod().
@@ -1159,7 +1159,7 @@ var _ = Describe("CEL Evaluator", func() {
 
 		It("should not modify unrelated pod fields when plugin is disabled", func() {
 			// Labels, annotations, nodeSelector non-arch keys must survive unchanged.
-			recorder := record.NewFakeRecorder(8)
+			recorder := newNativeRecorder()
 			reconciler := &PodReconciler{Recorder: recorder}
 
 			pod := NewPod().
@@ -1199,7 +1199,7 @@ var _ = Describe("CEL Evaluator", func() {
 		It("should skip PPC and return false when all CEL rules are malformed", func() {
 			// Construct a minimal PodReconciler; only the Recorder field is needed
 			// because applyCELArchitecturePlacement does not call the API server.
-			recorder := record.NewFakeRecorder(8)
+			recorder := newNativeRecorder()
 			reconciler := &PodReconciler{Recorder: recorder}
 
 			ppc := *NewPodPlacementConfig().
@@ -1230,7 +1230,7 @@ var _ = Describe("CEL Evaluator", func() {
 
 		It("should skip malformed PPC in both webhook and controller", func() {
 			// Both code paths uniformly skip PPCs with all-malformed CEL rules.
-			recorder := record.NewFakeRecorder(8)
+			recorder := newNativeRecorder()
 			pod := NewPod().WithName("workload").WithNamespace("default").Build()
 			ppcs := []v1beta1.PodPlacementConfig{
 				*NewPodPlacementConfig().
@@ -1426,7 +1426,7 @@ var _ = Describe("CEL Evaluator", func() {
 
 	Context("Nil Plugin Guard", func() {
 		It("should return false without panicking when CelArchitecturePlacement is nil in the controller path", func() {
-			recorder := record.NewFakeRecorder(8)
+			recorder := newNativeRecorder()
 			reconciler := &PodReconciler{Recorder: recorder}
 
 			ppc := *NewPodPlacementConfig().
@@ -1453,7 +1453,7 @@ var _ = Describe("CEL Evaluator", func() {
 
 		It("should not panic and leave pod unmodified when CelArchitecturePlacement is nil in the webhook path", func() {
 			ctx := context.Background()
-			recorder := record.NewFakeRecorder(8)
+			recorder := newNativeRecorder()
 
 			pod := NewPod().WithName("test-pod").WithNamespace("default").Build()
 
@@ -1482,7 +1482,7 @@ var _ = Describe("CEL Evaluator", func() {
 	Context("Multiple PPC Iteration", func() {
 		It("should skip disabled, empty-result, and malformed PPCs and apply the highest-priority matching one", func() {
 			ctx := context.Background()
-			recorder := record.NewFakeRecorder(8)
+			recorder := newNativeRecorder()
 
 			pod := NewPod().WithName("multi-ppc-pod").WithNamespace("default").Build()
 
@@ -1516,7 +1516,7 @@ var _ = Describe("CEL Evaluator", func() {
 
 		It("should use fallback from the first matching PPC when no rules match", func() {
 			ctx := context.Background()
-			recorder := record.NewFakeRecorder(8)
+			recorder := newNativeRecorder()
 
 			pod := NewPod().WithName("fallback-pod").WithNamespace("default").Build()
 
@@ -1555,7 +1555,7 @@ var _ = Describe("CEL Evaluator", func() {
 	Context("Priority Boundary", func() {
 		It("should evaluate PPC with priority 0 (minimum boundary)", func() {
 			ctx := context.Background()
-			recorder := record.NewFakeRecorder(8)
+			recorder := newNativeRecorder()
 
 			pod := NewPod().WithName("priority-zero-pod").WithNamespace("default").Build()
 			ppcs := []v1beta1.PodPlacementConfig{
@@ -1577,7 +1577,7 @@ var _ = Describe("CEL Evaluator", func() {
 	Context("CEL no-match falls through to image-based detection", func() {
 		It("should not modify pod when all PPCs have malformed CEL rules (allowing image-based fallthrough)", func() {
 			ctx := context.Background()
-			recorder := record.NewFakeRecorder(8)
+			recorder := newNativeRecorder()
 
 			pod := NewPod().WithName("fallthrough-pod").WithNamespace("default").Build()
 
