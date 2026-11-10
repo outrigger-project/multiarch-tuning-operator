@@ -40,7 +40,12 @@ func BeginTransaction(root string) (*Transaction, error) {
 	if err != nil {
 		return nil, fmt.Errorf("create transaction backup: %w", err)
 	}
-	transaction := &Transaction{root: root, backupDir: backupDir, originals: make(map[string]artifactBackup, len(dependencyArtifactPaths)), sources: make(map[string]artifactBackup)}
+	transaction := &Transaction{
+		root:      root,
+		backupDir: backupDir,
+		originals: make(map[string]artifactBackup, len(dependencyArtifactPaths)),
+		sources:   make(map[string]artifactBackup),
+	}
 	for _, name := range dependencyArtifactPaths {
 		backup := artifactBackup{path: filepath.Join(backupDir, "original", name)}
 		if err := backupArtifact(filepath.Join(root, name), backup.path, &backup.existed); err != nil {
@@ -58,7 +63,11 @@ func (t *Transaction) Checkpoint() (ModuleCheckpoint, error) {
 	}
 	t.sequence++
 	dir := filepath.Join(t.backupDir, "checkpoints", fmt.Sprintf("%06d", t.sequence))
-	checkpoint := ModuleCheckpoint{dir: dir, artifacts: make(map[string]artifactBackup, 2), sources: make(map[string]artifactBackup)}
+	checkpoint := ModuleCheckpoint{
+		dir:       dir,
+		artifacts: make(map[string]artifactBackup, 2),
+		sources:   make(map[string]artifactBackup),
+	}
 	for _, name := range []string{"go.mod", "go.sum"} {
 		backup := artifactBackup{path: filepath.Join(dir, name)}
 		if err := backupArtifact(filepath.Join(t.root, name), backup.path, &backup.existed); err != nil {
@@ -90,7 +99,11 @@ func (t *Transaction) RestoreCheckpoint(checkpoint ModuleCheckpoint) error {
 	return errors.Join(failures...)
 }
 
-func (t *Transaction) WriteSource(checkpoint ModuleCheckpoint, relative string, content []byte) error {
+func (t *Transaction) WriteSource(
+	checkpoint ModuleCheckpoint,
+	relative string,
+	content []byte,
+) error {
 	if t.closed || checkpoint.sources == nil {
 		return errors.New("source write requires an open transaction checkpoint")
 	}
@@ -235,12 +248,18 @@ func copyArtifact(source, destination string, info os.FileInfo) error {
 	if err := os.MkdirAll(filepath.Dir(destination), 0o700); err != nil {
 		return err
 	}
-	in, err := os.Open(source) // #nosec G304 -- source is a repository artifact or an updater-owned transaction backup.
+	in, err := os.Open(
+		source,
+	) // #nosec G304 -- source is a repository artifact or an updater-owned transaction backup.
 	if err != nil {
 		return err
 	}
 	defer func() { _ = in.Close() }()
-	out, err := os.OpenFile(destination, os.O_CREATE|os.O_EXCL|os.O_WRONLY, info.Mode().Perm()) // #nosec G304 -- destination is a repository artifact or an updater-owned transaction backup.
+	out, err := os.OpenFile(
+		destination,
+		os.O_CREATE|os.O_EXCL|os.O_WRONLY,
+		info.Mode().Perm(),
+	) // #nosec G304 -- destination is a repository artifact or an updater-owned transaction backup.
 	if err != nil {
 		return err
 	}

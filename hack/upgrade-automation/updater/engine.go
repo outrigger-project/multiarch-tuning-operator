@@ -37,7 +37,13 @@ const (
 	attemptAccepted = "accepted"
 )
 
-func ApplyTargets(ctx context.Context, runner GoRunner, baseline Snapshot, policy Policy, transaction *Transaction) (Snapshot, error) {
+func ApplyTargets(
+	ctx context.Context,
+	runner GoRunner,
+	baseline Snapshot,
+	policy Policy,
+	transaction *Transaction,
+) (Snapshot, error) {
 	if err := runner.CheckCompiler(ctx, compilerTarget(baseline, policy)); err != nil {
 		return Snapshot{}, err
 	}
@@ -47,7 +53,10 @@ func ApplyTargets(ctx context.Context, runner GoRunner, baseline Snapshot, polic
 	}
 	rollback := func(cause error) (Snapshot, error) {
 		if restoreErr := transaction.RestoreCheckpoint(checkpoint); restoreErr != nil {
-			return Snapshot{}, errors.Join(cause, fmt.Errorf("restore target checkpoint: %w", restoreErr))
+			return Snapshot{}, errors.Join(
+				cause,
+				fmt.Errorf("restore target checkpoint: %w", restoreErr),
+			)
 		}
 		return Snapshot{}, cause
 	}
@@ -80,7 +89,7 @@ func ApplyTargets(ctx context.Context, runner GoRunner, baseline Snapshot, polic
 			}
 		}
 	}
-	if _, err := runner.Run(ctx, "mod", "tidy"); err != nil {
+	if err := tidyWithTargets(ctx, runner, policy); err != nil {
 		return rollback(fmt.Errorf("tidy target dependency graph: %w", err))
 	}
 	wantToolchain := baseline.Toolchain
@@ -95,7 +104,12 @@ func ApplyTargets(ctx context.Context, runner GoRunner, baseline Snapshot, polic
 		return rollback(fmt.Errorf("reload graph after target setup: %w", err))
 	}
 	if violations := ValidatePolicy(baseline, after, policy); len(violations) != 0 {
-		return rollback(fmt.Errorf("requested Go/Kubernetes targets cannot coexist: %w", errors.Join(violations...)))
+		return rollback(
+			fmt.Errorf(
+				"requested Go/Kubernetes targets cannot coexist: %w",
+				errors.Join(violations...),
+			),
+		)
 	}
 	return after, nil
 }
@@ -132,7 +146,7 @@ func Run(ctx context.Context, cfg Config) (report Report, runErr error) {
 		}
 		report.RolledBack = true
 		if err := transaction.Rollback(); err != nil {
-			runErr = errors.Join(runErr, fmt.Errorf("rollback dependency update: %w", err))
+			runErr = &UpdaterError{Code: 2, Err: errors.Join(runErr, fmt.Errorf("rollback dependency update: %w", err))}
 			report.Status = runFailed
 		}
 		if runErr != nil {
@@ -145,306 +159,64 @@ func Run(ctx context.Context, cfg Config) (report Report, runErr error) {
 			report.Modules = sortedResults(results)
 			emitRunSummary(cfg.Progress, report)
 		}
-		if runErr != nil {
-			var coded *UpdaterError
-			if !errors.As(runErr, &coded) {
-				code := 2
-				if report.Status == runIncomplete {
-					code = 3
-				} else {
-					var precondition *PreconditionError
-					if errors.As(runErr, &precondition) {
-						code = 1
-					}
-				}
-				runErr = &UpdaterError{Code: code, Err: runErr}
-			}
-		}
+		runErr = runErrorWithCode(runErr, report.Status)
 	}()
 
 	baseline, err = CaptureSnapshot(ctx, root, cfg.GoBinary)
 	if err != nil {
 		return report, fmt.Errorf("capture baseline: %w", err)
 	}
-	progressf(cfg.Progress, "Inventory: %d modules; Go directive %s; toolchain %s", dependencyCount(baseline), baseline.GoDirective, toolchainLabel(baseline.Toolchain))
-	emitRequestedTargets(cfg.Progress, baseline, cfg.Policy)
+	progressf(
+		cfg.Progress,
+		"Inventory: %d modules; Go directive %s; toolchain %s",
+		dependencyCount(baseline),
+		baseline.GoDirective,
+		toolchainLabel(baseline.Toolchain),
+	)
 	report.Baseline = baseline
 	report.Final = baseline
 	observeSnapshot(results, baseline, baseline)
+	cfg.Policy, report.KubernetesReleaseTargets, err = ResolveKubernetesRelease(
+		ctx,
+		runner,
+		baseline,
+		cfg.Policy,
+	)
+	report.Policy = cfg.Policy
+	for _, decision := range report.KubernetesReleaseTargets {
+		progressf(
+			cfg.Progress,
+			"Kubernetes release: %s %s -> %s (%s)",
+			decision.Path,
+			decision.CurrentVersion,
+			decision.TargetVersion,
+			decision.Disposition,
+		)
+	}
+	if err != nil {
+		return report, fmt.Errorf("resolving Kubernetes release: %w", err)
+	}
+	emitRequestedTargets(cfg.Progress, baseline, cfg.Policy)
 	current, err := ApplyTargets(ctx, runner, baseline, cfg.Policy, transaction)
 	if err != nil {
 		return report, fmt.Errorf("apply target policy: %w", err)
 	}
 	observeSnapshot(results, current, baseline)
-	targetChanges := graphChanges(baseline, current)
-	for _, modulePath := range sortedTargetPaths(cfg.Policy.KubernetesTargets) {
-		targetVersion := cfg.Policy.KubernetesTargets[modulePath]
-		selected, exists := current.Modules[modulePath]
-		if !exists {
-			continue
-		}
-		before := baseline.Modules[modulePath]
-		if !baseline.Modules[modulePath].Main && before.Version != targetVersion {
-			result := resultFor(results, modulePath, baseline)
-			result.Attempts = append(result.Attempts, Attempt{Version: targetVersion, Outcome: attemptAccepted, Evidence: "explicit Kubernetes target", Changes: targetChanges})
-		}
-		if selected.Version != targetVersion {
-			return report, fmt.Errorf("kubernetes module %q selected %q after target setup, want %q", modulePath, selected.Version, targetVersion)
-		}
+	if err := recordAppliedTargets(results, baseline, current, cfg.Policy); err != nil {
+		return report, err
 	}
 
-	maxPasses := cfg.MaxPasses
-	if maxPasses <= 0 {
-		maxPasses = defaultMaxPasses
+	trials := dependencyTrials{
+		cfg: cfg, runner: runner, transaction: transaction, baseline: baseline,
+		current: current, results: results, migrations: migrations, migratedPaths: migratedPaths,
 	}
-	tracker := graphTracker{}
-	tracker.Seen(current)
-	considered := make(map[string]struct{})
-	candidateAttempts := make(map[string]int)
-	limitedModules := make(map[string]struct{})
-	completed := false
-	for pass := 0; pass < maxPasses; pass++ {
-		progressf(cfg.Progress, "Pass %d/%d: processing %d modules", pass+1, maxPasses, dependencyCount(current))
-		changedThisPass := false
-		for _, modulePath := range sortedModulePaths(current) {
-			module, selected := current.Modules[modulePath]
-			if !selected || module.Main {
-				continue
-			}
-			if target, migrated := migratedPaths[modulePath]; migrated {
-				progressf(cfg.Progress, "Skipping %s: root imports already migrated to %s", modulePath, target)
-				continue
-			}
-			if isProtectedModule(modulePath, cfg.Policy) {
-				progressf(cfg.Progress, "Pinned %s at %s (policy-pinned)", modulePath, versionLabel(module.Version))
-				continue
-			}
-			if !module.Required {
-				progressf(cfg.Progress, "Skipping %s at %s (not-in-go-mod)", modulePath, versionLabel(module.Version))
-				continue
-			}
-			progressf(cfg.Progress, "Checking %s at %s", modulePath, versionLabel(module.Version))
-			candidates, err := ListCandidates(ctx, runner, modulePath, module.Version)
-			if err != nil {
-				result := resultFor(results, modulePath, baseline)
-				result.Outcome = moduleExecutionFailure
-				return report, fmt.Errorf("enumerate candidates for %s: %w", modulePath, err)
-			}
-			if len(candidates) == 0 {
-				progressf(cfg.Progress, "No newer stable candidate for %s at %s", modulePath, versionLabel(module.Version))
-			}
-			accepted := false
-			for _, candidate := range candidates {
-				consideredKey := modulePath + "@" + candidate
-				if _, seen := considered[consideredKey]; seen {
-					continue
-				}
-				if candidateAttempts[modulePath] >= maxCandidateAttempts {
-					resultFor(results, modulePath, baseline).CandidateLimitReached = true
-					if _, alreadyReported := limitedModules[modulePath]; !alreadyReported {
-						progressf(cfg.Progress, "Candidate limit reached for %s: %d attempts; older candidates remain unchecked", modulePath, maxCandidateAttempts)
-					}
-					limitedModules[modulePath] = struct{}{}
-					break
-				}
-				considered[consideredKey] = struct{}{}
-				candidateAttempts[modulePath]++
-				progressf(cfg.Progress, "Trying %s: %s -> %s", modulePath, versionLabel(module.Version), candidate)
-				checkpoint, err := transaction.Checkpoint()
-				if err != nil {
-					return report, fmt.Errorf("checkpoint %s@%s: %w", modulePath, candidate, err)
-				}
-				beforeTrial := current
-				targetPath := modulePath
-				_, getErr := runner.Run(ctx, "get", modulePath+"@"+candidate)
-				if getErr != nil {
-					if newPath := renamedModulePath(getErr, modulePath); newPath != "" {
-						if err := transaction.RestoreCheckpoint(checkpoint); err != nil {
-							return report, fmt.Errorf("restore before module-path migration: %w", err)
-						}
-						targetPath = newPath
-						progressf(cfg.Progress, "Migrating %s@%s -> %s@%s: rewriting root-module imports", modulePath, module.Version, newPath, candidate)
-						files, migrationErr := migrateModule(ctx, runner, modulePath, newPath, candidate, beforeTrial, cfg.Policy, transaction, checkpoint)
-						migrations[consideredKey] = migrationTrial{TargetPath: newPath, SourceFiles: files}
-						getErr = migrationErr
-					}
-				}
-				if err := getErr; err != nil {
-					if restoreErr := transaction.RestoreCheckpoint(checkpoint); restoreErr != nil {
-						return report, errors.Join(fmt.Errorf("restore rejected candidate %s@%s: %w", modulePath, candidate, err), restoreErr)
-					}
-					if isConstraintFailure(err) {
-						result := resultFor(results, modulePath, baseline)
-						result.Attempts = append(result.Attempts, Attempt{Version: candidate, Outcome: moduleBlocked, Evidence: err.Error()})
-						progressf(cfg.Progress, "Rejected %s: %s -> %s (blocked-by-constraints: %s)", modulePath, versionLabel(module.Version), candidate, err.Error())
-						continue
-					}
-					result := resultFor(results, modulePath, baseline)
-					result.Attempts = append(result.Attempts, Attempt{Version: candidate, Outcome: moduleExecutionFailure, Evidence: err.Error()})
-					result.Outcome = moduleExecutionFailure
-					progressf(cfg.Progress, "Execution failure for %s: %s -> %s (%s)", modulePath, versionLabel(module.Version), candidate, err.Error())
-					return report, fmt.Errorf("execute candidate %s@%s: %w", modulePath, candidate, err)
-				}
-				trial, err := CaptureSnapshot(ctx, root, cfg.GoBinary)
-				if err != nil {
-					if restoreErr := transaction.RestoreCheckpoint(checkpoint); restoreErr != nil {
-						return report, errors.Join(fmt.Errorf("reload graph after %s@%s: %w", modulePath, candidate, err), restoreErr)
-					}
-					if isConstraintFailure(err) {
-						result := resultFor(results, modulePath, baseline)
-						result.Attempts = append(result.Attempts, Attempt{Version: candidate, Outcome: moduleBlocked, Evidence: err.Error()})
-						progressf(cfg.Progress, "Rejected %s: %s -> %s (blocked-by-constraints: %s)", modulePath, versionLabel(module.Version), candidate, err.Error())
-						continue
-					}
-					result := resultFor(results, modulePath, baseline)
-					result.Attempts = append(result.Attempts, Attempt{Version: candidate, Outcome: moduleExecutionFailure, Evidence: err.Error()})
-					result.Outcome = moduleExecutionFailure
-					progressf(cfg.Progress, "Execution failure for %s: %s -> %s (%s)", modulePath, versionLabel(module.Version), candidate, err.Error())
-					return report, fmt.Errorf("reload graph after %s@%s: %w", modulePath, candidate, err)
-				}
-				if err := applySelectedTargets(ctx, runner, cfg.Policy, trial); err != nil {
-					if restoreErr := transaction.RestoreCheckpoint(checkpoint); restoreErr != nil {
-						return report, errors.Join(fmt.Errorf("apply explicit target after %s@%s: %w", modulePath, candidate, err), restoreErr)
-					}
-					if isConstraintFailure(err) {
-						result := resultFor(results, modulePath, baseline)
-						result.Attempts = append(result.Attempts, Attempt{Version: candidate, Outcome: moduleBlocked, Evidence: err.Error()})
-						progressf(cfg.Progress, "Rejected %s: %s -> %s (blocked-by-constraints: %s)", modulePath, versionLabel(module.Version), candidate, err.Error())
-						continue
-					}
-					result := resultFor(results, modulePath, baseline)
-					result.Attempts = append(result.Attempts, Attempt{Version: candidate, Outcome: moduleExecutionFailure, Evidence: err.Error()})
-					result.Outcome = moduleExecutionFailure
-					progressf(cfg.Progress, "Execution failure for %s: %s -> %s (%s)", modulePath, versionLabel(module.Version), candidate, err.Error())
-					return report, fmt.Errorf("apply explicit target after %s@%s: %w", modulePath, candidate, err)
-				}
-				if _, err := runner.Run(ctx, "mod", "tidy"); err != nil {
-					if restoreErr := transaction.RestoreCheckpoint(checkpoint); restoreErr != nil {
-						return report, errors.Join(fmt.Errorf("restore failed tidy for %s@%s: %w", modulePath, candidate, err), restoreErr)
-					}
-					if isConstraintFailure(err) {
-						result := resultFor(results, modulePath, baseline)
-						result.Attempts = append(result.Attempts, Attempt{Version: candidate, Outcome: moduleBlocked, Evidence: err.Error()})
-						progressf(cfg.Progress, "Rejected %s: %s -> %s (blocked-by-constraints: %s)", modulePath, versionLabel(module.Version), candidate, err.Error())
-						continue
-					}
-					result := resultFor(results, modulePath, baseline)
-					result.Attempts = append(result.Attempts, Attempt{Version: candidate, Outcome: moduleExecutionFailure, Evidence: err.Error()})
-					result.Outcome = moduleExecutionFailure
-					progressf(cfg.Progress, "Execution failure for %s: %s -> %s (%s)", modulePath, versionLabel(module.Version), candidate, err.Error())
-					return report, fmt.Errorf("tidy candidate %s@%s: %w", modulePath, candidate, err)
-				}
-				if err := SetToolchainDirective(ctx, runner, expectedToolchain(baseline, cfg.Policy)); err != nil {
-					if restoreErr := transaction.RestoreCheckpoint(checkpoint); restoreErr != nil {
-						return report, errors.Join(fmt.Errorf("restore toolchain update for %s@%s: %w", modulePath, candidate, err), restoreErr)
-					}
-					result := resultFor(results, modulePath, baseline)
-					result.Attempts = append(result.Attempts, Attempt{Version: candidate, Outcome: moduleExecutionFailure, Evidence: err.Error()})
-					result.Outcome = moduleExecutionFailure
-					progressf(cfg.Progress, "Execution failure enforcing toolchain for %s: %s", modulePath, err.Error())
-					return report, fmt.Errorf("enforce toolchain after %s@%s: %w", modulePath, candidate, err)
-				}
-				after, err := CaptureSnapshot(ctx, root, cfg.GoBinary)
-				if err != nil {
-					if restoreErr := transaction.RestoreCheckpoint(checkpoint); restoreErr != nil {
-						return report, errors.Join(fmt.Errorf("reload graph after tidy for %s@%s: %w", modulePath, candidate, err), restoreErr)
-					}
-					if isConstraintFailure(err) {
-						result := resultFor(results, modulePath, baseline)
-						result.Attempts = append(result.Attempts, Attempt{Version: candidate, Outcome: moduleBlocked, Evidence: err.Error()})
-						progressf(cfg.Progress, "Rejected %s: %s -> %s (blocked-by-constraints: %s)", modulePath, versionLabel(module.Version), candidate, err.Error())
-						continue
-					}
-					result := resultFor(results, modulePath, baseline)
-					result.Attempts = append(result.Attempts, Attempt{Version: candidate, Outcome: moduleExecutionFailure, Evidence: err.Error()})
-					result.Outcome = moduleExecutionFailure
-					progressf(cfg.Progress, "Execution failure for %s: %s -> %s (%s)", modulePath, versionLabel(module.Version), candidate, err.Error())
-					return report, fmt.Errorf("reload graph after tidy for %s@%s: %w", modulePath, candidate, err)
-				}
-
-				changes := graphChanges(beforeTrial, after)
-				violations := ValidatePolicy(baseline, after, cfg.Policy)
-				if selected, exists := after.Modules[targetPath]; !exists || selected.Version != candidate {
-					violations = append(violations, fmt.Errorf("requested %s@%s selected %q", targetPath, candidate, selected.Version))
-				}
-				if targetPath != modulePath && len(violations) == 0 {
-					progressf(cfg.Progress, "Building packages to validate module-path migration to %s", targetPath)
-					if _, err := runner.Run(ctx, "build", "-mod=readonly", "./..."); err != nil {
-						if restoreErr := transaction.RestoreCheckpoint(checkpoint); restoreErr != nil {
-							return report, errors.Join(err, restoreErr)
-						}
-						if isMigrationBuildConstraint(err) {
-							violations = append(violations, fmt.Errorf("renamed module does not compile with root packages: %w", err))
-						} else {
-							result := resultFor(results, modulePath, baseline)
-							result.Attempts = append(result.Attempts, Attempt{Version: candidate, Outcome: moduleExecutionFailure, Evidence: err.Error()})
-							return report, fmt.Errorf("build renamed module %s@%s: %w", targetPath, candidate, err)
-						}
-					}
-				}
-				result := resultFor(results, modulePath, baseline)
-				if len(violations) != 0 {
-					evidence := joinErrors(violations)
-					result.Attempts = append(result.Attempts, Attempt{Version: candidate, Outcome: moduleBlocked, Evidence: evidence, Changes: changes})
-					recordRejectedGraph(results, baseline, beforeTrial, after, modulePath, evidence, changes)
-					progressf(cfg.Progress, "Rejected %s: %s -> %s (blocked-by-constraints: %s)", modulePath, versionLabel(module.Version), candidate, evidence)
-					if err := transaction.RestoreCheckpoint(checkpoint); err != nil {
-						return report, fmt.Errorf("restore policy-rejected candidate %s@%s: %w", modulePath, candidate, err)
-					}
-					continue
-				}
-				result.Attempts = append(result.Attempts, Attempt{Version: candidate, Outcome: attemptAccepted, Changes: changes})
-				if targetPath != modulePath {
-					result.MigratedTo = targetPath
-					migratedPaths[modulePath] = targetPath
-				}
-				for _, targetPath := range sortedTargetPaths(cfg.Policy.KubernetesTargets) {
-					if targetPath == modulePath || beforeTrial.Modules[targetPath].Version == after.Modules[targetPath].Version {
-						continue
-					}
-					targetResult := resultFor(results, targetPath, baseline)
-					targetResult.Attempts = append(targetResult.Attempts, Attempt{Version: cfg.Policy.KubernetesTargets[targetPath], Outcome: attemptAccepted, Evidence: "explicit Kubernetes target introduced during candidate trial", Changes: changes})
-				}
-				progressf(cfg.Progress, "Accepted %s: %s -> %s@%s (%d graph changes)", modulePath, versionLabel(module.Version), targetPath, after.Modules[targetPath].Version, len(changes))
-				observeSnapshot(results, after, baseline)
-				current = after
-				changedThisPass = true
-				accepted = true
-				break
-			}
-			if accepted {
-				continue
-			}
-		}
-		if !changedThisPass {
-			completed = true
-			progressf(cfg.Progress, "Pass %d complete: no candidates accepted", pass+1)
-			break
-		}
-		if tracker.Seen(current) {
+	if err := trials.run(ctx); err != nil {
+		if ExitCode(err) == 3 {
 			report.Status = runIncomplete
-			progressf(cfg.Progress, "Run incomplete: dependency graph cycle after pass %d", pass+1)
-			return report, fmt.Errorf("dependency graph cycle detected after pass %d", pass+1)
 		}
-		if pass+1 == maxPasses {
-			report.Status = runIncomplete
-			progressf(cfg.Progress, "Run incomplete: reached pass limit %d", maxPasses)
-			return report, fmt.Errorf("dependency update reached pass bound %d", maxPasses)
-		}
+		return report, err
 	}
-	if !completed {
-		report.Status = runIncomplete
-		return report, fmt.Errorf("dependency update did not converge within %d passes", maxPasses)
-	}
-	if len(limitedModules) != 0 {
-		paths := make([]string, 0, len(limitedModules))
-		for path := range limitedModules {
-			paths = append(paths, path)
-		}
-		sort.Strings(paths)
-		report.Status = runIncomplete
-		return report, fmt.Errorf("candidate limit of %d attempts per module reached with unchecked candidates: %s", maxCandidateAttempts, strings.Join(paths, ", "))
-	}
+	current = trials.current
 
 	progressf(cfg.Progress, "Normalizing go.mod into direct and indirect require blocks")
 	if err := NormalizeRequireBlocks(root); err != nil {
@@ -458,7 +230,10 @@ func Run(ctx context.Context, cfg Config) (report Report, runErr error) {
 		return report, fmt.Errorf("require-block normalization changed the selected module graph")
 	}
 	if violations := ValidatePolicy(baseline, normalized, cfg.Policy); len(violations) != 0 {
-		return report, fmt.Errorf("policy validation after require-block normalization failed: %w", errors.Join(violations...))
+		return report, fmt.Errorf(
+			"policy validation after require-block normalization failed: %w",
+			errors.Join(violations...),
+		)
 	}
 	current = normalized
 
@@ -469,7 +244,10 @@ func Run(ctx context.Context, cfg Config) (report Report, runErr error) {
 		}
 	}
 	if len(migratedPaths) != 0 {
-		progressf(cfg.Progress, "Validating migrated packages against the final accepted dependency graph")
+		progressf(
+			cfg.Progress,
+			"Validating migrated packages against the final accepted dependency graph",
+		)
 		if _, err := runner.Run(ctx, "build", "-mod=readonly", "./..."); err != nil {
 			return report, fmt.Errorf("final build after module-path migrations: %w", err)
 		}
@@ -482,7 +260,10 @@ func Run(ctx context.Context, cfg Config) (report Report, runErr error) {
 		return report, fmt.Errorf("capture final graph: %w", err)
 	}
 	if violations := ValidatePolicy(baseline, final, cfg.Policy); len(violations) != 0 {
-		return report, fmt.Errorf("final exact-policy validation failed: %w", errors.Join(violations...))
+		return report, fmt.Errorf(
+			"final exact-policy validation failed: %w",
+			errors.Join(violations...),
+		)
 	}
 	report.Status = runCompleted
 	report.Final = final
@@ -504,7 +285,79 @@ func Run(ctx context.Context, cfg Config) (report Report, runErr error) {
 	return report, nil
 }
 
-func applySelectedTargets(ctx context.Context, runner GoRunner, policy Policy, snapshot Snapshot) error {
+func recordAppliedTargets(
+	results map[string]*ModuleResult,
+	baseline, current Snapshot,
+	policy Policy,
+) error {
+	changes := graphChanges(baseline, current)
+	for _, path := range sortedTargetPaths(policy.KubernetesTargets) {
+		target := policy.KubernetesTargets[path]
+		selected, exists := current.Modules[path]
+		if !exists {
+			continue
+		}
+		before := baseline.Modules[path]
+		if !before.Main && before.Version != target {
+			result := resultFor(results, path, baseline)
+			result.Attempts = append(
+				result.Attempts,
+				Attempt{
+					Version:  target,
+					Outcome:  attemptAccepted,
+					Evidence: "explicit Kubernetes target",
+					Changes:  changes,
+				},
+			)
+		}
+		if selected.Version != target {
+			return fmt.Errorf(
+				"kubernetes module %q selected %q after target setup, want %q",
+				path,
+				selected.Version,
+				target,
+			)
+		}
+	}
+	return nil
+}
+
+func runErrorWithCode(err error, status string) error {
+	var coded *UpdaterError
+	if err == nil || errors.As(err, &coded) {
+		return err
+	}
+	code := ExitCode(err)
+	if status == runIncomplete {
+		code = 3
+	}
+	return &UpdaterError{Code: code, Err: err}
+}
+
+func tidyWithTargets(ctx context.Context, runner GoRunner, policy Policy) error {
+	if _, err := runner.Run(ctx, "mod", "tidy"); err != nil {
+		return err
+	}
+	if len(policy.KubernetesTargets) == 0 {
+		return nil
+	}
+	snapshot, err := CaptureSnapshot(ctx, runner.Root, runner.Binary)
+	if err != nil {
+		return fmt.Errorf("capturing graph after tidy: %w", err)
+	}
+	// Tidy drops pins for graph-only modules whose packages are not imported.
+	if err := applySelectedTargets(ctx, runner, policy, snapshot); err != nil {
+		return fmt.Errorf("reapplying exact targets after tidy: %w", err)
+	}
+	return nil
+}
+
+func applySelectedTargets(
+	ctx context.Context,
+	runner GoRunner,
+	policy Policy,
+	snapshot Snapshot,
+) error {
 	var paths []string
 	for modulePath, version := range policy.KubernetesTargets {
 		if selected, exists := snapshot.Modules[modulePath]; exists && selected.Version != version {
@@ -544,7 +397,10 @@ func isConstraintFailure(err error) bool {
 		return true
 	}
 	text := strings.ToLower(err.Error())
-	return strings.Contains(text, "requires go >=") || strings.Contains(text, "excluded by go.mod") || strings.Contains(text, "excluded by the main module") || modulePathMismatch.MatchString(text)
+	return strings.Contains(text, "requires go >=") ||
+		strings.Contains(text, "excluded by go.mod") ||
+		strings.Contains(text, "excluded by the main module") ||
+		modulePathMismatch.MatchString(text)
 }
 
 func graphChanges(before, after Snapshot) []Change {
@@ -589,7 +445,8 @@ func graphSignature(snapshot Snapshot) string {
 }
 
 func sameSnapshot(left, right Snapshot) bool {
-	if left.GoDirective != right.GoDirective || left.Toolchain != right.Toolchain || len(left.Modules) != len(right.Modules) {
+	if left.GoDirective != right.GoDirective || left.Toolchain != right.Toolchain ||
+		len(left.Modules) != len(right.Modules) {
 		return false
 	}
 	for path, module := range left.Modules {
@@ -655,7 +512,12 @@ func observeSnapshot(results map[string]*ModuleResult, snapshot, baseline Snapsh
 	}
 }
 
-func recordRejectedGraph(results map[string]*ModuleResult, baseline, before, after Snapshot, candidatePath, evidence string, changes []Change) {
+func recordRejectedGraph(
+	results map[string]*ModuleResult,
+	baseline, before, after Snapshot,
+	candidatePath, evidence string,
+	changes []Change,
+) {
 	for _, path := range sortedModulePaths(after) {
 		module := after.Modules[path]
 		if module.Main {
@@ -666,11 +528,24 @@ func recordRejectedGraph(results map[string]*ModuleResult, baseline, before, aft
 			continue
 		}
 		result := resultFor(results, path, baseline)
-		result.Attempts = append(result.Attempts, Attempt{Version: module.Version, Outcome: moduleBlocked, Evidence: "selected by a rejected transitive trial: " + evidence, Changes: changes})
+		result.Attempts = append(
+			result.Attempts,
+			Attempt{
+				Version:  module.Version,
+				Outcome:  moduleBlocked,
+				Evidence: "selected by a rejected transitive trial: " + evidence,
+				Changes:  changes,
+			},
+		)
 	}
 }
 
-func finalizeResults(results map[string]*ModuleResult, final Snapshot, policy Policy, rolledBack bool) {
+func finalizeResults(
+	results map[string]*ModuleResult,
+	final Snapshot,
+	policy Policy,
+	rolledBack bool,
+) {
 	for path, result := range results {
 		module, exists := final.Modules[path]
 		if exists && !module.Main {
@@ -684,7 +559,8 @@ func finalizeResults(results map[string]*ModuleResult, final Snapshot, policy Po
 			result.Outcome = moduleExecutionFailure
 			continue
 		}
-		if rolledBack && result.InitialVersion == result.FinalVersion && hasAttemptOutcome(result, attemptAccepted) {
+		if rolledBack && result.InitialVersion == result.FinalVersion &&
+			hasAttemptOutcome(result, attemptAccepted) {
 			result.Outcome = moduleExecutionFailure
 			continue
 		}
@@ -711,7 +587,8 @@ func finalizeResults(results map[string]*ModuleResult, final Snapshot, policy Po
 			continue
 		}
 		if isKubernetesModule(path) {
-			if result.InitialVersion == "" && result.FinalVersion == "" && hasAttemptOutcome(result, moduleBlocked) {
+			if result.InitialVersion == "" && result.FinalVersion == "" &&
+				hasAttemptOutcome(result, moduleBlocked) {
 				result.Outcome = moduleBlocked
 			} else {
 				result.Outcome = modulePolicyPinned
@@ -795,23 +672,49 @@ func emitModuleSummaries(writer io.Writer, modules []ModuleResult) {
 		switch module.Outcome {
 		case moduleUpdated:
 			if module.MigratedTo != "" {
-				progressf(writer, "Migrated %s@%s -> %s (see target module for final version)", module.Path, versionLabel(module.InitialVersion), module.MigratedTo)
+				progressf(
+					writer,
+					"Migrated %s@%s -> %s (see target module for final version)",
+					module.Path,
+					versionLabel(module.InitialVersion),
+					module.MigratedTo,
+				)
 				continue
 			}
 			if module.InitialVersion == "" {
-				progressf(writer, "Added %s: %s -> %s", module.Path, versionLabel(module.InitialVersion), versionLabel(module.FinalVersion))
+				progressf(
+					writer,
+					"Added %s: %s -> %s",
+					module.Path,
+					versionLabel(module.InitialVersion),
+					versionLabel(module.FinalVersion),
+				)
 			} else {
-				progressf(writer, "Updated %s: %s -> %s", module.Path, versionLabel(module.InitialVersion), versionLabel(module.FinalVersion))
+				progressf(writer, "Updated %s: %s -> %s", module.Path,
+					versionLabel(module.InitialVersion), versionLabel(module.FinalVersion))
 			}
 		case moduleRemoved:
-			progressf(writer, "Removed %s: %s -> %s", module.Path, versionLabel(module.InitialVersion), versionLabel(module.FinalVersion))
+			progressf(
+				writer,
+				"Removed %s: %s -> %s",
+				module.Path,
+				versionLabel(module.InitialVersion),
+				versionLabel(module.FinalVersion),
+			)
 		default:
 			current := module.FinalVersion
 			if current == "" {
 				current = module.InitialVersion
 			}
 			if module.CandidateLimitReached {
-				progressf(writer, "No update %s: remains at %s (%s; candidate limit reached after %d attempts)", module.Path, versionLabel(current), module.Outcome, maxCandidateAttempts)
+				progressf(
+					writer,
+					"No update %s: remains at %s (%s; candidate limit reached after %d attempts)",
+					module.Path,
+					versionLabel(current),
+					module.Outcome,
+					maxCandidateAttempts,
+				)
 			} else {
 				progressf(writer, "No update %s: remains at %s (%s)", module.Path, versionLabel(current), module.Outcome)
 			}
@@ -821,14 +724,25 @@ func emitModuleSummaries(writer io.Writer, modules []ModuleResult) {
 
 func emitRequestedTargets(writer io.Writer, baseline Snapshot, policy Policy) {
 	if policy.Mode == ModeGoOnly || policy.Mode == ModeBoth {
-		progressf(writer, "Go directive target: %s -> %s", versionLabel(baseline.GoDirective), policy.GoTarget)
+		progressf(
+			writer,
+			"Go directive target: %s -> %s",
+			versionLabel(baseline.GoDirective),
+			policy.GoTarget,
+		)
 	}
 	for _, modulePath := range sortedTargetPaths(policy.KubernetesTargets) {
 		current := "<absent>"
 		if selected, exists := baseline.Modules[modulePath]; exists {
 			current = selected.Version
 		}
-		progressf(writer, "Kubernetes target: %s %s -> %s", modulePath, current, policy.KubernetesTargets[modulePath])
+		progressf(
+			writer,
+			"Kubernetes target: %s %s -> %s",
+			modulePath,
+			current,
+			policy.KubernetesTargets[modulePath],
+		)
 	}
 }
 
@@ -836,12 +750,14 @@ func emitRunSummary(writer io.Writer, report Report) {
 	if report.Baseline.GoDirective == report.Final.GoDirective {
 		progressf(writer, "Go directive unchanged at %s", versionLabel(report.Final.GoDirective))
 	} else {
-		progressf(writer, "Go directive: %s -> %s", versionLabel(report.Baseline.GoDirective), versionLabel(report.Final.GoDirective))
+		progressf(writer, "Go directive: %s -> %s",
+			versionLabel(report.Baseline.GoDirective), versionLabel(report.Final.GoDirective))
 	}
 	if report.Baseline.Toolchain == report.Final.Toolchain {
 		progressf(writer, "Toolchain unchanged (%s)", toolchainLabel(report.Final.Toolchain))
 	} else {
-		progressf(writer, "Toolchain: %s -> %s", toolchainLabel(report.Baseline.Toolchain), toolchainLabel(report.Final.Toolchain))
+		progressf(writer, "Toolchain: %s -> %s",
+			toolchainLabel(report.Baseline.Toolchain), toolchainLabel(report.Final.Toolchain))
 	}
 	emitModuleSummaries(writer, report.Modules)
 }

@@ -13,6 +13,8 @@ import (
 	"strings"
 	"syscall"
 
+	"golang.org/x/mod/modfile"
+
 	"github.com/openshift/multiarch-tuning-operator/hack/upgrade-automation/updater"
 )
 
@@ -24,12 +26,13 @@ Usage:
   upgrade.sh --mode pin-both
   upgrade.sh --mode go-only --go-target 1.26.8
   upgrade.sh --mode kubernetes-only --k8s-target k8s.io/api=v0.36.6
-  upgrade.sh --mode both --go-target 1.26.8 --k8s-target k8s.io/api=v0.36.6
+  upgrade.sh --mode both --go-target 1.26.10 --k8s-release 1.36.6
 
 Options:
   --mode         pin-both | go-only | kubernetes-only | both
   --go-target    exact Go patch version, required by go-only and both
-  --k8s-target   repeatable exact module=version Kubernetes target
+  --k8s-release  Kubernetes release (1.N.P); preserve module majors, report unavailable versions
+  --k8s-target   repeatable exact module=version Kubernetes target (overrides release target)
   --go-bin       Go compiler executable (default: go)
   --report       JSON report path (default: _output/dependency-upgrade-report.json)
 `
@@ -57,6 +60,11 @@ func parseArgs(args []string) (cliOptions, error) {
 	flags.SetOutput(io.Discard)
 	mode := flags.String("mode", "", "dependency update policy")
 	goTarget := flags.String("go-target", "", "exact Go patch version")
+	k8sRelease := flags.String(
+		"k8s-release",
+		"",
+		"Kubernetes release (1.N.P), preserving module majors",
+	)
 	goBinary := flags.String("go-bin", "go", "Go compiler executable")
 	reportPath := flags.String("report", defaultReportPath, "JSON report path")
 	var k8sTargets repeatedFlag
@@ -65,9 +73,12 @@ func parseArgs(args []string) (cliOptions, error) {
 		return cliOptions{}, err
 	}
 	if flags.NArg() != 0 {
-		return cliOptions{}, fmt.Errorf("unexpected positional arguments: %s", strings.Join(flags.Args(), " "))
+		return cliOptions{}, fmt.Errorf(
+			"unexpected positional arguments: %s",
+			strings.Join(flags.Args(), " "),
+		)
 	}
-	policy, err := updater.ParsePolicy(*mode, *goTarget, k8sTargets)
+	policy, err := updater.ParsePolicy(*mode, *goTarget, *k8sRelease, k8sTargets)
 	if err != nil {
 		return cliOptions{}, err
 	}
@@ -94,8 +105,13 @@ func execute(args []string, root string, stdout, stderr io.Writer) int {
 		reportPath = filepath.Join(absoluteRoot, reportPath)
 	}
 	if err := validateRepository(absoluteRoot); err != nil {
-		report := updater.Report{Status: "failed", Policy: options.policy, Failure: err.Error(), Modules: []updater.ModuleResult{}}
-		if writeErr := updater.WriteReport(reportPath, report); writeErr != nil {
+		report := updater.Report{
+			Status:  "failed",
+			Policy:  options.policy,
+			Failure: err.Error(),
+			Modules: []updater.ModuleResult{},
+		}
+		if _, writeErr := writeFailureReport(reportPath, report); writeErr != nil {
 			_, _ = fmt.Fprintf(stderr, "cannot write report: %v\n", writeErr)
 		}
 		_, _ = fmt.Fprintf(stderr, "precondition failed: %v\n", err)
@@ -104,10 +120,26 @@ func execute(args []string, root string, stdout, stderr io.Writer) int {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	report, runErr := updater.Run(ctx, updater.Config{Root: absoluteRoot, Policy: options.policy, GoBinary: options.goBinary, ReportPath: reportPath, Progress: stderr})
+	report, runErr := updater.Run(
+		ctx,
+		updater.Config{
+			Root:       absoluteRoot,
+			Policy:     options.policy,
+			GoBinary:   options.goBinary,
+			ReportPath: reportPath,
+			Progress:   stderr,
+		},
+	)
 	if runErr != nil {
-		if writeErr := updater.WriteReport(reportPath, report); writeErr != nil {
-			_, _ = fmt.Fprintf(stderr, "dependency update failed: %v\ncannot write report: %v\n", runErr, writeErr)
+		var writeErr error
+		reportPath, writeErr = writeFailureReport(reportPath, report)
+		if writeErr != nil {
+			_, _ = fmt.Fprintf(
+				stderr,
+				"dependency update failed: %v\ncannot write report: %v\n",
+				runErr,
+				writeErr,
+			)
 			return 2
 		}
 	}
@@ -119,33 +151,53 @@ func execute(args []string, root string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-func validateRepository(root string) error {
-	modulePath := ""
-	goMod, err := os.ReadFile(filepath.Join(root, "go.mod")) // #nosec G304 -- fixed filename under the maintainer-selected repository root.
-	if err != nil {
-		return &updater.PreconditionError{Err: fmt.Errorf("repository root must contain go.mod: %w", err)}
+func writeFailureReport(path string, report updater.Report) (string, error) {
+	// Preserve previous reports; only successful runs replace the requested path.
+	if _, err := os.Stat(path); err == nil {
+		path += ".failed"
 	}
-	for _, line := range strings.Split(string(goMod), "\n") {
-		fields := strings.Fields(line)
-		if len(fields) >= 2 && fields[0] == "module" {
-			modulePath = fields[1]
-			break
+	return path, updater.WriteReport(path, report)
+}
+
+func validateRepository(root string) error {
+	goMod, err := os.ReadFile(
+		filepath.Join(root, "go.mod"),
+	) // #nosec G304 -- fixed filename under the maintainer-selected repository root.
+	if err != nil {
+		return &updater.PreconditionError{
+			Err: fmt.Errorf("repository root must contain go.mod: %w", err),
 		}
 	}
+	modulePath := modfile.ModulePath(goMod)
 	if modulePath != "github.com/openshift/multiarch-tuning-operator" {
-		return &updater.PreconditionError{Err: fmt.Errorf("expected repository module github.com/openshift/multiarch-tuning-operator, found %q", modulePath)}
+		return &updater.PreconditionError{
+			Err: fmt.Errorf(
+				"expected repository module github.com/openshift/multiarch-tuning-operator, found %q",
+				modulePath,
+			),
+		}
 	}
 	if _, err := os.Stat(filepath.Join(root, "Makefile")); err != nil {
-		return &updater.PreconditionError{Err: fmt.Errorf("repository root must contain Makefile: %w", err)}
+		return &updater.PreconditionError{
+			Err: fmt.Errorf("repository root must contain Makefile: %w", err),
+		}
 	}
 	command := exec.Command("git", "status", "--porcelain", "--untracked-files=all")
 	command.Dir = root
 	output, err := command.CombinedOutput()
 	if err != nil {
-		return &updater.PreconditionError{Err: fmt.Errorf("check clean Git working tree: %w: %s", err, strings.TrimSpace(string(output)))}
+		return &updater.PreconditionError{
+			Err: fmt.Errorf(
+				"check clean Git working tree: %w: %s",
+				err,
+				strings.TrimSpace(string(output)),
+			),
+		}
 	}
 	if len(strings.TrimSpace(string(output))) != 0 {
-		return &updater.PreconditionError{Err: fmt.Errorf("working tree is not clean:\n%s", strings.TrimSpace(string(output)))}
+		return &updater.PreconditionError{
+			Err: fmt.Errorf("working tree is not clean:\n%s", strings.TrimSpace(string(output))),
+		}
 	}
 	return nil
 }

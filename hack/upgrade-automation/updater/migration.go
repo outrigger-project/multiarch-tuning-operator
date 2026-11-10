@@ -18,7 +18,9 @@ import (
 	"golang.org/x/mod/module"
 )
 
-var modulePathMismatch = regexp.MustCompile(`module declares its path as:\s*(\S+)\s+but was required as:\s*(\S+)`)
+var modulePathMismatch = regexp.MustCompile(
+	`module declares its path as:\s*(\S+)\s+but was required as:\s*(\S+)`,
+)
 
 type migrationConstraint struct{ err error }
 
@@ -32,21 +34,45 @@ func (e *migrationConstraint) Unwrap() error { return e.err }
 
 func renamedModulePath(err error, requested string) string {
 	match := modulePathMismatch.FindStringSubmatch(err.Error())
-	if len(match) != 3 || match[2] != requested || match[1] == requested || module.CheckPath(match[1]) != nil {
+	if len(match) != 3 || match[2] != requested || match[1] == requested ||
+		module.CheckPath(match[1]) != nil {
 		return ""
 	}
 	return match[1]
 }
 
-func migrateModule(ctx context.Context, runner GoRunner, oldPath, newPath, version string, graph Snapshot, policy Policy, transaction *Transaction, checkpoint ModuleCheckpoint) ([]string, error) {
+func migrateModule(
+	ctx context.Context,
+	runner GoRunner,
+	oldPath, newPath, version string,
+	graph Snapshot,
+	policy Policy,
+	transaction *Transaction,
+	checkpoint ModuleCheckpoint,
+) ([]string, error) {
 	if isProtectedModule(oldPath, policy) || isProtectedModule(newPath, policy) {
-		return nil, &migrationConstraint{fmt.Errorf("module-path migration %s -> %s touches a policy-protected module", oldPath, newPath)}
+		return nil, &migrationConstraint{
+			fmt.Errorf(
+				"module-path migration %s -> %s touches a policy-protected module",
+				oldPath,
+				newPath,
+			),
+		}
 	}
 	if err := module.Check(newPath, version); err != nil {
-		return nil, &migrationConstraint{fmt.Errorf("invalid renamed module target %s@%s: %w", newPath, version, err)}
+		return nil, &migrationConstraint{
+			fmt.Errorf("invalid renamed module target %s@%s: %w", newPath, version, err),
+		}
 	}
 	if selected, exists := graph.Modules[newPath]; exists && selected.Version != version {
-		return nil, &migrationConstraint{fmt.Errorf("renamed module %s already selected at %s; refusing to override it with %s", newPath, selected.Version, version)}
+		return nil, &migrationConstraint{
+			fmt.Errorf(
+				"renamed module %s already selected at %s; refusing to override it with %s",
+				newPath,
+				selected.Version,
+				version,
+			),
+		}
 	}
 	// Download before changing imports; verify the new path really declares itself.
 	output, err := runner.Run(ctx, "mod", "download", "-json", newPath+"@"+version)
@@ -62,21 +88,39 @@ func migrateModule(ctx context.Context, runner GoRunner, oldPath, newPath, versi
 		return nil, fmt.Errorf("decode renamed module download: %w", err)
 	}
 	if downloaded.Path != newPath || downloaded.Version != version || downloaded.GoMod == "" {
-		return nil, fmt.Errorf("unexpected downloaded renamed module metadata for %s@%s", newPath, version)
+		return nil, fmt.Errorf(
+			"unexpected downloaded renamed module metadata for %s@%s",
+			newPath,
+			version,
+		)
 	}
 	data, err := os.ReadFile(downloaded.GoMod)
 	if err != nil {
 		return nil, fmt.Errorf("read renamed module declaration: %w", err)
 	}
 	if declared := modfile.ModulePath(data); declared != newPath {
-		return nil, &migrationConstraint{fmt.Errorf("renamed target %s declares module path %q", newPath, declared)}
+		return nil, &migrationConstraint{
+			fmt.Errorf("renamed target %s declares module path %q", newPath, declared),
+		}
 	}
-	files, err := rewriteModuleImports(runner.Root, oldPath, newPath, graph, transaction, checkpoint)
+	files, err := rewriteModuleImports(
+		runner.Root,
+		oldPath,
+		newPath,
+		graph,
+		transaction,
+		checkpoint,
+	)
 	if err != nil {
 		return files, err
 	}
 	if len(files) == 0 {
-		return nil, &migrationConstraint{fmt.Errorf("cannot migrate %s: no root-module imports use this path; its transitive consumers must migrate first", oldPath)}
+		return nil, &migrationConstraint{
+			fmt.Errorf(
+				"cannot migrate %s: no root-module imports use this path; its transitive consumers must migrate first",
+				oldPath,
+			),
+		}
 	}
 	if _, err := runner.Run(ctx, "mod", "edit", "-droprequire="+oldPath, "-require="+newPath+"@"+version); err != nil {
 		return files, err
@@ -87,7 +131,12 @@ func migrateModule(ctx context.Context, runner GoRunner, oldPath, newPath, versi
 	return files, nil
 }
 
-func rewriteModuleImports(root, oldPath, newPath string, graph Snapshot, transaction *Transaction, checkpoint ModuleCheckpoint) ([]string, error) {
+func rewriteModuleImports(
+	root, oldPath, newPath string,
+	graph Snapshot,
+	transaction *Transaction,
+	checkpoint ModuleCheckpoint,
+) ([]string, error) {
 	root, err := filepath.Abs(root)
 	if err != nil {
 		return nil, err
@@ -101,7 +150,8 @@ func rewriteModuleImports(root, oldPath, newPath string, graph Snapshot, transac
 			if path == root {
 				return nil
 			}
-			if strings.HasPrefix(entry.Name(), ".") || entry.Name() == "vendor" || entry.Name() == "testdata" {
+			if strings.HasPrefix(entry.Name(), ".") || entry.Name() == "vendor" ||
+				entry.Name() == "testdata" {
 				return filepath.SkipDir
 			}
 			if _, err := os.Stat(filepath.Join(path, "go.mod")); err == nil {
@@ -114,7 +164,9 @@ func rewriteModuleImports(root, oldPath, newPath string, graph Snapshot, transac
 		if filepath.Ext(path) != ".go" || entry.Type()&os.ModeSymlink != 0 {
 			return nil
 		}
-		data, err := os.ReadFile(path) // #nosec G304 -- WalkDir supplies a repository-local path; symlinks are excluded above.
+		data, err := os.ReadFile(
+			path,
+		) // #nosec G304 -- WalkDir supplies a repository-local path; symlinks are excluded above.
 		if err != nil {
 			return err
 		}
@@ -132,11 +184,17 @@ func rewriteModuleImports(root, oldPath, newPath string, graph Snapshot, transac
 			if !belongsToModule(importPath, oldPath, graph) {
 				continue
 			}
-			start, end := positions.Position(literal.Pos()).Offset, positions.Position(literal.End()).Offset
+			start, end := positions.Position(
+				literal.Pos(),
+			).Offset, positions.Position(
+				literal.End(),
+			).Offset
 			replacement := strconv.Quote(newPath + strings.TrimPrefix(importPath, oldPath))
 			data = append(data[:start], append([]byte(replacement), data[end:]...)...)
 		}
-		original, err := os.ReadFile(path) // #nosec G304 -- same repository-local, non-symlink source file read above.
+		original, err := os.ReadFile(
+			path,
+		) // #nosec G304 -- same repository-local, non-symlink source file read above.
 		if err != nil {
 			return err
 		}
@@ -161,7 +219,8 @@ func belongsToModule(importPath, oldPath string, graph Snapshot) bool {
 		return false
 	}
 	for path := range graph.Modules {
-		if strings.HasPrefix(path, oldPath+"/") && (importPath == path || strings.HasPrefix(importPath, path+"/")) {
+		if strings.HasPrefix(path, oldPath+"/") &&
+			(importPath == path || strings.HasPrefix(importPath, path+"/")) {
 			return false
 		}
 	}
@@ -184,7 +243,10 @@ func isMigrationBuildConstraint(err error) bool {
 	if isConstraintFailure(err) {
 		return true
 	}
-	for _, marker := range []string{"undefined:", "cannot use ", "imported and not used", "has no field or method", "too many arguments", "not enough arguments", "import cycle not allowed", "syntax error:"} {
+	for _, marker := range []string{
+		"undefined:", "cannot use ", "imported and not used", "has no field or method",
+		"too many arguments", "not enough arguments", "import cycle not allowed", "syntax error:",
+	} {
 		if strings.Contains(err.Error(), marker) {
 			return true
 		}

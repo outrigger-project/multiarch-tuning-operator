@@ -15,6 +15,113 @@ import (
 	"github.com/openshift/multiarch-tuning-operator/hack/upgrade-automation/updater"
 )
 
+const testFailedStatus = "failed"
+
+func TestValidateRepositoryModuleIdentity(t *testing.T) {
+	root := cliFixture(t)
+	setFakeGitStatus(t, "")
+	if err := validateRepository(root); err != nil {
+		t.Fatalf("validateRepository: %v", err)
+	}
+	oldModule := []byte("module example.com/other-operator\n\ngo 1.26.7\n")
+	if err := os.WriteFile(filepath.Join(root, "go.mod"), oldModule, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateRepository(root); err == nil ||
+		!strings.Contains(
+			err.Error(),
+			"expected repository module github.com/openshift/multiarch-tuning-operator",
+		) {
+		t.Fatalf("validateRepository: got %v, want wrong-repository error", err)
+	}
+}
+
+func TestValidateRepositoryQuotedModulePath(t *testing.T) {
+	root := cliFixture(t)
+	setFakeGitStatus(t, "")
+	goMod := "// repository identity\n" +
+		"module \"github.com/openshift/multiarch-tuning-operator\" // module comment\n\ngo 1.26.7\n"
+	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte(goMod), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateRepository(root); err != nil {
+		t.Fatalf("validateRepository: rejecting valid quoted module path: %v", err)
+	}
+}
+
+func TestFailedRunPreservesSuccessfulReport(t *testing.T) {
+	for _, tt := range []struct {
+		name   string
+		status string
+		code   int
+	}{
+		{name: "precondition", status: "?? user-file\n", code: 1},
+		{name: "execution", code: 2},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			root := cliFixture(t)
+			setFakeGitStatus(t, tt.status)
+			success := []byte(`{"status":"completed"}`)
+			path := filepath.Join(root, defaultReportPath)
+			if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, success, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			var stdout, stderr bytes.Buffer
+			args := []string{"--mode", "pin-both", "--go-bin", filepath.Join(root, "missing-compiler")}
+			if code := execute(args, root, &stdout, &stderr); code != tt.code {
+				t.Fatalf("execute: exit %d, stderr=%s", code, &stderr)
+			}
+			got, err := os.ReadFile(path)
+			if err != nil || !bytes.Equal(got, success) {
+				t.Fatalf("successful report overwritten: %s, %v", got, err)
+			}
+			data, err := os.ReadFile(path + ".failed")
+			if err != nil {
+				t.Fatalf("failure report missing: %v", err)
+			}
+			var report updater.Report
+			if err := json.Unmarshal(data, &report); err != nil || report.Status != testFailedStatus {
+				t.Fatalf("invalid failure report: %s, %v", data, err)
+			}
+		})
+	}
+}
+
+func TestDefaultReportIsIgnored(t *testing.T) {
+	cmd := exec.Command("git", "check-ignore", "--no-index", "--quiet", defaultReportPath)
+	cmd.Dir = "../../../.."
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("default report is not ignored: %v", err)
+	}
+}
+
+func TestParseArgsKubernetesRelease(t *testing.T) {
+	for _, mode := range []string{"both", "kubernetes-only"} {
+		args := []string{"--mode", mode, "--k8s-release", "1.36.6"}
+		if mode == "both" {
+			args = append(args, "--go-target", "1.26.10")
+		}
+		got, err := parseArgs(args)
+		if err != nil || got.policy.KubernetesRelease != "1.36.6" {
+			t.Fatalf("parseArgs: %v, %v", got, err)
+		}
+	}
+	for _, args := range [][]string{
+		{"--mode", "go-only", "--go-target", "1.26.10", "--k8s-release", "1.36.6"},
+		{"--mode", "pin-both", "--k8s-release", "1.36.6"},
+		{"--mode", "kubernetes-only", "--k8s-release", "1.36"},
+		{"--mode", "kubernetes-only", "--k8s-release", "1.36.6-beta.1"},
+		{"--mode", "kubernetes-only", "--k8s-release", "1.036.6"},
+	} {
+		if _, err := parseArgs(args); err == nil {
+			t.Fatalf("accepted invalid args %v", args)
+		}
+	}
+}
+
 func TestParseArgsAcceptsFourModes(t *testing.T) {
 	tests := []struct {
 		name string
@@ -22,9 +129,30 @@ func TestParseArgsAcceptsFourModes(t *testing.T) {
 		mode updater.Mode
 	}{
 		{name: "pin both", args: []string{"--mode", "pin-both"}, mode: updater.ModePinBoth},
-		{name: "Go only", args: []string{"--mode", "go-only", "--go-target", "1.26.8"}, mode: updater.ModeGoOnly},
-		{name: "Kubernetes only", args: []string{"--mode", "kubernetes-only", "--k8s-target", "k8s.io/api=v0.36.6"}, mode: updater.ModeKubernetesOnly},
-		{name: "both", args: []string{"--mode", "both", "--go-target", "1.26.8", "--k8s-target", "k8s.io/api=v0.36.6", "--k8s-target", "k8s.io/apimachinery=v0.36.6"}, mode: updater.ModeBoth},
+		{
+			name: "Go only",
+			args: []string{"--mode", "go-only", "--go-target", "1.26.8"},
+			mode: updater.ModeGoOnly,
+		},
+		{
+			name: "Kubernetes only",
+			args: []string{"--mode", "kubernetes-only", "--k8s-target", "k8s.io/api=v0.36.6"},
+			mode: updater.ModeKubernetesOnly,
+		},
+		{
+			name: "both",
+			args: []string{
+				"--mode",
+				"both",
+				"--go-target",
+				"1.26.8",
+				"--k8s-target",
+				"k8s.io/api=v0.36.6",
+				"--k8s-target",
+				"k8s.io/apimachinery=v0.36.6",
+			},
+			mode: updater.ModeBoth,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -45,7 +173,12 @@ func TestParseArgsDefaultsReportAndGoBinary(t *testing.T) {
 		t.Fatalf("parseArgs() error = %v", err)
 	}
 	if options.reportPath != defaultReportPath || options.goBinary != "go" {
-		t.Fatalf("defaults = report %q, Go %q; want %q and go", options.reportPath, options.goBinary, defaultReportPath)
+		t.Fatalf(
+			"defaults = report %q, Go %q; want %q and go",
+			options.reportPath,
+			options.goBinary,
+			defaultReportPath,
+		)
 	}
 }
 
@@ -70,9 +203,18 @@ func TestExecuteWritesFailureReportAndReturnsUpdaterExitCode(t *testing.T) {
 	}
 	setFakeGitStatus(t, "")
 	var stdout, stderr bytes.Buffer
-	code := execute([]string{"--mode", "go-only", "--go-target", "1.26.8", "--go-bin", goBinary}, root, &stdout, &stderr)
+	code := execute(
+		[]string{"--mode", "go-only", "--go-target", "1.26.8", "--go-bin", goBinary},
+		root,
+		&stdout,
+		&stderr,
+	)
 	if code != 2 {
-		t.Fatalf("execute() exit = %d, want compiler mismatch exit 2; stderr=%s", code, stderr.String())
+		t.Fatalf(
+			"execute() exit = %d, want compiler mismatch exit 2; stderr=%s",
+			code,
+			stderr.String(),
+		)
 	}
 	data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(defaultReportPath)))
 	if err != nil {
@@ -82,11 +224,15 @@ func TestExecuteWritesFailureReportAndReturnsUpdaterExitCode(t *testing.T) {
 	if err := json.Unmarshal(data, &report); err != nil {
 		t.Fatalf("decode report: %v", err)
 	}
-	if report.Status != "failed" || !report.RolledBack || report.Failure == "" || report.Baseline.GoDirective != "1.26.7" {
+	if report.Status != testFailedStatus || !report.RolledBack || report.Failure == "" ||
+		report.Baseline.GoDirective != "1.26.7" {
 		t.Fatalf("failure report = %#v", report)
 	}
 	if len(report.Policy.KubernetesTargets) != 0 {
-		t.Fatalf("pin-both Kubernetes target map unexpectedly nonempty: %#v", report.Policy.KubernetesTargets)
+		t.Fatalf(
+			"pin-both Kubernetes target map unexpectedly nonempty: %#v",
+			report.Policy.KubernetesTargets,
+		)
 	}
 }
 
@@ -106,7 +252,7 @@ func TestExecuteDirtyTreeReturnsPreconditionExitAndWritesReport(t *testing.T) {
 	if err := json.Unmarshal(data, &report); err != nil {
 		t.Fatal(err)
 	}
-	if report.Status != "failed" || report.RolledBack || !bytes.Contains(data, []byte("clean")) {
+	if report.Status != testFailedStatus || report.RolledBack || !bytes.Contains(data, []byte("clean")) {
 		t.Fatalf("dirty-tree report = %s", data)
 	}
 }
@@ -118,7 +264,9 @@ func TestExecuteInvalidArgumentsReturnOneWithoutStartingUpdater(t *testing.T) {
 	if code != 1 {
 		t.Fatalf("execute() exit = %d, want invalid argument exit 1", code)
 	}
-	if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(defaultReportPath))); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(defaultReportPath))); !os.IsNotExist(
+		err,
+	) {
 		t.Fatalf("invalid invocation wrote report: stat error = %v", err)
 	}
 }
@@ -131,7 +279,10 @@ func TestExecuteReportPublicationControlsDependencyCommit(t *testing.T) {
 	for _, failPublication := range []bool{false, true} {
 		t.Run(fmt.Sprintf("publication failure=%t", failPublication), func(t *testing.T) {
 			root := cliFixture(t)
-			original := "module github.com/openshift/multiarch-tuning-operator\n\ngo " + strings.TrimPrefix(strings.Fields(runtime.Version())[0], "go") + "\n"
+			original := "module github.com/openshift/multiarch-tuning-operator\n\ngo " + strings.TrimPrefix(
+				strings.Fields(runtime.Version())[0],
+				"go",
+			) + "\n"
 			if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte(original), 0o600); err != nil {
 				t.Fatal(err)
 			}
@@ -153,7 +304,12 @@ func TestExecuteReportPublicationControlsDependencyCommit(t *testing.T) {
 			}
 			setFakeGitStatus(t, "")
 			var stdout, stderr bytes.Buffer
-			code := execute([]string{"--mode", "pin-both", "--report", reportPath, "--go-bin", goBinary}, root, &stdout, &stderr)
+			code := execute(
+				[]string{"--mode", "pin-both", "--report", reportPath, "--go-bin", goBinary},
+				root,
+				&stdout,
+				&stderr,
+			)
 			if failPublication {
 				if code != 2 || !strings.Contains(stderr.String(), "publish report") {
 					t.Fatalf("exit=%d stderr=%s, want publication failure", code, &stderr)
@@ -179,7 +335,8 @@ func TestExecuteReportPublicationControlsDependencyCommit(t *testing.T) {
 				t.Fatal(err)
 			}
 			var report updater.Report
-			if err := json.Unmarshal(data, &report); err != nil || report.Status != "completed" || report.RolledBack {
+			if err := json.Unmarshal(data, &report); err != nil || report.Status != "completed" ||
+				report.RolledBack {
 				t.Fatalf("report=%s error=%v", data, err)
 			}
 			if _, err := os.Stat(sentinel); !os.IsNotExist(err) {
@@ -203,7 +360,10 @@ func TestLauncherUsesSelectedGoBinary(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
-	for _, option := range [][]string{{"--go-bin", selected}, {"--go-bin=" + selected}, {"-go-bin", selected}, {"-go-bin=" + selected}} {
+	for _, option := range [][]string{
+		{"--go-bin", selected}, {"--go-bin=" + selected},
+		{"-go-bin", selected}, {"-go-bin=" + selected},
+	} {
 		args := append([]string{"../../scripts/upgrade.sh", "--mode", "pin-both"}, option...)
 		args = append(args, "--help")
 		output, err := exec.Command("bash", args...).CombinedOutput()
@@ -213,7 +373,8 @@ func TestLauncherUsesSelectedGoBinary(t *testing.T) {
 	}
 	output, err := exec.Command("bash", "../../scripts/upgrade.sh", "--go-bin").CombinedOutput()
 	var exitErr *exec.ExitError
-	if !errors.As(err, &exitErr) || exitErr.ExitCode() != 1 || !bytes.Contains(output, []byte("--go-bin requires")) {
+	if !errors.As(err, &exitErr) || exitErr.ExitCode() != 1 ||
+		!bytes.Contains(output, []byte("--go-bin requires")) {
 		t.Fatalf("missing compiler argument: error=%v output=%s", err, output)
 	}
 }
@@ -221,7 +382,8 @@ func TestLauncherUsesSelectedGoBinary(t *testing.T) {
 func cliFixture(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
-	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module github.com/openshift/multiarch-tuning-operator\n\ngo 1.26.7\n"), 0o600); err != nil {
+	goMod := []byte("module github.com/openshift/multiarch-tuning-operator\n\ngo 1.26.7\n")
+	if err := os.WriteFile(filepath.Join(root, "go.mod"), goMod, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(root, "Makefile"), []byte("all:\n\t@true\n"), 0o600); err != nil {

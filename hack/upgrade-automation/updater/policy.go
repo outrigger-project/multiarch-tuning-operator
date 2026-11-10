@@ -22,6 +22,7 @@ const (
 type Policy struct {
 	Mode              Mode              `json:"mode"`
 	GoTarget          string            `json:"goTarget,omitempty"`
+	KubernetesRelease string            `json:"kubernetesRelease,omitempty"`
 	KubernetesTargets map[string]string `json:"kubernetesTargets,omitempty"`
 }
 
@@ -41,8 +42,12 @@ type Snapshot struct {
 
 var exactGoVersion = regexp.MustCompile(`^1\.[0-9]+\.[0-9]+$`)
 
-func ParsePolicy(mode, goTarget string, k8sTargetArgs []string) (Policy, error) {
-	policy := Policy{Mode: Mode(mode), KubernetesTargets: make(map[string]string)}
+func ParsePolicy(mode, goTarget, k8sRelease string, k8sTargetArgs []string) (Policy, error) {
+	policy := Policy{
+		Mode:              Mode(mode),
+		KubernetesRelease: k8sRelease,
+		KubernetesTargets: make(map[string]string),
+	}
 	switch policy.Mode {
 	case ModePinBoth, ModeGoOnly, ModeKubernetesOnly, ModeBoth:
 	default:
@@ -53,34 +58,69 @@ func ParsePolicy(mode, goTarget string, k8sTargetArgs []string) (Policy, error) 
 	updatesKubernetes := policy.Mode == ModeKubernetesOnly || policy.Mode == ModeBoth
 	if updatesGo {
 		if !exactGoVersion.MatchString(goTarget) {
-			return Policy{}, fmt.Errorf("mode %q requires an exact Go target in X.Y.Z form, got %q", mode, goTarget)
+			return Policy{}, fmt.Errorf(
+				"mode %q requires an exact Go target in X.Y.Z form, got %q",
+				mode,
+				goTarget,
+			)
 		}
 		policy.GoTarget = goTarget
 	} else if goTarget != "" {
 		return Policy{}, fmt.Errorf("mode %q pins Go and does not accept --go-target", mode)
 	}
 
-	if !updatesKubernetes && len(k8sTargetArgs) != 0 {
-		return Policy{}, fmt.Errorf("mode %q pins Kubernetes and does not accept --k8s-target", mode)
+	if k8sRelease != "" &&
+		(!exactGoVersion.MatchString(k8sRelease) || !semver.IsValid("v"+k8sRelease)) {
+		return Policy{}, fmt.Errorf(
+			"invalid Kubernetes release %q: expected stable 1.N.P",
+			k8sRelease,
+		)
+	}
+	if !updatesKubernetes {
+		if k8sRelease != "" {
+			return Policy{}, fmt.Errorf(
+				"mode %q pins Kubernetes and does not accept --k8s-release",
+				mode,
+			)
+		}
+		if len(k8sTargetArgs) != 0 {
+			return Policy{}, fmt.Errorf(
+				"mode %q pins Kubernetes and does not accept --k8s-target",
+				mode,
+			)
+		}
 	}
 	for _, target := range k8sTargetArgs {
 		modulePath, version, ok := strings.Cut(target, "=")
 		if !ok || modulePath == "" || version == "" || strings.Contains(version, "=") {
-			return Policy{}, fmt.Errorf("invalid Kubernetes target %q: expected module=exact-version", target)
+			return Policy{}, fmt.Errorf(
+				"invalid Kubernetes target %q: expected module=exact-version",
+				target,
+			)
 		}
 		if err := module.CheckPath(modulePath); err != nil {
-			return Policy{}, fmt.Errorf("invalid module path in Kubernetes target %q: %w", target, err)
+			return Policy{}, fmt.Errorf(
+				"invalid module path in Kubernetes target %q: %w",
+				target,
+				err,
+			)
 		}
 		if !semver.IsValid(version) {
-			return Policy{}, fmt.Errorf("invalid exact module version in Kubernetes target %q", target)
+			return Policy{}, fmt.Errorf(
+				"invalid exact module version in Kubernetes target %q",
+				target,
+			)
 		}
 		if _, duplicate := policy.KubernetesTargets[modulePath]; duplicate {
 			return Policy{}, fmt.Errorf("duplicate Kubernetes target for module %q", modulePath)
 		}
 		policy.KubernetesTargets[modulePath] = version
 	}
-	if updatesKubernetes && len(policy.KubernetesTargets) == 0 {
-		return Policy{}, fmt.Errorf("mode %q requires at least one --k8s-target module=version", mode)
+	if updatesKubernetes && len(policy.KubernetesTargets) == 0 && k8sRelease == "" {
+		return Policy{}, fmt.Errorf(
+			"mode %q requires --k8s-release or at least one --k8s-target module=version",
+			mode,
+		)
 	}
 	return policy, nil
 }
@@ -97,10 +137,16 @@ func ValidatePolicy(before, after Snapshot, policy Policy) []error {
 		}
 	}
 	if after.GoDirective != wantGo {
-		violations = append(violations, fmt.Errorf("go directive selected %q, want exact %q", after.GoDirective, wantGo))
+		violations = append(
+			violations,
+			fmt.Errorf("go directive selected %q, want exact %q", after.GoDirective, wantGo),
+		)
 	}
 	if after.Toolchain != wantToolchain {
-		violations = append(violations, fmt.Errorf("toolchain directive selected %q, want %q", after.Toolchain, wantToolchain))
+		violations = append(
+			violations,
+			fmt.Errorf("toolchain directive selected %q, want %q", after.Toolchain, wantToolchain),
+		)
 	}
 
 	for _, path := range sortedSnapshotPaths(before) {
@@ -110,7 +156,10 @@ func ValidatePolicy(before, after Snapshot, policy Policy) []error {
 		}
 		selected, exists := after.Modules[path]
 		if !exists {
-			violations = append(violations, fmt.Errorf("baseline Kubernetes module %q was removed", path))
+			violations = append(
+				violations,
+				fmt.Errorf("baseline Kubernetes module %q was removed", path),
+			)
 			continue
 		}
 		wantVersion := baselineModule.Version
@@ -118,7 +167,15 @@ func ValidatePolicy(before, after Snapshot, policy Policy) []error {
 			wantVersion = target
 		}
 		if selected.Version != wantVersion {
-			violations = append(violations, fmt.Errorf("kubernetes module %q selected %q, want exact %q", path, selected.Version, wantVersion))
+			violations = append(
+				violations,
+				fmt.Errorf(
+					"kubernetes module %q selected %q, want exact %q",
+					path,
+					selected.Version,
+					wantVersion,
+				),
+			)
 		}
 	}
 
@@ -127,9 +184,14 @@ func ValidatePolicy(before, after Snapshot, policy Policy) []error {
 		if isKubernetesModule(path) {
 			if _, existed := before.Modules[path]; !existed {
 				if target, explicitlyAllowed := policy.KubernetesTargets[path]; !explicitlyAllowed {
-					violations = append(violations, fmt.Errorf("new Kubernetes module %q has no explicit policy target", path))
+					violations = append(
+						violations,
+						fmt.Errorf("new Kubernetes module %q has no explicit policy target", path),
+					)
 				} else if selected.Version != target {
-					violations = append(violations, fmt.Errorf("new Kubernetes module %q selected %q, want exact target %q", path, selected.Version, target))
+					violations = append(violations, fmt.Errorf(
+						"new Kubernetes module %q selected %q, want exact target %q", path, selected.Version, target,
+					))
 				}
 			}
 		}
@@ -145,7 +207,15 @@ func ValidatePolicy(before, after Snapshot, policy Policy) []error {
 			// The baseline loop reports k8s.io modules; this also supports an
 			// explicitly targeted Kubernetes ecosystem module outside that prefix.
 			if !isKubernetesModule(path) {
-				violations = append(violations, fmt.Errorf("target module %q selected %q, want exact target %q", path, selected.Version, target))
+				violations = append(
+					violations,
+					fmt.Errorf(
+						"target module %q selected %q, want exact target %q",
+						path,
+						selected.Version,
+						target,
+					),
+				)
 			}
 		}
 	}

@@ -67,7 +67,15 @@ func CaptureSnapshot(ctx context.Context, root, goBin string) (Snapshot, error) 
 	}
 	if len(mod.Replace) != 0 {
 		replacement := mod.Replace[0]
-		return Snapshot{}, &PreconditionError{Err: fmt.Errorf("replace directives are unsupported: %s %s => %s %s", replacement.Old.Path, replacement.Old.Version, replacement.New.Path, replacement.New.Version)}
+		return Snapshot{}, &PreconditionError{
+			Err: fmt.Errorf(
+				"replace directives are unsupported: %s %s => %s %s",
+				replacement.Old.Path,
+				replacement.Old.Version,
+				replacement.New.Path,
+				replacement.New.Version,
+			),
+		}
 	}
 
 	direct := make(map[string]bool, len(mod.Require))
@@ -88,13 +96,27 @@ func CaptureSnapshot(ctx context.Context, root, goBin string) (Snapshot, error) 
 			return Snapshot{}, fmt.Errorf("decode selected module graph: %w", err)
 		}
 		if listed.Path == "" {
-			return Snapshot{}, &PreconditionError{Err: errors.New("selected module graph contains an empty module path")}
+			return Snapshot{}, &PreconditionError{
+				Err: errors.New("selected module graph contains an empty module path"),
+			}
 		}
 		if listed.Replace != nil {
-			return Snapshot{}, &PreconditionError{Err: fmt.Errorf("replace directives are unsupported: selected module %q is replaced by %q", listed.Path, listed.Replace.Path)}
+			return Snapshot{}, &PreconditionError{
+				Err: fmt.Errorf(
+					"replace directives are unsupported: selected module %q is replaced by %q",
+					listed.Path,
+					listed.Replace.Path,
+				),
+			}
 		}
 		isDirect, required := direct[listed.Path]
-		modules[listed.Path] = Module{Path: listed.Path, Version: listed.Version, Main: listed.Main, Direct: isDirect, Required: required}
+		modules[listed.Path] = Module{
+			Path:     listed.Path,
+			Version:  listed.Version,
+			Main:     listed.Main,
+			Direct:   isDirect,
+			Required: required,
+		}
 	}
 	if len(modules) == 0 {
 		return Snapshot{}, &PreconditionError{Err: errors.New("selected module graph is empty")}
@@ -109,7 +131,12 @@ func rejectWorkspace(ctx context.Context, runner GoRunner) error {
 	}
 	workspace := strings.TrimSpace(string(output))
 	if workspace != "" && workspace != "off" {
-		return &PreconditionError{Err: fmt.Errorf("active Go workspace %q is unsupported; run from a module with GOWORK=off", workspace)}
+		return &PreconditionError{
+			Err: fmt.Errorf(
+				"active Go workspace %q is unsupported; run from a module with GOWORK=off",
+				workspace,
+			),
+		}
 	}
 	return nil
 }

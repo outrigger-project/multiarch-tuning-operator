@@ -15,14 +15,35 @@ func TestParsePolicyAcceptsFourModes(t *testing.T) {
 		wantTargets map[string]string
 	}{
 		{name: "pin both", mode: "pin-both", wantTargets: map[string]string{}},
-		{name: "go only", mode: "go-only", goTarget: "1.26.8", wantGo: "1.26.8", wantTargets: map[string]string{}},
-		{name: "kubernetes only", mode: "kubernetes-only", k8sTargets: []string{"k8s.io/api=v0.36.6", "k8s.io/apimachinery=v0.36.6"}, wantTargets: map[string]string{"k8s.io/api": "v0.36.6", "k8s.io/apimachinery": "v0.36.6"}},
-		{name: "both", mode: "both", goTarget: "1.26.8", k8sTargets: []string{"k8s.io/api=v0.36.6"}, wantGo: "1.26.8", wantTargets: map[string]string{"k8s.io/api": "v0.36.6"}},
+		{
+			name:        "go only",
+			mode:        "go-only",
+			goTarget:    "1.26.8",
+			wantGo:      "1.26.8",
+			wantTargets: map[string]string{},
+		},
+		{
+			name:       "kubernetes only",
+			mode:       "kubernetes-only",
+			k8sTargets: []string{"k8s.io/api=v0.36.6", "k8s.io/apimachinery=v0.36.6"},
+			wantTargets: map[string]string{
+				"k8s.io/api":          testKubernetesTarget,
+				"k8s.io/apimachinery": testKubernetesTarget,
+			},
+		},
+		{
+			name:        "both",
+			mode:        "both",
+			goTarget:    "1.26.8",
+			k8sTargets:  []string{"k8s.io/api=v0.36.6"},
+			wantGo:      "1.26.8",
+			wantTargets: map[string]string{"k8s.io/api": testKubernetesTarget},
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := ParsePolicy(tt.mode, tt.goTarget, tt.k8sTargets)
+			got, err := ParsePolicy(tt.mode, tt.goTarget, "", tt.k8sTargets)
 			if err != nil {
 				t.Fatalf("ParsePolicy() error = %v", err)
 			}
@@ -34,7 +55,12 @@ func TestParsePolicyAcceptsFourModes(t *testing.T) {
 			}
 			for module, version := range tt.wantTargets {
 				if got.KubernetesTargets[module] != version {
-					t.Errorf("KubernetesTargets[%q] = %q, want %q", module, got.KubernetesTargets[module], version)
+					t.Errorf(
+						"KubernetesTargets[%q] = %q, want %q",
+						module,
+						got.KubernetesTargets[module],
+						version,
+					)
 				}
 			}
 		})
@@ -51,16 +77,32 @@ func TestParsePolicyRejectsMissingAndMalformedTargets(t *testing.T) {
 		{name: "missing Go target", mode: "go-only"},
 		{name: "Go target must include patch", mode: "go-only", goTarget: "1.26"},
 		{name: "missing Kubernetes target map", mode: "kubernetes-only"},
-		{name: "empty Kubernetes module", mode: "kubernetes-only", k8sTargets: []string{"=v0.36.6"}},
-		{name: "empty Kubernetes version", mode: "kubernetes-only", k8sTargets: []string{"k8s.io/api="}},
-		{name: "Kubernetes version must be exact", mode: "kubernetes-only", k8sTargets: []string{"k8s.io/api=latest"}},
-		{name: "duplicate Kubernetes target", mode: "kubernetes-only", k8sTargets: []string{"k8s.io/api=v0.36.5", "k8s.io/api=v0.36.6"}},
+		{
+			name:       "empty Kubernetes module",
+			mode:       "kubernetes-only",
+			k8sTargets: []string{"=v0.36.6"},
+		},
+		{
+			name:       "empty Kubernetes version",
+			mode:       "kubernetes-only",
+			k8sTargets: []string{"k8s.io/api="},
+		},
+		{
+			name:       "Kubernetes version must be exact",
+			mode:       "kubernetes-only",
+			k8sTargets: []string{"k8s.io/api=latest"},
+		},
+		{
+			name:       "duplicate Kubernetes target",
+			mode:       "kubernetes-only",
+			k8sTargets: []string{"k8s.io/api=v0.36.5", "k8s.io/api=v0.36.6"},
+		},
 		{name: "unknown mode", mode: "update-everything"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if _, err := ParsePolicy(tt.mode, tt.goTarget, tt.k8sTargets); err == nil {
+			if _, err := ParsePolicy(tt.mode, tt.goTarget, "", tt.k8sTargets); err == nil {
 				t.Fatal("ParsePolicy() error = nil, want invalid policy error")
 			}
 		})
@@ -75,38 +117,79 @@ func TestParsePolicyRejectsTargetsForPinnedDimensions(t *testing.T) {
 		k8sTargets []string
 	}{
 		{name: "Go target while Go pinned", mode: "pin-both", goTarget: "1.26.8"},
-		{name: "Kubernetes target while Kubernetes pinned", mode: "go-only", goTarget: "1.26.8", k8sTargets: []string{"k8s.io/api=v0.36.6"}},
-		{name: "Go target while Go pinned in Kubernetes mode", mode: "kubernetes-only", goTarget: "1.26.8", k8sTargets: []string{"k8s.io/api=v0.36.6"}},
+		{
+			name:       "Kubernetes target while Kubernetes pinned",
+			mode:       "go-only",
+			goTarget:   "1.26.8",
+			k8sTargets: []string{"k8s.io/api=v0.36.6"},
+		},
+		{
+			name:       "Go target while Go pinned in Kubernetes mode",
+			mode:       "kubernetes-only",
+			goTarget:   "1.26.8",
+			k8sTargets: []string{"k8s.io/api=v0.36.6"},
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if _, err := ParsePolicy(tt.mode, tt.goTarget, tt.k8sTargets); err == nil {
+			if _, err := ParsePolicy(tt.mode, tt.goTarget, "", tt.k8sTargets); err == nil {
 				t.Fatal("ParsePolicy() error = nil, want pinned-dimension target error")
 			}
 		})
 	}
 }
 
+func TestParsePolicyNamesRejectedKubernetesFlag(t *testing.T) {
+	for _, mode := range []string{"pin-both", "go-only"} {
+		goTarget := ""
+		if mode == "go-only" {
+			goTarget = "1.26.10"
+		}
+		for _, tt := range []struct {
+			name     string
+			release  string
+			targets  []string
+			wantFlag string
+		}{
+			{name: "release", release: "1.36.6", wantFlag: "--k8s-release"},
+			{name: "target", targets: []string{"k8s.io/api=v0.36.6"}, wantFlag: "--k8s-target"},
+			{name: "both", release: "1.36.6", targets: []string{"k8s.io/api=v0.36.6"}, wantFlag: "--k8s-release"},
+		} {
+			t.Run(mode+"/"+tt.name, func(t *testing.T) {
+				_, err := ParsePolicy(mode, goTarget, tt.release, tt.targets)
+				want := fmt.Sprintf(
+					"mode %q pins Kubernetes and does not accept %s",
+					mode,
+					tt.wantFlag,
+				)
+				if err == nil || err.Error() != want {
+					t.Fatalf("ParsePolicy: got %v, want %q", err, want)
+				}
+			})
+		}
+	}
+}
+
 func TestValidatePolicyPreservesIndependentGoAndKubernetesPins(t *testing.T) {
 	baseline := Snapshot{
-		GoDirective: "1.26.7",
+		GoDirective: testBaselineGo,
 		Toolchain:   "go1.26.7",
 		Modules: map[string]Module{
-			"k8s.io/api":          {Path: "k8s.io/api", Version: "v0.36.5"},
+			"k8s.io/api":          {Path: "k8s.io/api", Version: testKubernetesBaseline},
 			"k8s.io/apimachinery": {Path: "k8s.io/apimachinery", Version: "v0.36.4"},
 			"example.com/lib":     {Path: "example.com/lib", Version: "v1.2.3"},
 		},
 	}
-	policy, err := ParsePolicy("pin-both", "", nil)
+	policy, err := ParsePolicy("pin-both", "", "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	after := Snapshot{
-		GoDirective: "1.26.7",
+		GoDirective: testBaselineGo,
 		Toolchain:   "go1.26.7",
 		Modules: map[string]Module{
-			"k8s.io/api":          {Path: "k8s.io/api", Version: "v0.36.6"},
+			"k8s.io/api":          {Path: "k8s.io/api", Version: testKubernetesTarget},
 			"k8s.io/apimachinery": {Path: "k8s.io/apimachinery", Version: "v0.36.4"},
 			"example.com/lib":     {Path: "example.com/lib", Version: "v1.3.0"},
 		},
@@ -114,13 +197,16 @@ func TestValidatePolicyPreservesIndependentGoAndKubernetesPins(t *testing.T) {
 
 	violations := ValidatePolicy(baseline, after, policy)
 	if len(violations) != 1 {
-		t.Fatalf("ValidatePolicy() violations = %v, want one independently pinned Kubernetes violation", violations)
+		t.Fatalf(
+			"ValidatePolicy() violations = %v, want one independently pinned Kubernetes violation",
+			violations,
+		)
 	}
 }
 
 func TestValidatePolicyKeepsToolchainPresenceExact(t *testing.T) {
-	baseline := Snapshot{GoDirective: "1.26.7", Modules: map[string]Module{}}
-	policy, err := ParsePolicy("go-only", "1.26.8", nil)
+	baseline := Snapshot{GoDirective: testBaselineGo, Modules: map[string]Module{}}
+	policy, err := ParsePolicy("go-only", "1.26.8", "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,8 +217,12 @@ func TestValidatePolicyKeepsToolchainPresenceExact(t *testing.T) {
 }
 
 func TestValidatePolicyUpdatesExistingToolchainWithGoTarget(t *testing.T) {
-	baseline := Snapshot{GoDirective: "1.26.7", Toolchain: "go1.26.7", Modules: map[string]Module{}}
-	policy, err := ParsePolicy("go-only", "1.26.8", nil)
+	baseline := Snapshot{
+		GoDirective: testBaselineGo,
+		Toolchain:   "go1.26.7",
+		Modules:     map[string]Module{},
+	}
+	policy, err := ParsePolicy("go-only", "1.26.8", "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,15 +233,15 @@ func TestValidatePolicyUpdatesExistingToolchainWithGoTarget(t *testing.T) {
 }
 
 func TestValidatePolicyRejectsNewUnlistedKubernetesModule(t *testing.T) {
-	baseline := Snapshot{GoDirective: "1.26.7", Modules: map[string]Module{
-		"k8s.io/api": {Path: "k8s.io/api", Version: "v0.36.5"},
+	baseline := Snapshot{GoDirective: testBaselineGo, Modules: map[string]Module{
+		"k8s.io/api": {Path: "k8s.io/api", Version: testKubernetesBaseline},
 	}}
-	policy, err := ParsePolicy("kubernetes-only", "", []string{"k8s.io/api=v0.36.6"})
+	policy, err := ParsePolicy("kubernetes-only", "", "", []string{"k8s.io/api=v0.36.6"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	after := Snapshot{GoDirective: "1.26.7", Modules: map[string]Module{
-		"k8s.io/api":     {Path: "k8s.io/api", Version: "v0.36.6"},
+	after := Snapshot{GoDirective: testBaselineGo, Modules: map[string]Module{
+		"k8s.io/api":     {Path: "k8s.io/api", Version: testKubernetesTarget},
 		"k8s.io/new-api": {Path: "k8s.io/new-api", Version: "v0.1.0"},
 	}}
 	if violations := ValidatePolicy(baseline, after, policy); len(violations) == 0 {
@@ -160,18 +250,21 @@ func TestValidatePolicyRejectsNewUnlistedKubernetesModule(t *testing.T) {
 }
 
 func TestValidatePolicyOrdersKubernetesViolationsDeterministically(t *testing.T) {
-	baseline := Snapshot{GoDirective: "1.26.7", Modules: make(map[string]Module)}
-	after := Snapshot{GoDirective: "1.26.7", Modules: make(map[string]Module)}
+	baseline := Snapshot{GoDirective: testBaselineGo, Modules: make(map[string]Module)}
+	after := Snapshot{GoDirective: testBaselineGo, Modules: make(map[string]Module)}
 	for index := 0; index < 16; index++ {
 		modulePath := fmt.Sprintf("k8s.io/api-%02d", index)
-		baseline.Modules[modulePath] = Module{Path: modulePath, Version: "v0.36.5"}
-		after.Modules[modulePath] = Module{Path: modulePath, Version: "v0.36.6"}
+		baseline.Modules[modulePath] = Module{Path: modulePath, Version: testKubernetesBaseline}
+		after.Modules[modulePath] = Module{Path: modulePath, Version: testKubernetesTarget}
 	}
-	policy, err := ParsePolicy("pin-both", "", nil)
+	policy, err := ParsePolicy("pin-both", "", "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	violations := ValidatePolicy(baseline, after, policy)
+	if len(violations) != 16 {
+		t.Fatalf("ValidatePolicy() returned %d violations, want 16: %v", len(violations), violations)
+	}
 	for index := 1; index < len(violations); index++ {
 		if violations[index-1].Error() > violations[index].Error() {
 			t.Fatalf("policy violations are not stable-sorted: %v", violations)

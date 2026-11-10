@@ -25,12 +25,20 @@ func (r GoRunner) Run(ctx context.Context, args ...string) ([]byte, error) {
 	if goBin == "" {
 		goBin = "go"
 	}
-	cmd := exec.CommandContext(ctx, goBin, args...) // #nosec G204 -- the maintainer selects the compiler; arguments are passed without a shell.
+	cmd := exec.CommandContext(
+		ctx,
+		goBin,
+		args...) // #nosec G204 -- the maintainer selects the compiler; arguments are passed without a shell.
 	cmd.Dir = root
 	cmd.Env = environmentWith(map[string]string{"GOTOOLCHAIN": "local", "GOFLAGS": "-mod=mod"})
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return nil, fmt.Errorf("go %s: %w: %s", strings.Join(args, " "), err, sanitizeEvidence(strings.TrimSpace(string(output))))
+		return nil, fmt.Errorf(
+			"go %s: %w: %s",
+			strings.Join(args, " "),
+			err,
+			sanitizeEvidence(strings.TrimSpace(string(output))),
+		)
 	}
 	return output, nil
 }
@@ -42,7 +50,11 @@ func (r GoRunner) CheckCompiler(ctx context.Context, expected string) error {
 	}
 	fields := strings.Fields(string(output))
 	if len(fields) < 3 || fields[0] != "go" || fields[1] != "version" {
-		return fmt.Errorf("unexpected output from Go compiler %q: %q", r.Binary, strings.TrimSpace(string(output)))
+		return fmt.Errorf(
+			"unexpected output from Go compiler %q: %q",
+			r.Binary,
+			strings.TrimSpace(string(output)),
+		)
 	}
 	actual := strings.TrimPrefix(fields[2], "go")
 	expected = strings.TrimPrefix(expected, "go")
@@ -105,7 +117,9 @@ func removeToolchainDirective(root string) error {
 	if err != nil {
 		return err
 	}
-	data, err := os.ReadFile(path) // #nosec G304 -- fixed go.mod path under the maintainer-selected repository root.
+	data, err := os.ReadFile(
+		path,
+	) // #nosec G304 -- fixed go.mod path under the maintainer-selected repository root.
 	if err != nil {
 		return err
 	}

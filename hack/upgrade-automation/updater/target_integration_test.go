@@ -24,28 +24,40 @@ func TestTargetSetupEnforcesFourIndependentModes(t *testing.T) {
 		{
 			name: "pin both",
 			mode: "pin-both", baselineGo: testGoVersion,
-			wantGo:  testGoVersion,
-			wantK8s: map[string]string{"k8s.io/api": "v0.36.5", "k8s.io/apimachinery": "v0.36.4"},
+			wantGo: testGoVersion,
+			wantK8s: map[string]string{
+				"k8s.io/api":          testKubernetesBaseline,
+				"k8s.io/apimachinery": "v0.36.4",
+			},
 		},
 		{
 			name: "update Go only and keep absent toolchain absent",
 			mode: "go-only", baselineGo: "1.26.6", goTarget: testGoVersion,
-			wantGo:  testGoVersion,
-			wantK8s: map[string]string{"k8s.io/api": "v0.36.5", "k8s.io/apimachinery": "v0.36.4"},
+			wantGo: testGoVersion,
+			wantK8s: map[string]string{
+				"k8s.io/api":          testKubernetesBaseline,
+				"k8s.io/apimachinery": "v0.36.4",
+			},
 		},
 		{
 			name: "update Kubernetes only with independent targets",
 			mode: "kubernetes-only", baselineGo: testGoVersion,
 			k8sTargets: []string{"k8s.io/api=v0.36.6", "k8s.io/apimachinery=v0.36.6"},
 			wantGo:     testGoVersion,
-			wantK8s:    map[string]string{"k8s.io/api": "v0.36.6", "k8s.io/apimachinery": "v0.36.6"},
+			wantK8s: map[string]string{
+				"k8s.io/api":          testKubernetesTarget,
+				"k8s.io/apimachinery": testKubernetesTarget,
+			},
 		},
 		{
 			name: "update both and preserve existing toolchain presence",
 			mode: "both", baselineGo: "1.26.6", toolchain: "go1.26.6", goTarget: testGoVersion,
 			k8sTargets: []string{"k8s.io/api=v0.36.6", "k8s.io/apimachinery=v0.36.6"},
 			wantGo:     testGoVersion, wantTool: "go" + testGoVersion,
-			wantK8s: map[string]string{"k8s.io/api": "v0.36.6", "k8s.io/apimachinery": "v0.36.6"},
+			wantK8s: map[string]string{
+				"k8s.io/api":          testKubernetesTarget,
+				"k8s.io/apimachinery": testKubernetesTarget,
+			},
 		},
 	}
 
@@ -57,7 +69,7 @@ func TestTargetSetupEnforcesFourIndependentModes(t *testing.T) {
 			if err != nil {
 				t.Fatalf("CaptureSnapshot(baseline): %v", err)
 			}
-			policy, err := ParsePolicy(tt.mode, tt.goTarget, tt.k8sTargets)
+			policy, err := ParsePolicy(tt.mode, tt.goTarget, "", tt.k8sTargets)
 			if err != nil {
 				t.Fatalf("ParsePolicy(): %v", err)
 			}
@@ -65,7 +77,13 @@ func TestTargetSetupEnforcesFourIndependentModes(t *testing.T) {
 			if err != nil {
 				t.Fatalf("BeginTransaction(): %v", err)
 			}
-			after, err := ApplyTargets(context.Background(), GoRunner{Root: root, Binary: "go"}, baseline, policy, transaction)
+			after, err := ApplyTargets(
+				context.Background(),
+				GoRunner{Root: root, Binary: "go"},
+				baseline,
+				policy,
+				transaction,
+			)
 			if err != nil {
 				t.Fatalf("ApplyTargets(): %v", err)
 			}
@@ -73,7 +91,13 @@ func TestTargetSetupEnforcesFourIndependentModes(t *testing.T) {
 				t.Fatalf("Commit(): %v", err)
 			}
 			if after.GoDirective != tt.wantGo || after.Toolchain != tt.wantTool {
-				t.Errorf("Go/toolchain = %q/%q, want %q/%q", after.GoDirective, after.Toolchain, tt.wantGo, tt.wantTool)
+				t.Errorf(
+					"Go/toolchain = %q/%q, want %q/%q",
+					after.GoDirective,
+					after.Toolchain,
+					tt.wantGo,
+					tt.wantTool,
+				)
 			}
 			for modulePath, version := range tt.wantK8s {
 				if got := after.Modules[modulePath].Version; got != version {
@@ -91,7 +115,7 @@ func TestTargetSetupRollsBackIncompatibleKubernetesTargets(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CaptureSnapshot(baseline): %v", err)
 	}
-	policy, err := ParsePolicy("kubernetes-only", "", []string{"k8s.io/api=v0.36.6"})
+	policy, err := ParsePolicy("kubernetes-only", "", "", []string{"k8s.io/api=v0.36.6"})
 	if err != nil {
 		t.Fatalf("ParsePolicy(): %v", err)
 	}
@@ -103,7 +127,13 @@ func TestTargetSetupRollsBackIncompatibleKubernetesTargets(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BeginTransaction(): %v", err)
 	}
-	_, err = ApplyTargets(context.Background(), GoRunner{Root: root, Binary: "go"}, baseline, policy, transaction)
+	_, err = ApplyTargets(
+		context.Background(),
+		GoRunner{Root: root, Binary: "go"},
+		baseline,
+		policy,
+		transaction,
+	)
 	if err == nil || !strings.Contains(err.Error(), "kubernetes module") {
 		t.Fatalf("ApplyTargets() error = %v, want exact pin conflict", err)
 	}
@@ -122,7 +152,11 @@ func TestTargetSetupRollsBackIncompatibleKubernetesTargets(t *testing.T) {
 		t.Fatalf("CaptureSnapshot(after rollback): %v", err)
 	}
 	if !reflect.DeepEqual(after.Modules, baseline.Modules) {
-		t.Fatalf("selected modules after rollback = %#v, want baseline %#v", after.Modules, baseline.Modules)
+		t.Fatalf(
+			"selected modules after rollback = %#v, want baseline %#v",
+			after.Modules,
+			baseline.Modules,
+		)
 	}
 	if err := transaction.Rollback(); err != nil {
 		t.Fatalf("Rollback(): %v", err)
@@ -168,24 +202,38 @@ func targetFixture(t *testing.T, goVersion, toolchain string) (string, string) {
 	t.Helper()
 	root := t.TempDir()
 	proxy := filepath.Join(t.TempDir(), "proxy")
-	apiVersions := []string{"v0.36.5", "v0.36.6"}
+	apiVersions := []string{testKubernetesBaseline, testKubernetesTarget}
 	for _, version := range apiVersions {
 		requirements := map[string]string(nil)
-		if version == "v0.36.6" {
-			requirements = map[string]string{"k8s.io/apimachinery": "v0.36.6"}
+		if version == testKubernetesTarget {
+			requirements = map[string]string{"k8s.io/apimachinery": testKubernetesTarget}
 		}
 		writeProxyModule(t, proxy, "k8s.io/api", version, "1.20", requirements)
 	}
 	writeProxyVersionList(t, proxy, "k8s.io/api", apiVersions)
-	for _, version := range []string{"v0.36.4", "v0.36.6"} {
+	for _, version := range []string{"v0.36.4", testKubernetesTarget} {
 		writeProxyModule(t, proxy, "k8s.io/apimachinery", version, "1.20", nil)
 	}
-	writeProxyVersionList(t, proxy, "k8s.io/apimachinery", []string{"v0.36.4", "v0.36.6"})
+	writeProxyVersionList(
+		t,
+		proxy,
+		"k8s.io/apimachinery",
+		[]string{"v0.36.4", testKubernetesTarget},
+	)
 	toolchainDirective := ""
 	if toolchain != "" {
 		toolchainDirective = "toolchain " + toolchain + "\n"
 	}
-	writeModule(t, root, "module fixture.test/root\n\ngo "+goVersion+"\n"+toolchainDirective+"\nrequire (\n\tk8s.io/api v0.36.5\n\tk8s.io/apimachinery v0.36.4\n)\n")
-	writeFile(t, filepath.Join(root, "fixture.go"), "package fixture\n\nimport (\n\t_ \"k8s.io/api\"\n\t_ \"k8s.io/apimachinery\"\n)\n")
+	writeModule(
+		t,
+		root,
+		"module fixture.test/root\n\ngo "+goVersion+"\n"+toolchainDirective+
+			"\nrequire (\n\tk8s.io/api v0.36.5\n\tk8s.io/apimachinery v0.36.4\n)\n",
+	)
+	writeFile(
+		t,
+		filepath.Join(root, "fixture.go"),
+		"package fixture\n\nimport (\n\t_ \"k8s.io/api\"\n\t_ \"k8s.io/apimachinery\"\n)\n",
+	)
 	return root, proxy
 }

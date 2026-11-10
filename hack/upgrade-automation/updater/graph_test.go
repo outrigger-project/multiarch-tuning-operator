@@ -18,9 +18,9 @@ func TestCaptureSnapshotInventoriesSelectedModulesAndClassification(t *testing.T
 	proxy := filepath.Join(t.TempDir(), "proxy")
 	for _, modulePath := range []string{"example.test/direct", "example.test/indirect", "k8s.io/api"} {
 		writeProxyModule(t, proxy, modulePath, map[string]string{
-			"example.test/direct":   "v1.0.0",
-			"example.test/indirect": "v1.0.0",
-			"k8s.io/api":            "v0.36.5",
+			"example.test/direct":   testInitialVersion,
+			"example.test/indirect": testInitialVersion,
+			"k8s.io/api":            testKubernetesBaseline,
 		}[modulePath], "1.20", nil)
 	}
 	writeModule(t, root, `module fixture.test/root
@@ -39,20 +39,39 @@ require (
 	if err != nil {
 		t.Fatalf("CaptureSnapshot() error = %v", err)
 	}
-	if snapshot.GoDirective != "1.26.7" {
+	if snapshot.GoDirective != testBaselineGo {
 		t.Errorf("GoDirective = %q, want 1.26.7", snapshot.GoDirective)
 	}
 	if snapshot.Toolchain != "" {
 		t.Errorf("Toolchain = %q, want absent", snapshot.Toolchain)
 	}
 	want := map[string]Module{
-		"fixture.test/root":     {Path: "fixture.test/root", Main: true},
-		"example.test/direct":   {Path: "example.test/direct", Version: "v1.0.0", Direct: true, Required: true},
-		"example.test/indirect": {Path: "example.test/indirect", Version: "v1.0.0", Required: true},
-		"k8s.io/api":            {Path: "k8s.io/api", Version: "v0.36.5", Direct: true, Required: true},
+		"fixture.test/root": {Path: "fixture.test/root", Main: true},
+		"example.test/direct": {
+			Path:     "example.test/direct",
+			Version:  testInitialVersion,
+			Direct:   true,
+			Required: true,
+		},
+		"example.test/indirect": {
+			Path:     "example.test/indirect",
+			Version:  testInitialVersion,
+			Required: true,
+		},
+		"k8s.io/api": {
+			Path:     "k8s.io/api",
+			Version:  testKubernetesBaseline,
+			Direct:   true,
+			Required: true,
+		},
 	}
 	if len(snapshot.Modules) != len(want) {
-		t.Fatalf("module count = %d, want %d: %#v", len(snapshot.Modules), len(want), snapshot.Modules)
+		t.Fatalf(
+			"module count = %d, want %d: %#v",
+			len(snapshot.Modules),
+			len(want),
+			snapshot.Modules,
+		)
 	}
 	for path, expected := range want {
 		if got := snapshot.Modules[path]; got != expected {
@@ -72,7 +91,11 @@ func TestCaptureSnapshotRejectsLocalAndRemoteReplacements(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			root := t.TempDir()
-			writeModule(t, root, fmt.Sprintf("module fixture.test/root\n\ngo 1.26.7\n\n%s\n", tt.replace))
+			writeModule(
+				t,
+				root,
+				fmt.Sprintf("module fixture.test/root\n\ngo 1.26.7\n\n%s\n", tt.replace),
+			)
 			_, err := CaptureSnapshot(context.Background(), root, "go")
 			if err == nil || !strings.Contains(err.Error(), "replace") {
 				t.Fatalf("CaptureSnapshot() error = %v, want clear replacement error", err)
@@ -130,11 +153,28 @@ func setLocalProxy(t *testing.T, proxy string) {
 	t.Setenv("GOMODCACHE", moduleCache)
 }
 
-func writeProxyModule(t *testing.T, proxy, modulePath, version, goVersion string, requirements map[string]string) {
-	writeProxyModuleWithSource(t, proxy, modulePath, version, goVersion, requirements, "package fixture\n")
+func writeProxyModule(
+	t *testing.T,
+	proxy, modulePath, version, goVersion string,
+	requirements map[string]string,
+) {
+	writeProxyModuleWithSource(
+		t,
+		proxy,
+		modulePath,
+		version,
+		goVersion,
+		requirements,
+		"package fixture\n",
+	)
 }
 
-func writeProxyModuleWithSource(t *testing.T, proxy, modulePath, version, goVersion string, requirements map[string]string, source string) {
+func writeProxyModuleWithSource(
+	t *testing.T,
+	proxy, modulePath, version, goVersion string,
+	requirements map[string]string,
+	source string,
+) {
 	t.Helper()
 	versionDir := filepath.Join(proxy, filepath.FromSlash(modulePath), "@v")
 	if err := os.MkdirAll(versionDir, 0o700); err != nil {

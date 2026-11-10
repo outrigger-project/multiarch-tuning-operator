@@ -9,6 +9,8 @@ import (
 	"golang.org/x/mod/modfile"
 )
 
+const requireDirective = "require"
+
 func NormalizeRequireBlocks(root string) error {
 	root, err := filepath.Abs(root)
 	if err != nil {
@@ -19,7 +21,9 @@ func NormalizeRequireBlocks(root string) error {
 	if err != nil {
 		return fmt.Errorf("stat go.mod: %w", err)
 	}
-	data, err := os.ReadFile(path) // #nosec G304 -- fixed go.mod path under the maintainer-selected repository root.
+	data, err := os.ReadFile(
+		path,
+	) // #nosec G304 -- fixed go.mod path under the maintainer-selected repository root.
 	if err != nil {
 		return fmt.Errorf("read go.mod: %w", err)
 	}
@@ -41,7 +45,7 @@ func NormalizeRequireBlocks(root string) error {
 	for _, statement := range file.Syntax.Stmt {
 		switch node := statement.(type) {
 		case *modfile.Line:
-			if len(node.Token) != 0 && node.Token[0] == "require" {
+			if len(node.Token) != 0 && node.Token[0] == requireDirective {
 				if insertAt < 0 {
 					insertAt = len(statements)
 				}
@@ -64,7 +68,7 @@ func NormalizeRequireBlocks(root string) error {
 				continue
 			}
 		case *modfile.LineBlock:
-			if len(node.Token) != 0 && node.Token[0] == "require" {
+			if len(node.Token) != 0 && node.Token[0] == requireDirective {
 				if insertAt < 0 {
 					insertAt = len(statements)
 				}
@@ -95,10 +99,24 @@ func NormalizeRequireBlocks(root string) error {
 		statements = append(statements, statement)
 	}
 
-	sort.Slice(directLines, func(i, j int) bool { return directLines[i].Token[0] < directLines[j].Token[0] })
-	sort.Slice(indirectLines, func(i, j int) bool { return indirectLines[i].Token[0] < indirectLines[j].Token[0] })
-	directBlock := &modfile.LineBlock{Comments: directComments, Token: []string{"require"}, Line: directLines}
-	indirectBlock := &modfile.LineBlock{Comments: indirectComments, Token: []string{"require"}, Line: indirectLines}
+	sort.Slice(
+		directLines,
+		func(i, j int) bool { return directLines[i].Token[0] < directLines[j].Token[0] },
+	)
+	sort.Slice(
+		indirectLines,
+		func(i, j int) bool { return indirectLines[i].Token[0] < indirectLines[j].Token[0] },
+	)
+	directBlock := &modfile.LineBlock{
+		Comments: directComments,
+		Token:    []string{requireDirective},
+		Line:     directLines,
+	}
+	indirectBlock := &modfile.LineBlock{
+		Comments: indirectComments,
+		Token:    []string{requireDirective},
+		Line:     indirectLines,
+	}
 	if insertAt < 0 {
 		insertAt = len(statements)
 		for index, statement := range statements {
@@ -172,11 +190,11 @@ func verifyRequireBlocks(path string, data []byte, expected []*modfile.Require) 
 	for _, statement := range parsed.Syntax.Stmt {
 		switch node := statement.(type) {
 		case *modfile.Line:
-			if len(node.Token) != 0 && node.Token[0] == "require" {
+			if len(node.Token) != 0 && node.Token[0] == requireDirective {
 				return fmt.Errorf("normalized go.mod contains a standalone require directive")
 			}
 		case *modfile.LineBlock:
-			if len(node.Token) != 0 && node.Token[0] == "require" {
+			if len(node.Token) != 0 && node.Token[0] == requireDirective {
 				blocks = append(blocks, node)
 			}
 		}
@@ -195,7 +213,10 @@ func verifyRequireBlocks(path string, data []byte, expected []*modfile.Require) 
 			}
 			indirect, exists := indirectByPath[line.Token[0]]
 			if !exists {
-				return fmt.Errorf("normalized require block contains unknown module %q", line.Token[0])
+				return fmt.Errorf(
+					"normalized require block contains unknown module %q",
+					line.Token[0],
+				)
 			}
 			if index == 0 && indirect {
 				return fmt.Errorf("direct require block contains indirect module %q", line.Token[0])
@@ -206,7 +227,11 @@ func verifyRequireBlocks(path string, data []byte, expected []*modfile.Require) 
 		}
 	}
 	if len(parsed.Require) != len(expected) {
-		return fmt.Errorf("normalized go.mod changed the require count from %d to %d", len(expected), len(parsed.Require))
+		return fmt.Errorf(
+			"normalized go.mod changed the require count from %d to %d",
+			len(expected),
+			len(parsed.Require),
+		)
 	}
 	expectedByPath := make(map[string]modfile.Require, len(expected))
 	for _, requirement := range expected {
@@ -214,8 +239,13 @@ func verifyRequireBlocks(path string, data []byte, expected []*modfile.Require) 
 	}
 	for _, requirement := range parsed.Require {
 		want, exists := expectedByPath[requirement.Mod.Path]
-		if !exists || want.Mod.Version != requirement.Mod.Version || want.Indirect != requirement.Indirect {
-			return fmt.Errorf("normalized go.mod changed requirement %s@%s", requirement.Mod.Path, requirement.Mod.Version)
+		if !exists || want.Mod.Version != requirement.Mod.Version ||
+			want.Indirect != requirement.Indirect {
+			return fmt.Errorf(
+				"normalized go.mod changed requirement %s@%s",
+				requirement.Mod.Path,
+				requirement.Mod.Version,
+			)
 		}
 		delete(expectedByPath, requirement.Mod.Path)
 	}

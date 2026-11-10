@@ -9,7 +9,11 @@ import (
 	"golang.org/x/mod/semver"
 )
 
-func ListCandidates(ctx context.Context, runner GoRunner, modulePath, current string) ([]string, error) {
+func ListCandidates(
+	ctx context.Context,
+	runner GoRunner,
+	modulePath, current string,
+) ([]string, error) {
 	if modulePath == "" {
 		return nil, fmt.Errorf("module path is required")
 	}
@@ -22,12 +26,17 @@ func ListCandidates(ctx context.Context, runner GoRunner, modulePath, current st
 	}
 	fields := strings.Fields(string(output))
 	if len(fields) == 0 || fields[0] != modulePath {
-		return nil, fmt.Errorf("unexpected version list for %s: %q", modulePath, strings.TrimSpace(string(output)))
+		return nil, fmt.Errorf(
+			"unexpected version list for %s: %q",
+			modulePath,
+			strings.TrimSpace(string(output)),
+		)
 	}
 	seen := make(map[string]struct{}, len(fields)-1)
 	candidates := make([]string, 0, len(fields)-1)
 	for _, version := range fields[1:] {
-		if !semver.IsValid(version) || semver.Prerelease(version) != "" || semver.Compare(version, current) <= 0 {
+		if !semver.IsValid(version) || semver.Prerelease(version) != "" ||
+			semver.Compare(version, current) <= 0 {
 			continue
 		}
 		if _, duplicate := seen[version]; duplicate {

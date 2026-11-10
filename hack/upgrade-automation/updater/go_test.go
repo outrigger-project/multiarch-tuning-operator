@@ -26,7 +26,8 @@ func TestGoEnvironmentOverridesToolchainAndVendorFlags(t *testing.T) {
 
 func TestCompilerVersionRejectsMismatch(t *testing.T) {
 	runner := GoRunner{Root: t.TempDir(), Binary: "go"}
-	if err := runner.CheckCompiler(context.Background(), futureGoVersion); err == nil || !strings.Contains(err.Error(), futureGoVersion) {
+	if err := runner.CheckCompiler(context.Background(), futureGoVersion); err == nil ||
+		!strings.Contains(err.Error(), futureGoVersion) {
 		t.Fatalf("CheckCompiler() error = %v, want mismatch for %s", err, futureGoVersion)
 	}
 }
@@ -42,7 +43,7 @@ func TestCompilerVersionUsesSelectedBinary(t *testing.T) {
 	root := t.TempDir()
 	writeModule(t, root, "module fixture.test/root\n\ngo 1.26.7\n")
 	runner := GoRunner{Root: root, Binary: "/bin/true"}
-	if err := runner.CheckCompiler(context.Background(), "1.26.7"); err == nil {
+	if err := runner.CheckCompiler(context.Background(), testBaselineGo); err == nil {
 		t.Fatal("CheckCompiler() error = nil, want selected binary mismatch")
 	}
 }

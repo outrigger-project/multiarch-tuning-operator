@@ -41,9 +41,17 @@ import (
 var text = "old.test/lib/pkg"
 `
 	writeFile(t, filepath.Join(root, "fixture.go"), source)
-	writeFile(t, filepath.Join(root, "vendor", "keep.go"), "package vendor\nimport _ \"old.test/lib/pkg\"\n")
+	writeFile(
+		t,
+		filepath.Join(root, "vendor", "keep.go"),
+		"package vendor\nimport _ \"old.test/lib/pkg\"\n",
+	)
 	writeFile(t, filepath.Join(root, "nested", "go.mod"), "module fixture.test/nested\ngo 1.26.7\n")
-	writeFile(t, filepath.Join(root, "nested", "keep.go"), "package nested\nimport _ \"old.test/lib/pkg\"\n")
+	writeFile(
+		t,
+		filepath.Join(root, "nested", "keep.go"),
+		"package nested\nimport _ \"old.test/lib/pkg\"\n",
+	)
 	before := snapshotFiles(t, root)
 	transaction, err := BeginTransaction(root)
 	if err != nil {
@@ -59,10 +67,17 @@ var text = "old.test/lib/pkg"
 		t.Fatal(err)
 	}
 	graph := Snapshot{Modules: map[string]Module{
-		"old.test/lib":        {Path: "old.test/lib", Version: "v1.0.0"},
-		"old.test/lib/nested": {Path: "old.test/lib/nested", Version: "v1.0.0"},
+		"old.test/lib":        {Path: "old.test/lib", Version: testInitialVersion},
+		"old.test/lib/nested": {Path: "old.test/lib/nested", Version: testInitialVersion},
 	}}
-	files, err := rewriteModuleImports(root, "old.test/lib", "new.test/lib", graph, transaction, checkpoint)
+	files, err := rewriteModuleImports(
+		root,
+		"old.test/lib",
+		"new.test/lib",
+		graph,
+		transaction,
+		checkpoint,
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,20 +106,31 @@ var text = "old.test/lib/pkg"
 func TestMigrationReplacesRequirementAndRewritesImports(t *testing.T) {
 	root, proxy := engineFixture(t)
 	oldPath, newPath := "old.test/lib", "new.test/lib"
-	writeProxyModule(t, proxy, oldPath, "v1.0.0", "1.20", nil)
+	writeProxyModule(t, proxy, oldPath, testInitialVersion, "1.20", nil)
 	// Serve the renamed module's go.mod under the old path, as the real release does.
-	writeProxyModule(t, proxy, oldPath, "v1.1.0", "1.20", nil)
-	writeFile(t, filepath.Join(proxy, oldPath, "@v", "v1.1.0.mod"), "module "+newPath+"\n\ngo 1.20\n")
-	writeProxyVersionList(t, proxy, oldPath, []string{"v1.0.0", "v1.1.0"})
-	writeProxyModule(t, proxy, newPath, "v1.1.0", "1.20", nil)
-	writeModule(t, root, "module fixture.test/root\n\ngo "+testGoVersion+"\nrequire "+oldPath+" v1.0.0\n")
+	writeProxyModule(t, proxy, oldPath, testUpdatedVersion, "1.20", nil)
+	writeFile(
+		t,
+		filepath.Join(proxy, oldPath, "@v", "v1.1.0.mod"),
+		"module "+newPath+"\n\ngo 1.20\n",
+	)
+	writeProxyVersionList(t, proxy, oldPath, []string{testInitialVersion, testUpdatedVersion})
+	writeProxyModule(t, proxy, newPath, testUpdatedVersion, "1.20", nil)
+	writeModule(
+		t,
+		root,
+		"module fixture.test/root\n\ngo "+testGoVersion+"\nrequire "+oldPath+" v1.0.0\n",
+	)
 	writeFile(t, filepath.Join(root, "fixture.go"), "package fixture\nimport _ \""+oldPath+"\"\n")
 	setLocalProxy(t, proxy)
-	report, err := Run(context.Background(), Config{Root: root, Policy: mustPolicy(t, "pin-both", "", nil), GoBinary: "go"})
+	report, err := Run(
+		context.Background(),
+		Config{Root: root, Policy: mustPolicy(t, "pin-both", nil), GoBinary: "go"},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if report.Final.Modules[newPath].Version != "v1.1.0" {
+	if report.Final.Modules[newPath].Version != testUpdatedVersion {
 		t.Fatalf("new module missing: %#v", report.Final.Modules)
 	}
 	if _, exists := report.Final.Modules[oldPath]; exists {
@@ -114,7 +140,8 @@ func TestMigrationReplacesRequirementAndRewritesImports(t *testing.T) {
 	if result.MigratedTo != newPath || result.Outcome != moduleUpdated {
 		t.Fatalf("migration report = %#v", result)
 	}
-	if len(result.Attempts) != 1 || result.Attempts[0].TargetPath != newPath || len(result.Attempts[0].SourceFiles) != 1 {
+	if len(result.Attempts) != 1 || result.Attempts[0].TargetPath != newPath ||
+		len(result.Attempts[0].SourceFiles) != 1 {
 		t.Fatalf("migration evidence = %#v", result.Attempts)
 	}
 	data, err := os.ReadFile(filepath.Join(root, "fixture.go"))
@@ -162,55 +189,110 @@ func TestMigrationRollbackRestoresImportsAfterLaterFailure(t *testing.T) {
 
 func TestMigrationRejectedByPinsRestoresSourceAndTriesOlderCandidate(t *testing.T) {
 	root, proxy := engineFixture(t)
-	for _, version := range []string{"v1.0.0", "v1.0.1", "v1.1.0"} {
+	for _, version := range []string{testInitialVersion, testOldestCandidate, testUpdatedVersion} {
 		writeProxyModule(t, proxy, "old.test/lib", version, "1.20", nil)
 	}
-	writeFile(t, filepath.Join(proxy, "old.test/lib/@v/v1.1.0.mod"), "module new.test/lib\n\ngo 1.20\n")
-	writeProxyVersionList(t, proxy, "old.test/lib", []string{"v1.0.0", "v1.0.1", "v1.1.0"})
-	writeProxyModule(t, proxy, "new.test/lib", "v1.1.0", "1.20", map[string]string{"k8s.io/api": "v0.36.6"})
-	for _, version := range []string{"v0.36.5", "v0.36.6"} {
+	writeFile(
+		t,
+		filepath.Join(proxy, "old.test/lib/@v/v1.1.0.mod"),
+		"module new.test/lib\n\ngo 1.20\n",
+	)
+	writeProxyVersionList(
+		t,
+		proxy,
+		"old.test/lib",
+		[]string{testInitialVersion, testOldestCandidate, testUpdatedVersion},
+	)
+	writeProxyModule(
+		t,
+		proxy,
+		"new.test/lib",
+		testUpdatedVersion,
+		"1.20",
+		map[string]string{"k8s.io/api": testKubernetesTarget},
+	)
+	for _, version := range []string{testKubernetesBaseline, testKubernetesTarget} {
 		writeProxyModule(t, proxy, "k8s.io/api", version, "1.20", nil)
 	}
-	writeProxyVersionList(t, proxy, "k8s.io/api", []string{"v0.36.5", "v0.36.6"})
-	writeModule(t, root, "module fixture.test/root\n\ngo "+testGoVersion+"\nrequire (\nold.test/lib v1.0.0\nk8s.io/api v0.36.5\n)\n")
+	writeProxyVersionList(
+		t,
+		proxy,
+		"k8s.io/api",
+		[]string{testKubernetesBaseline, testKubernetesTarget},
+	)
+	writeModule(
+		t,
+		root,
+		"module fixture.test/root\n\ngo "+testGoVersion+"\nrequire (\nold.test/lib v1.0.0\nk8s.io/api v0.36.5\n)\n",
+	)
 	source := "package fixture\nimport (\n_ \"old.test/lib\"\n_ \"k8s.io/api\"\n)\n"
 	writeFile(t, filepath.Join(root, "fixture.go"), source)
 	setLocalProxy(t, proxy)
-	report, err := Run(context.Background(), Config{Root: root, Policy: mustPolicy(t, "pin-both", "", nil), GoBinary: "go"})
+	report, err := Run(
+		context.Background(),
+		Config{Root: root, Policy: mustPolicy(t, "pin-both", nil), GoBinary: "go"},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
 	result := moduleResult(t, report, "old.test/lib")
-	if result.FinalVersion != "v1.0.1" || result.MigratedTo != "" || len(result.Attempts) != 2 {
+	if result.FinalVersion != testOldestCandidate || result.MigratedTo != "" ||
+		len(result.Attempts) != 2 {
 		t.Fatalf("fallback result = %#v", result)
 	}
-	if result.Attempts[0].TargetPath != "new.test/lib" || result.Attempts[0].Outcome != moduleBlocked {
+	if result.Attempts[0].TargetPath != "new.test/lib" ||
+		result.Attempts[0].Outcome != moduleBlocked {
 		t.Fatalf("rejected migration missing evidence: %#v", result.Attempts)
 	}
 	assertFile(t, filepath.Join(root, "fixture.go"), source)
-	if report.Final.Modules["k8s.io/api"].Version != "v0.36.5" {
+	if report.Final.Modules["k8s.io/api"].Version != testKubernetesBaseline {
 		t.Fatal("Kubernetes pin changed")
 	}
 }
 
 func TestMigrationCompileFailureRestoresSourceAndTriesOlderCandidate(t *testing.T) {
 	root, proxy := engineFixture(t)
-	for _, version := range []string{"v1.0.0", "v1.0.1", "v1.1.0"} {
-		writeProxyModuleWithSource(t, proxy, "old.test/lib", version, "1.20", nil, "package fixture\nconst Value = 1\n")
+	for _, version := range []string{testInitialVersion, testOldestCandidate, testUpdatedVersion} {
+		writeProxyModuleWithSource(
+			t,
+			proxy,
+			"old.test/lib",
+			version,
+			"1.20",
+			nil,
+			"package fixture\nconst Value = 1\n",
+		)
 	}
-	writeFile(t, filepath.Join(proxy, "old.test/lib/@v/v1.1.0.mod"), "module new.test/lib\n\ngo 1.20\n")
-	writeProxyVersionList(t, proxy, "old.test/lib", []string{"v1.0.0", "v1.0.1", "v1.1.0"})
-	writeProxyModule(t, proxy, "new.test/lib", "v1.1.0", "1.20", nil)
-	writeModule(t, root, "module fixture.test/root\n\ngo "+testGoVersion+"\nrequire old.test/lib v1.0.0\n")
+	writeFile(
+		t,
+		filepath.Join(proxy, "old.test/lib/@v/v1.1.0.mod"),
+		"module new.test/lib\n\ngo 1.20\n",
+	)
+	writeProxyVersionList(
+		t,
+		proxy,
+		"old.test/lib",
+		[]string{testInitialVersion, testOldestCandidate, testUpdatedVersion},
+	)
+	writeProxyModule(t, proxy, "new.test/lib", testUpdatedVersion, "1.20", nil)
+	writeModule(
+		t,
+		root,
+		"module fixture.test/root\n\ngo "+testGoVersion+"\nrequire old.test/lib v1.0.0\n",
+	)
 	source := "package fixture\nimport lib \"old.test/lib\"\nvar _ = lib.Value\n"
 	writeFile(t, filepath.Join(root, "fixture.go"), source)
 	setLocalProxy(t, proxy)
-	report, err := Run(context.Background(), Config{Root: root, Policy: mustPolicy(t, "pin-both", "", nil), GoBinary: "go"})
+	report, err := Run(
+		context.Background(),
+		Config{Root: root, Policy: mustPolicy(t, "pin-both", nil), GoBinary: "go"},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
 	result := moduleResult(t, report, "old.test/lib")
-	if result.FinalVersion != "v1.0.1" || len(result.Attempts) != 2 || result.Attempts[0].Outcome != moduleBlocked {
+	if result.FinalVersion != testOldestCandidate || len(result.Attempts) != 2 ||
+		result.Attempts[0].Outcome != moduleBlocked {
 		t.Fatalf("compile-rejected fallback result = %#v", result)
 	}
 	assertFile(t, filepath.Join(root, "fixture.go"), source)

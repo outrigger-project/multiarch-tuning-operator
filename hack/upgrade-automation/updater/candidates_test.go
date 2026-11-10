@@ -17,10 +17,19 @@ func TestListCandidatesReturnsStableNewerVersionsNewestFirst(t *testing.T) {
 		writeProxyModule(t, proxy, "example.test/lib", version, "1.20", nil)
 	}
 	writeProxyVersionList(t, proxy, "example.test/lib", versions)
-	writeModule(t, root, "module fixture.test/root\n\ngo 1.26.7\n\nrequire example.test/lib v1.2.0\n")
+	writeModule(
+		t,
+		root,
+		"module fixture.test/root\n\ngo 1.26.7\n\nrequire example.test/lib v1.2.0\n",
+	)
 	setLocalProxy(t, proxy)
 
-	got, err := ListCandidates(context.Background(), GoRunner{Root: root, Binary: "go"}, "example.test/lib", "v1.2.0")
+	got, err := ListCandidates(
+		context.Background(),
+		GoRunner{Root: root, Binary: "go"},
+		"example.test/lib",
+		"v1.2.0",
+	)
 	if err != nil {
 		t.Fatalf("ListCandidates() error = %v", err)
 	}
@@ -39,10 +48,19 @@ func TestListCandidatesTreatsStableTagNewerThanPseudoVersion(t *testing.T) {
 		writeProxyModule(t, proxy, "example.test/lib", version, "1.20", nil)
 	}
 	writeProxyVersionList(t, proxy, "example.test/lib", versions)
-	writeModule(t, root, "module fixture.test/root\n\ngo 1.26.7\n\nrequire example.test/lib "+pseudo+"\n")
+	writeModule(
+		t,
+		root,
+		"module fixture.test/root\n\ngo 1.26.7\n\nrequire example.test/lib "+pseudo+"\n",
+	)
 	setLocalProxy(t, proxy)
 
-	got, err := ListCandidates(context.Background(), GoRunner{Root: root, Binary: "go"}, "example.test/lib", pseudo)
+	got, err := ListCandidates(
+		context.Background(),
+		GoRunner{Root: root, Binary: "go"},
+		"example.test/lib",
+		pseudo,
+	)
 	if err != nil {
 		t.Fatalf("ListCandidates() error = %v", err)
 	}

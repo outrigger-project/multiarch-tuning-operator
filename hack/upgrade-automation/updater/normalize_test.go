@@ -3,7 +3,7 @@ package updater
 import (
 	"os"
 	"path/filepath"
-	"reflect"
+	"slices"
 	"testing"
 
 	"golang.org/x/mod/modfile"
@@ -39,13 +39,13 @@ exclude example.test/excluded v1.2.3
 		t.Fatalf("parse normalized go.mod: %v", err)
 	}
 	direct, indirect := requireBlockPaths(t, file)
-	if !reflect.DeepEqual(direct, []string{"example.test/a", "example.test/z"}) {
+	if !slices.Equal(direct, []string{"example.test/a", "example.test/z"}) {
 		t.Fatalf("direct require paths = %v", direct)
 	}
-	if !reflect.DeepEqual(indirect, []string{"example.test/indirect-a", "example.test/indirect-z"}) {
+	if !slices.Equal(indirect, []string{"example.test/indirect-a", "example.test/indirect-z"}) {
 		t.Fatalf("indirect require paths = %v", indirect)
 	}
-	if file.Go == nil || file.Go.Version != "1.26.7" {
+	if file.Go == nil || file.Go.Version != testBaselineGo {
 		t.Fatalf("Go directive changed: got %+v, want version 1.26.7", file.Go)
 	}
 	if file.Toolchain == nil || file.Toolchain.Name != "go1.26.7" {
@@ -89,7 +89,7 @@ func TestNormalizeRequireBlocksKeepsExactlyTwoBlocksWhenAClassIsEmpty(t *testing
 				t.Fatalf("parse normalized go.mod: %v", err)
 			}
 			direct, indirect := requireBlockPaths(t, file)
-			if !reflect.DeepEqual(direct, tt.wantDirect) || !reflect.DeepEqual(indirect, tt.wantIndirect) {
+			if !slices.Equal(direct, tt.wantDirect) || !slices.Equal(indirect, tt.wantIndirect) {
 				t.Fatalf("require groups = direct %v, indirect %v", direct, indirect)
 			}
 		})
@@ -102,11 +102,11 @@ func requireBlockPaths(t *testing.T, file *modfile.File) ([]string, []string) {
 	for _, statement := range file.Syntax.Stmt {
 		switch statement := statement.(type) {
 		case *modfile.Line:
-			if len(statement.Token) > 0 && statement.Token[0] == "require" {
+			if len(statement.Token) > 0 && statement.Token[0] == requireDirective {
 				t.Fatal("found standalone require line; want require blocks only")
 			}
 		case *modfile.LineBlock:
-			if len(statement.Token) > 0 && statement.Token[0] == "require" {
+			if len(statement.Token) > 0 && statement.Token[0] == requireDirective {
 				blocks = append(blocks, statement)
 			}
 		}
@@ -114,7 +114,8 @@ func requireBlockPaths(t *testing.T, file *modfile.File) ([]string, []string) {
 	if len(blocks) != 2 {
 		t.Fatalf("found %d require blocks, want exactly two", len(blocks))
 	}
-	var direct, indirect []string
+	direct := make([]string, 0, len(blocks[0].Line))
+	indirect := make([]string, 0, len(blocks[1].Line))
 	for _, line := range blocks[0].Line {
 		direct = append(direct, line.Token[0])
 	}

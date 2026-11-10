@@ -38,14 +38,23 @@ type ModuleResult struct {
 	MigratedTo            string    `json:"migratedTo,omitempty"`
 }
 
+// ReleaseTargetResult records one automatic release-target decision.
+type ReleaseTargetResult struct {
+	Path           string `json:"path"`
+	CurrentVersion string `json:"currentVersion"`
+	TargetVersion  string `json:"targetVersion,omitempty"`
+	Disposition    string `json:"disposition"`
+}
+
 type Report struct {
-	Status     string         `json:"status"`
-	Policy     Policy         `json:"policy"`
-	Baseline   Snapshot       `json:"baseline"`
-	Final      Snapshot       `json:"final"`
-	Modules    []ModuleResult `json:"modules"`
-	RolledBack bool           `json:"rolledBack"`
-	Failure    string         `json:"failure,omitempty"`
+	KubernetesReleaseTargets []ReleaseTargetResult `json:"kubernetesReleaseTargets,omitempty"`
+	Status                   string                `json:"status"`
+	Policy                   Policy                `json:"policy"`
+	Baseline                 Snapshot              `json:"baseline"`
+	Final                    Snapshot              `json:"final"`
+	Modules                  []ModuleResult        `json:"modules"`
+	RolledBack               bool                  `json:"rolledBack"`
+	Failure                  string                `json:"failure,omitempty"`
 }
 
 type PreconditionError struct {
@@ -80,8 +89,10 @@ func ExitCode(err error) int {
 
 var (
 	proxyCredentials = regexp.MustCompile(`(?i)(https?://)[^/@\s]+@`)
-	querySecret      = regexp.MustCompile(`(?i)(token|password|passwd|secret|api[_-]?key|access[_-]?token)=([^&\s]+)`)
-	bearerSecret     = regexp.MustCompile(`(?i)(authorization:\s*bearer\s+)[^\s]+`)
+	querySecret      = regexp.MustCompile(
+		`(?i)(token|password|passwd|secret|api[_-]?key|access[_-]?token)=([^&\s]+)`,
+	)
+	bearerSecret = regexp.MustCompile(`(?i)(authorization:\s*bearer\s+)[^\s]+`)
 )
 
 func WriteReport(path string, report Report) error {
@@ -129,13 +140,19 @@ func normalizeReport(report Report) Report {
 	if report.Modules == nil {
 		report.Modules = []ModuleResult{}
 	}
-	sort.Slice(report.Modules, func(i, j int) bool { return report.Modules[i].Path < report.Modules[j].Path })
+	sort.Slice(
+		report.Modules,
+		func(i, j int) bool { return report.Modules[i].Path < report.Modules[j].Path },
+	)
 	for i := range report.Modules {
 		module := &report.Modules[i]
 		for j := range module.Attempts {
 			attempt := &module.Attempts[j]
 			attempt.Evidence = sanitizeEvidence(attempt.Evidence)
-			sort.Slice(attempt.Changes, func(a, b int) bool { return attempt.Changes[a].Path < attempt.Changes[b].Path })
+			sort.Slice(
+				attempt.Changes,
+				func(a, b int) bool { return attempt.Changes[a].Path < attempt.Changes[b].Path },
+			)
 		}
 	}
 	report.Failure = sanitizeEvidence(report.Failure)

@@ -17,21 +17,36 @@ func TestReportJSONIsDeterministicAndSorted(t *testing.T) {
 	report := Report{
 		Status: runCompleted,
 		Policy: Policy{Mode: ModePinBoth},
-		Baseline: Snapshot{GoDirective: "1.26.7", Modules: map[string]Module{
-			"example.test/z": {Path: "example.test/z", Version: "v1.0.0"},
+		Baseline: Snapshot{GoDirective: testBaselineGo, Modules: map[string]Module{
+			"example.test/z": {Path: "example.test/z", Version: testInitialVersion},
 		}},
-		Final: Snapshot{GoDirective: "1.26.7", Modules: map[string]Module{
-			"example.test/z": {Path: "example.test/z", Version: "v1.1.0"},
+		Final: Snapshot{GoDirective: testBaselineGo, Modules: map[string]Module{
+			"example.test/z": {Path: "example.test/z", Version: testUpdatedVersion},
 		}},
 		Modules: []ModuleResult{
-			{Path: "example.test/z", InitialVersion: "v1.0.0", FinalVersion: "v1.1.0", Outcome: moduleUpdated, Attempts: []Attempt{
-				{Version: "v1.2.0", Outcome: moduleBlocked},
-				{Version: "v1.1.0", Outcome: attemptAccepted, Changes: []Change{
-					{Path: "example.test/z", Before: "v1.0.0", After: "v1.1.0"},
-					{Path: "example.test/a", After: "v1.2.0"},
-				}},
-			}},
-			{Path: "example.test/a", InitialVersion: "v1.0.0", FinalVersion: "v1.2.0", Outcome: moduleUpdated},
+			{
+				Path:           "example.test/z",
+				InitialVersion: testInitialVersion,
+				FinalVersion:   testUpdatedVersion,
+				Outcome:        moduleUpdated,
+				Attempts: []Attempt{
+					{Version: "v1.2.0", Outcome: moduleBlocked},
+					{Version: testUpdatedVersion, Outcome: attemptAccepted, Changes: []Change{
+						{
+							Path:   "example.test/z",
+							Before: testInitialVersion,
+							After:  testUpdatedVersion,
+						},
+						{Path: "example.test/a", After: "v1.2.0"},
+					}},
+				},
+			},
+			{
+				Path:           "example.test/a",
+				InitialVersion: testInitialVersion,
+				FinalVersion:   "v1.2.0",
+				Outcome:        moduleUpdated,
+			},
 		},
 	}
 	firstPath := filepath.Join(t.TempDir(), "first", "report.json")
@@ -62,36 +77,53 @@ func TestReportJSONIsDeterministicAndSorted(t *testing.T) {
 		t.Fatalf("module order = %v, want sorted paths", paths)
 	}
 	attempts := decoded.Modules[1].Attempts
-	if len(attempts) != 2 || attempts[0].Version != "v1.2.0" || attempts[1].Version != "v1.1.0" {
+	if len(attempts) != 2 || attempts[0].Version != "v1.2.0" ||
+		attempts[1].Version != testUpdatedVersion {
 		t.Fatalf("candidate attempts lost chronological order: %#v", attempts)
 	}
 	changePaths := []string{attempts[1].Changes[0].Path, attempts[1].Changes[1].Path}
 	if !reflect.DeepEqual(changePaths, []string{"example.test/a", "example.test/z"}) {
 		t.Fatalf("accepted changes order = %v, want sorted paths", changePaths)
 	}
-	if decoded.Baseline.GoDirective != "1.26.7" || decoded.Final.Modules["example.test/z"].Version != "v1.1.0" {
+	if decoded.Baseline.GoDirective != testBaselineGo ||
+		decoded.Final.Modules["example.test/z"].Version != testUpdatedVersion {
 		t.Fatalf("baseline/final graph missing from report: %#v", decoded)
 	}
 }
 
 func TestReportPreservesOutcomesAndRollbackEvidence(t *testing.T) {
-	outcomes := []string{moduleUpdated, moduleAlreadyCurrent, modulePolicyPinned, moduleBlocked, moduleRemoved, moduleExecutionFailure}
+	outcomes := []string{
+		moduleUpdated,
+		moduleAlreadyCurrent,
+		modulePolicyPinned,
+		moduleBlocked,
+		moduleRemoved,
+		moduleExecutionFailure,
+	}
 	report := Report{
 		Status:     runFailed,
 		RolledBack: true,
 		Failure:    "proxy retrieval failed",
 		Policy:     Policy{Mode: ModePinBoth},
-		Baseline:   Snapshot{GoDirective: "1.26.7", Modules: map[string]Module{}},
-		Final:      Snapshot{GoDirective: "1.26.7", Modules: map[string]Module{}},
+		Baseline:   Snapshot{GoDirective: testBaselineGo, Modules: map[string]Module{}},
+		Final:      Snapshot{GoDirective: testBaselineGo, Modules: map[string]Module{}},
 	}
 	for index, outcome := range outcomes {
 		path := "example.test/module"
 		report.Modules = append(report.Modules, ModuleResult{
 			Path:           path + string(rune('a'+index)),
-			InitialVersion: "v1.0.0",
-			FinalVersion:   "v1.1.0",
+			InitialVersion: testInitialVersion,
+			FinalVersion:   testUpdatedVersion,
 			Outcome:        outcome,
-			Attempts:       []Attempt{{Version: "v1.1.0", Outcome: attemptAccepted, Changes: []Change{{Path: path, Before: "v1.0.0", After: "v1.1.0"}}}},
+			Attempts: []Attempt{
+				{
+					Version: testUpdatedVersion,
+					Outcome: attemptAccepted,
+					Changes: []Change{
+						{Path: path, Before: testInitialVersion, After: testUpdatedVersion},
+					},
+				},
+			},
 		})
 	}
 	path := filepath.Join(t.TempDir(), "report.json")
@@ -106,7 +138,8 @@ func TestReportPreservesOutcomesAndRollbackEvidence(t *testing.T) {
 	if err := json.Unmarshal(data, &decoded); err != nil {
 		t.Fatal(err)
 	}
-	if !decoded.RolledBack || decoded.Status != runFailed || decoded.Failure != "proxy retrieval failed" {
+	if !decoded.RolledBack || decoded.Status != runFailed ||
+		decoded.Failure != "proxy retrieval failed" {
 		t.Fatalf("rollback evidence = %#v", decoded)
 	}
 	got := make([]string, 0, len(decoded.Modules))
@@ -136,12 +169,26 @@ func TestRetrievalFailureIsExecutionFailureAndRollsBackAcceptedTrial(t *testing.
 		t.Run(failureMode, func(t *testing.T) {
 			root, proxy := engineFixture(t)
 			for _, modulePath := range []string{"example.test/a", "example.test/b"} {
-				writeProxyModule(t, proxy, modulePath, "v1.0.0", "1.20", nil)
-				writeProxyModule(t, proxy, modulePath, "v1.1.0", "1.20", nil)
-				writeProxyVersionList(t, proxy, modulePath, []string{"v1.0.0", "v1.1.0"})
+				writeProxyModule(t, proxy, modulePath, testInitialVersion, "1.20", nil)
+				writeProxyModule(t, proxy, modulePath, testUpdatedVersion, "1.20", nil)
+				writeProxyVersionList(
+					t,
+					proxy,
+					modulePath,
+					[]string{testInitialVersion, testUpdatedVersion},
+				)
 			}
-			writeModule(t, root, "module fixture.test/root\n\ngo "+testGoVersion+"\n\nrequire (\n\texample.test/a v1.0.0\n\texample.test/b v1.0.0\n)\n")
-			writeFile(t, filepath.Join(root, "fixture.go"), "package fixture\n\nimport (\n\t_ \"example.test/a\"\n\t_ \"example.test/b\"\n)\n")
+			writeModule(
+				t,
+				root,
+				"module fixture.test/root\n\ngo "+testGoVersion+
+					"\n\nrequire (\n\texample.test/a v1.0.0\n\texample.test/b v1.0.0\n)\n",
+			)
+			writeFile(
+				t,
+				filepath.Join(root, "fixture.go"),
+				"package fixture\n\nimport (\n\t_ \"example.test/a\"\n\t_ \"example.test/b\"\n)\n",
+			)
 			writeFile(t, filepath.Join(root, "vendor", "sentinel.txt"), "baseline vendor\n")
 			setLocalProxy(t, proxy)
 			originalMod, err := os.ReadFile(filepath.Join(root, "go.mod"))
@@ -150,30 +197,47 @@ func TestRetrievalFailureIsExecutionFailureAndRollsBackAcceptedTrial(t *testing.
 			}
 			if failureMode == "unauthorized" {
 				files := http.FileServer(http.Dir(proxy))
-				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-					if r.URL.Path == "/example.test/b/@v/v1.1.0.zip" {
-						http.Error(w, "unauthorized", http.StatusUnauthorized)
-						return
-					}
-					w.Header().Set("Content-Type", "application/octet-stream")
-					files.ServeHTTP(w, r)
-				}))
+				server := httptest.NewServer(
+					http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+						if r.URL.Path == "/example.test/b/@v/v1.1.0.zip" {
+							http.Error(w, "unauthorized", http.StatusUnauthorized)
+							return
+						}
+						w.Header().Set("Content-Type", "application/octet-stream")
+						files.ServeHTTP(w, r)
+					}),
+				)
 				defer server.Close()
 				t.Setenv("GOPROXY", server.URL)
 			} else if err := os.Remove(filepath.Join(proxy, "example.test", "b", "@v", "v1.1.0.zip")); err != nil {
 				t.Fatal(err)
 			}
 
-			report, runErr := Run(context.Background(), Config{Root: root, Policy: mustPolicy(t, "pin-both", "", nil), GoBinary: "go"})
-			if runErr == nil || report.Status != runFailed || !report.RolledBack || ExitCode(runErr) != 2 {
-				t.Fatalf("Run() status/error/rollback = %q/%v/%t, want failed retrieval with rollback", report.Status, runErr, report.RolledBack)
+			report, runErr := Run(
+				context.Background(),
+				Config{Root: root, Policy: mustPolicy(t, "pin-both", nil), GoBinary: "go"},
+			)
+			if runErr == nil || report.Status != runFailed || !report.RolledBack ||
+				ExitCode(runErr) != 2 {
+				t.Fatalf(
+					"Run() status/error/rollback = %q/%v/%t, want failed retrieval with rollback",
+					report.Status,
+					runErr,
+					report.RolledBack,
+				)
 			}
 			wantEvidence := map[string]string{"unauthorized": "401", "missing zip": "no such file"}[failureMode]
 			if !strings.Contains(strings.ToLower(report.Failure), wantEvidence) {
-				t.Fatalf("failure evidence = %q, want retrieval evidence for %s", report.Failure, failureMode)
+				t.Fatalf(
+					"failure evidence = %q, want retrieval evidence for %s",
+					report.Failure,
+					failureMode,
+				)
 			}
 			a := moduleResult(t, report, "example.test/a")
-			if a.FinalVersion != "v1.0.0" || a.Outcome != moduleExecutionFailure || len(a.Attempts) == 0 || a.Attempts[0].Outcome != attemptAccepted {
+			if a.FinalVersion != testInitialVersion || a.Outcome != moduleExecutionFailure ||
+				len(a.Attempts) == 0 ||
+				a.Attempts[0].Outcome != attemptAccepted {
 				t.Fatalf("accepted module after run rollback = %#v", a)
 			}
 			b := moduleResult(t, report, "example.test/b")
@@ -185,9 +249,14 @@ func TestRetrievalFailureIsExecutionFailureAndRollsBackAcceptedTrial(t *testing.
 				t.Fatal(err)
 			}
 			if !bytes.Equal(afterMod, originalMod) {
-				t.Fatalf("go.mod after rollback differs from baseline:\n%s\n%s", afterMod, originalMod)
+				t.Fatalf(
+					"go.mod after rollback differs from baseline:\n%s\n%s",
+					afterMod,
+					originalMod,
+				)
 			}
-			if got, err := os.ReadFile(filepath.Join(root, "vendor", "sentinel.txt")); err != nil || string(got) != "baseline vendor\n" {
+			if got, err := os.ReadFile(filepath.Join(root, "vendor", "sentinel.txt")); err != nil ||
+				string(got) != "baseline vendor\n" {
 				t.Fatalf("vendor after rollback = %q, error=%v", got, err)
 			}
 			if _, err := os.Stat(filepath.Join(root, "go.sum")); !os.IsNotExist(err) {
@@ -200,30 +269,38 @@ func TestRetrievalFailureIsExecutionFailureAndRollsBackAcceptedTrial(t *testing.
 func TestReportContainsIncompatibleTargetEvidence(t *testing.T) {
 	root, proxy := targetFixture(t, testGoVersion, "")
 	setLocalProxy(t, proxy)
-	policy := mustPolicy(t, "kubernetes-only", "", []string{"k8s.io/api=v0.36.6"})
+	policy := mustPolicy(t, "kubernetes-only", []string{"k8s.io/api=v0.36.6"})
 	report, err := Run(context.Background(), Config{Root: root, Policy: policy, GoBinary: "go"})
 	if err == nil || ExitCode(err) != 2 || report.Status != runFailed || !report.RolledBack {
-		t.Fatalf("Run() report/error = %#v/%v, want failed target transaction with exit 2", report, err)
+		t.Fatalf(
+			"Run() report/error = %#v/%v, want failed target transaction with exit 2",
+			report,
+			err,
+		)
 	}
-	if !strings.Contains(report.Failure, "k8s.io/apimachinery") || !strings.Contains(report.Failure, "v0.36.4") {
-		t.Fatalf("report failure evidence = %q, want exact independent Kubernetes pin conflict", report.Failure)
+	if !strings.Contains(report.Failure, "k8s.io/apimachinery") ||
+		!strings.Contains(report.Failure, "v0.36.4") {
+		t.Fatalf(
+			"report failure evidence = %q, want exact independent Kubernetes pin conflict",
+			report.Failure,
+		)
 	}
-	if got := report.Final.Modules["k8s.io/api"].Version; got != "v0.36.5" {
+	if got := report.Final.Modules["k8s.io/api"].Version; got != testKubernetesBaseline {
 		t.Fatalf("final Kubernetes version after rollback = %q, want v0.36.5", got)
 	}
 }
 
 func TestReportFatalExecutionFailureOutranksRejectedCandidates(t *testing.T) {
 	baseline := Snapshot{Modules: map[string]Module{
-		"example.test/lib": {Path: "example.test/lib", Version: "v1.0.0"},
+		"example.test/lib": {Path: "example.test/lib", Version: testInitialVersion},
 	}}
 	results := map[string]*ModuleResult{
 		"example.test/lib": {
 			Path:           "example.test/lib",
-			InitialVersion: "v1.0.0",
+			InitialVersion: testInitialVersion,
 			Attempts: []Attempt{
 				{Version: "v1.2.0", Outcome: moduleBlocked},
-				{Version: "v1.1.0", Outcome: moduleExecutionFailure},
+				{Version: testUpdatedVersion, Outcome: moduleExecutionFailure},
 			},
 		},
 	}

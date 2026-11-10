@@ -2,6 +2,12 @@
 
 `scripts/upgrade.sh` tries dependency updates only for modules explicitly required in the root `go.mod`, including `// indirect` requirements. It still inventories and validates the entire selected module graph. It does not choose Go or Kubernetes target versions, create commits, push branches, or open pull requests. Maintainers can run it manually; the external Prow periodic job can pass the same explicit inputs and publish the workspace changes.
 
+## Running in Multiarch Tuning Operator
+
+The launcher uses `go run -mod=readonly`, compiling from the module cache/proxy rather than requiring a complete vendor tree. No manual GOFLAGS override is needed; startup does not change go.mod/go.sum. Missing cached packages may require network access.
+
+The selected compiler must match the policy target as described below. An actual update also requires a clean Git worktree: commit or otherwise resolve local changes before running it. The updater reports failures and rolls back dependency changes.
+
 ## Modes
 
 Run `hack/upgrade-automation/scripts/upgrade.sh` with exactly one mode:
@@ -18,23 +24,26 @@ hack/upgrade-automation/scripts/upgrade.sh --mode kubernetes-only \
   --k8s-target k8s.io/api=v0.36.6 \
   --k8s-target k8s.io/apimachinery=v0.36.6
 
-# Set both independent policies.
+# Set Go and expand a Kubernetes release across selected Kubernetes modules.
 hack/upgrade-automation/scripts/upgrade.sh --mode both \
-  --go-target 1.26.8 \
-  --k8s-target k8s.io/api=v0.36.6 \
-  --k8s-target k8s.io/apimachinery=v0.36.6
+  --go-target 1.26.10 \
+  --k8s-release 1.36.6
 ```
 
-`--go-target` is an exact `X.Y.Z` version. Each repeatable `--k8s-target` is an exact `module=version` pair using Go module version syntax, such as `k8s.io/api=v0.36.6`. Go-only and both modes require a Go target; Kubernetes-only and both modes require at least one Kubernetes target. Targets in pinned dimensions and extra positional arguments are rejected.
+`--go-target` is an exact `X.Y.Z` version. Each repeatable `--k8s-target` is an exact `module=version` pair using Go module version syntax, such as `k8s.io/api=v0.36.6`. Go-only and both modes require a Go target; Kubernetes-only and both modes require `--k8s-release` or at least one Kubernetes target. Targets in pinned dimensions and extra positional arguments are rejected.
 
-The Kubernetes map is the release-alignment policy: list every intended module/version pair. There is no automatic “same version for every `k8s.io/*` module” rule. Unlisted baseline Kubernetes modules retain their individual selected versions. A newly introduced Kubernetes module is rejected unless explicitly listed. A target map entry absent from the baseline is applied only if a candidate introduces that module; if it never appears, the report marks the target blocked.
+`--k8s-release 1.N.P` expands across the baseline selected `k8s.io/*` graph, including indirect and graph-only modules. Candidates preserve each module's current major: client-go v0.36.4 tries v0.36.6, while cloud-provider-vsphere v1.36.0 tries v1.36.6. Explicit `--k8s-target` entries override derived targets. Independently versioned klog/v2, utils, kube-openapi, gengo/v2, and pseudo/prerelease baselines remain pinned. Automatic expansion does not downgrade newer baselines.
+
+Successful version listings that lack a candidate produce an `unavailable` decision: keep current version, report it, and continue. Retrieval/authentication failures still abort. No other minor version is substituted. If another target requires changing an unavailable or otherwise retained pin, the transaction fails and rolls back. Release input, effective target map, and sorted per-module decisions (`path`, `currentVersion`, `targetVersion`, `disposition`) are recorded under policy and `kubernetesReleaseTargets` in JSON, with progress on stderr.
+
+Without a release flag, the explicit Kubernetes map remains the release-alignment policy: list every intended module/version pair. Unlisted baseline Kubernetes modules retain their individual selected versions. A newly introduced Kubernetes module is rejected unless explicitly listed. A target map entry absent from the baseline is applied only if a candidate introduces that module; if it never appears, the report marks the target blocked.
 
 `pin-both` pins only the Go and Kubernetes dimensions. Other eligible modules are still considered for stable, newer versions.
 
 ## What the updater does
 
 1. Requires this repository and a clean Git working tree, then records `go.mod`'s Go directive/toolchain and inventories `go list -m -json all`.
-2. Applies requested Go and Kubernetes targets as one transaction and checks the full graph before any individual dependency trials.
+2. Applies requested Go and Kubernetes targets as one transaction and checks the full graph before any individual dependency trials. After each tidy, reapplies exact targets for still-selected graph-only modules whose packages are not imported; otherwise tidy can discard their pins and expose older transitive requirements. A later standalone `go mod tidy` can remove these pins again.
 3. Processes module paths in lexical order. Only modules explicitly required in the current root `go.mod` receive individual candidate trials; graph-only transitive modules are skipped. For each eligible module it lists versions newest-first, skipping prereleases and downgrades. It requests a specific version with `go get module@version`, never `go get -u`. If that release declares a renamed module path, the updater can migrate root-module imports transactionally (see below).
 4. Runs `go mod tidy`, reloads the selected graph, and verifies the candidate's actual selected version plus every Go/toolchain/Kubernetes exact pin. Accepted trials include graph-wide additions, removals, and version changes.
 5. Refreshes the inventory after accepted trials and processes newly discovered modules. A fixed pass bound and cycle detection prevent unbounded runs.
@@ -72,7 +81,7 @@ Protected modules cannot be migrated automatically. A rename with no matching ro
 
 ## Report
 
-The default report is `_output/dependency-upgrade-report.json`; override it with `--report PATH`. It is atomically written JSON and includes:
+The default report is `_output/dependency-upgrade-report.json`; override it with `--report PATH`. The default output directory is ignored by Git so generated reports do not block the next run. A failed run preserves any existing report at the requested path and writes to `<PATH>.failed` instead; a successful run atomically replaces the requested report. If no report exists yet, a failed run writes to the requested path. Reports include:
 
 - policy inputs and baseline/final Go directive, toolchain, and selected Kubernetes module versions;
 - overall `completed`, `incomplete`, or `failed` status, plus run-level failure and rollback state;
