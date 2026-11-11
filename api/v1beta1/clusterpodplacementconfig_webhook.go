@@ -23,23 +23,40 @@ import (
 
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
+
+	"github.com/openshift/multiarch-tuning-operator/pkg/utils"
 )
 
 // +kubebuilder:webhook:path=/validate-multiarch-openshift-io-v1beta1-clusterpodplacementconfig,mutating=false,failurePolicy=fail,sideEffects=None,groups=multiarch.openshift.io,resources=clusterpodplacementconfigs,verbs=create;update;delete,versions=v1beta1,name=validate-clusterpodplacementconfig.multiarch.openshift.io,admissionReviewVersions=v1
+// +kubebuilder:webhook:path=/mutate-multiarch-openshift-io-v1beta1-clusterpodplacementconfig,mutating=true,failurePolicy=fail,sideEffects=None,groups=multiarch.openshift.io,resources=clusterpodplacementconfigs,verbs=create,versions=v1beta1,name=mutate-clusterpodplacementconfig.multiarch.openshift.io,admissionReviewVersions=v1
 
 func (c *ClusterPodPlacementConfig) SetupWebhookWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewWebhookManagedBy(mgr, &ClusterPodPlacementConfig{}).
+		WithDefaulter(&ClusterPodPlacementConfigDefaulter{}).
 		WithValidator(&ClusterPodPlacementConfigValidator{
-			Client: mgr.GetClient(),
+			Client:    mgr.GetClient(),
+			APIReader: mgr.GetAPIReader(),
 		}).
 		Complete()
+}
+
+// ClusterPodPlacementConfigDefaulter protects cleanup before the object is persisted.
+// +kubebuilder:object:generate=false
+type ClusterPodPlacementConfigDefaulter struct{}
+
+func (*ClusterPodPlacementConfigDefaulter) Default(_ context.Context, cppc *ClusterPodPlacementConfig) error {
+	// Adding this only in reconciliation can race a DELETE that already read an unprotected object.
+	controllerutil.AddFinalizer(cppc, utils.PodPlacementFinalizerName)
+	return nil
 }
 
 // ClusterPodPlacementConfigValidator validates ClusterPodPlacementConfig resources
 // +kubebuilder:object:generate=false
 type ClusterPodPlacementConfigValidator struct {
-	Client client.Client
+	Client    client.Client
+	APIReader client.Reader
 }
 
 func (v *ClusterPodPlacementConfigValidator) ValidateCreate(ctx context.Context, obj *ClusterPodPlacementConfig) (warnings admission.Warnings, err error) {
@@ -55,6 +72,12 @@ func (v *ClusterPodPlacementConfigValidator) ValidateDelete(ctx context.Context,
 	existingPPCs := &PodPlacementConfigList{}
 	if err := v.Client.List(ctx, existingPPCs); err != nil {
 		return nil, fmt.Errorf("failed to list existing PodPlacementConfigs: %w", err)
+	}
+	// Confirm an empty cache result before allowing irreversible deletion.
+	if len(existingPPCs.Items) == 0 {
+		if err := v.APIReader.List(ctx, existingPPCs); err != nil {
+			return nil, fmt.Errorf("failed to list existing PodPlacementConfigs from API server: %w", err)
+		}
 	}
 	if len(existingPPCs.Items) != 0 {
 		return nil, fmt.Errorf("cannot delete ClusterPodPlacementConfig while local PodPlacementConfigs still exist")
