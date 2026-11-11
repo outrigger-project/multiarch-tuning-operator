@@ -22,6 +22,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -75,6 +76,8 @@ var (
 	testEnv    *envtest.Environment
 	ctx        context.Context
 	suiteLog   = ctrl.Log.WithName("setup")
+	// simulateMonitoringCheckFailure makes the monitoring availability check of the reconciler fail while set.
+	simulateMonitoringCheckFailure atomic.Bool
 )
 
 func init() {
@@ -235,6 +238,15 @@ func runManager() {
 	clientset := kubernetes.NewForConfigOrDie(cfg)
 
 	By("Setting up ClusterPodPlacementConfig controller")
+	// Let specs simulate a failure of the monitoring availability check. monitoringAvailableFunc is replaced once,
+	// before the manager starts, so that specs only toggle an atomic flag while the reconciler is running.
+	defaultMonitoringAvailableFunc := monitoringAvailableFunc
+	monitoringAvailableFunc = func(ctx context.Context, r *ClusterPodPlacementConfigReconciler) (bool, error) {
+		if simulateMonitoringCheckFailure.Load() {
+			return false, errors.NewServiceUnavailable("simulated monitoring availability check failure")
+		}
+		return defaultMonitoringAvailableFunc(ctx, r)
+	}
 	ctrlref, err := events.GetControllerReferenceForCurrentPod(context.TODO(), clientset, utils.Namespace(), nil)
 	if err != nil {
 		suiteLog.Error(err, "unable to get controller reference for current pod (falling back to namespace)")

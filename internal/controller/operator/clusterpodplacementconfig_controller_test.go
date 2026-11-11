@@ -19,6 +19,7 @@ package operator
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	admissionv1 "k8s.io/api/admissionregistration/v1"
 	appsv1 "k8s.io/api/apps/v1"
@@ -156,6 +157,29 @@ var _ = Describe("internal/Controller/ClusterPodPlacementConfig/ClusterPodPlacem
 					}), s)
 					g.Expect(err).NotTo(HaveOccurred(), "failed to get service "+utils.PodPlacementWebhookName, err)
 				}).Should(Succeed(), "the service "+utils.PodPlacementWebhookName+" should be recreated")
+			})
+			It("should reconcile the core operand while the monitoring availability cannot be determined", func() {
+				By("Simulating a failure of the monitoring availability check")
+				simulateMonitoringCheckFailure.Store(true)
+				DeferCleanup(func() { simulateMonitoringCheckFailure.Store(false) })
+
+				By("Deleting a core operand object")
+				webhookService := &corev1.Service{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      utils.PodPlacementWebhookName,
+						Namespace: utils.Namespace(),
+					},
+				}
+				Expect(k8sClient.Delete(ctx, webhookService, crclient.PropagationPolicy(metav1.DeletePropagationBackground))).
+					To(Succeed(), "failed to delete service "+utils.PodPlacementWebhookName)
+
+				By("Verifying the core operand object is recreated despite the monitoring failure")
+				Eventually(func(g Gomega) {
+					s := &corev1.Service{}
+					g.Expect(k8sClient.Get(ctx, crclient.ObjectKeyFromObject(webhookService), s)).To(Succeed(),
+						"the service "+utils.PodPlacementWebhookName+" should be recreated")
+					g.Expect(s.DeletionTimestamp.IsZero()).To(BeTrue(), "the service "+utils.PodPlacementWebhookName+" is still pending deletion")
+				}).Should(Succeed(), "the core operand should be reconciled even though the monitoring availability cannot be determined")
 			})
 			DescribeTable("should reconcile if deleted", func(object crclient.Object) {
 				name := object.GetName()
@@ -725,17 +749,39 @@ var _ = Describe("internal/Controller/ClusterPodPlacementConfig/ClusterPodPlacem
 				g.Expect(err3).NotTo(HaveOccurred(), "non-errored ENoExecEvent should still exist")
 			}).Should(Succeed(), "errored events should be deleted while non-errored remains")
 
+			By("Verifying the core operand is still reconciled while the plugin cleanup is blocked")
+			webhookService := &corev1.Service{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      utils.PodPlacementWebhookName,
+					Namespace: utils.Namespace(),
+				},
+			}
+			Expect(k8sClient.Delete(ctx, webhookService, crclient.PropagationPolicy(metav1.DeletePropagationBackground))).
+				To(Succeed(), "failed to delete service "+utils.PodPlacementWebhookName)
+			Eventually(func(g Gomega) {
+				s := &corev1.Service{}
+				g.Expect(k8sClient.Get(ctx, crclient.ObjectKeyFromObject(webhookService), s)).To(Succeed(),
+					"the service "+utils.PodPlacementWebhookName+" should be recreated")
+				g.Expect(s.DeletionTimestamp.IsZero()).To(BeTrue(), "the service "+utils.PodPlacementWebhookName+" is still pending deletion")
+			}).Should(Succeed(), "the core operand should be reconciled even though the plugin cleanup is blocked")
+			cppc = &v1beta1.ClusterPodPlacementConfig{}
+			Expect(k8sClient.Get(ctx, crclient.ObjectKey{Name: common.SingletonResourceObjectName}, cppc)).To(Succeed())
+			Expect(cppc.Finalizers).To(ContainElement(utils.ExecFormatErrorFinalizerName),
+				"the plugin cleanup should still be blocked by the non-errored ENoExecEvent")
+
 			By("Deleting the non-errored ENoExecEvent to allow cleanup to proceed")
 			Expect(k8sClient.Delete(ctx, nonErroredENEE)).To(Succeed(), "failed to delete non-errored ENoExecEvent")
 
 			By("Verifying the ExecFormatErrorMonitor finalizer is removed after all ENoExecEvents are gone")
+			// ENoExecEvents are not watched by the reconciler: the cleanup proceeds at the next 5s requeue, after the
+			// core operand is applied, so the timeout must cover one requeue interval plus a reconciliation.
 			Eventually(func(g Gomega) {
 				cppc := &v1beta1.ClusterPodPlacementConfig{}
 				err := k8sClient.Get(ctx, crclient.ObjectKey{Name: common.SingletonResourceObjectName}, cppc)
 				g.Expect(err).NotTo(HaveOccurred())
 				g.Expect(cppc.Finalizers).NotTo(ContainElement(utils.ExecFormatErrorFinalizerName),
 					"ExecFormatErrorMonitor finalizer should be removed")
-			}).Should(Succeed(), "finalizer should be removed after cleanup")
+			}).WithTimeout(15*time.Second).Should(Succeed(), "finalizer should be removed after cleanup")
 		})
 	})
 	Context("is handling the DaemonSet creation deferral when the ServiceAccount has no imagePullSecrets", func() {

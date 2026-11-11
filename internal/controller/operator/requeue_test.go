@@ -100,6 +100,33 @@ func TestMergeWithStatusErr(t *testing.T) {
 			wantRequeue:    true,
 			wantRequeueDur: 5 * time.Second,
 		},
+		{
+			name:           "requeueAfterError in primary errors takes priority when the status error is nil",
+			statusErr:      nil,
+			primaryErrs:    []error{primaryErr, newRequeueAfterError(3*time.Second, "cleanup in progress")},
+			wantRequeue:    true,
+			wantRequeueDur: 3 * time.Second,
+		},
+		{
+			name:           "requeueAfterError in primary errors takes priority over a plain status error",
+			statusErr:      plainStatusErr,
+			primaryErrs:    []error{nil, newRequeueAfterError(3*time.Second, "cleanup in progress")},
+			wantRequeue:    true,
+			wantRequeueDur: 3 * time.Second,
+		},
+		{
+			name:           "status requeueAfterError takes priority over a primary requeueAfterError",
+			statusErr:      newRequeueAfterError(5*time.Second, "progressing"),
+			primaryErrs:    []error{newRequeueAfterError(3*time.Second, "cleanup in progress")},
+			wantRequeue:    true,
+			wantRequeueDur: 5 * time.Second,
+		},
+		{
+			name:        "nil primary errors are ignored",
+			statusErr:   nil,
+			primaryErrs: []error{nil, nil},
+			wantNil:     true,
+		},
 	}
 
 	for _, tt := range tests {
