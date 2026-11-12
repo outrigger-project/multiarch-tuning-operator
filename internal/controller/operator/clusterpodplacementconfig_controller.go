@@ -19,7 +19,9 @@ package operator
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
+	"sync"
 	"time"
 
 	admissionv1 "k8s.io/api/admissionregistration/v1"
@@ -37,13 +39,16 @@ import (
 
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
+	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	ctrllog "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+	"sigs.k8s.io/controller-runtime/pkg/source"
 
 	"github.com/openshift/library-go/pkg/operator/events"
 
@@ -66,6 +71,17 @@ type ClusterPodPlacementConfigReconciler struct {
 	Scheme        *runtime.Scheme
 	ClientSet     *kubernetes.Clientset
 	Recorder      events.Recorder
+
+	// controller and cache are set by SetupWithManager.
+	// They are used by the monitoring reconcile loop logic.
+	controller controller.Controller
+	cache      cache.Cache
+
+	// monitoringWatchesMu guards serviceMonitorsWatched and prometheusRulesWatched
+	// which record whether the ownership watch on the corresponding monitoring resource is registered.
+	monitoringWatchesMu    sync.Mutex
+	serviceMonitorsWatched bool
+	prometheusRulesWatched bool
 }
 
 const (
@@ -561,18 +577,17 @@ func (r *ClusterPodPlacementConfigReconciler) handleDelete(ctx context.Context,
 		},
 	}
 
-	if utils.IsResourceAvailable(ctx, r.DynamicClient, monitoringv1.SchemeGroupVersion.WithResource("servicemonitors")) {
-		objsToDelete = append(objsToDelete, utils.ToDeleteRef{
-			NamespacedTypedClient: utils.NewDynamicDeleter(r.DynamicClient.Resource(schema.GroupVersionResource{Group: "monitoring.coreos.com", Version: "v1", Resource: "servicemonitors"}).Namespace(utils.Namespace())),
-			ObjName:               utils.PodPlacementWebhookName,
-		}, utils.ToDeleteRef{
-			NamespacedTypedClient: utils.NewDynamicDeleter(r.DynamicClient.Resource(schema.GroupVersionResource{Group: "monitoring.coreos.com", Version: "v1", Resource: "servicemonitors"}).Namespace(utils.Namespace())),
-			ObjName:               utils.PodPlacementControllerName,
-		}, utils.ToDeleteRef{
-			NamespacedTypedClient: utils.NewDynamicDeleter(r.DynamicClient.Resource(schema.GroupVersionResource{Group: "monitoring.coreos.com", Version: "v1", Resource: "prometheusrules"}).Namespace(utils.Namespace())),
-			ObjName:               utils.OperatorName,
-		})
-	}
+	// The monitoring objects are always deleted as DeleteResources ignores NotFound errors.
+	objsToDelete = append(objsToDelete, utils.ToDeleteRef{
+		NamespacedTypedClient: utils.NewDynamicDeleter(r.DynamicClient.Resource(schema.GroupVersionResource{Group: "monitoring.coreos.com", Version: "v1", Resource: "servicemonitors"}).Namespace(utils.Namespace())),
+		ObjName:               utils.PodPlacementWebhookName,
+	}, utils.ToDeleteRef{
+		NamespacedTypedClient: utils.NewDynamicDeleter(r.DynamicClient.Resource(schema.GroupVersionResource{Group: "monitoring.coreos.com", Version: "v1", Resource: "servicemonitors"}).Namespace(utils.Namespace())),
+		ObjName:               utils.PodPlacementControllerName,
+	}, utils.ToDeleteRef{
+		NamespacedTypedClient: utils.NewDynamicDeleter(r.DynamicClient.Resource(schema.GroupVersionResource{Group: "monitoring.coreos.com", Version: "v1", Resource: "prometheusrules"}).Namespace(utils.Namespace())),
+		ObjName:               utils.OperatorName,
+	})
 
 	log.Info("Deleting the remaining resources after cleanup")
 	// NOTE: err aggregates non-nil errors, excluding NotFound errors
@@ -714,18 +729,17 @@ func (r *ClusterPodPlacementConfigReconciler) handleEnoexecDelete(ctx context.Co
 		},
 	}
 
-	if utils.IsResourceAvailable(ctx, r.DynamicClient, monitoringv1.SchemeGroupVersion.WithResource("servicemonitors")) {
-		deploymentRelatedObjsToDelete = append(deploymentRelatedObjsToDelete, utils.ToDeleteRef{
-			NamespacedTypedClient: utils.NewDynamicDeleter(r.DynamicClient.Resource(schema.GroupVersionResource{Group: "monitoring.coreos.com", Version: "v1", Resource: "servicemonitors"}).Namespace(utils.Namespace())),
-			ObjName:               utils.EnoexecControllerName,
-		}, utils.ToDeleteRef{
-			NamespacedTypedClient: utils.NewDynamicDeleter(r.DynamicClient.Resource(schema.GroupVersionResource{Group: "monitoring.coreos.com", Version: "v1", Resource: "prometheusrules"}).Namespace(utils.Namespace())),
-			ObjName:               plugins.ExecFormatErrorMonitorPluginName,
-		}, utils.ToDeleteRef{
-			NamespacedTypedClient: utils.NewDynamicDeleter(r.DynamicClient.Resource(schema.GroupVersionResource{Group: "monitoring.coreos.com", Version: "v1", Resource: "prometheusrules"}).Namespace(utils.Namespace())),
-			ObjName:               utils.ExecFormatErrorsDetected,
-		})
-	}
+	// The monitoring objects are always deleted as DeleteResources ignores NotFound errors.
+	deploymentRelatedObjsToDelete = append(deploymentRelatedObjsToDelete, utils.ToDeleteRef{
+		NamespacedTypedClient: utils.NewDynamicDeleter(r.DynamicClient.Resource(schema.GroupVersionResource{Group: "monitoring.coreos.com", Version: "v1", Resource: "servicemonitors"}).Namespace(utils.Namespace())),
+		ObjName:               utils.EnoexecControllerName,
+	}, utils.ToDeleteRef{
+		NamespacedTypedClient: utils.NewDynamicDeleter(r.DynamicClient.Resource(schema.GroupVersionResource{Group: "monitoring.coreos.com", Version: "v1", Resource: "prometheusrules"}).Namespace(utils.Namespace())),
+		ObjName:               plugins.ExecFormatErrorMonitorPluginName,
+	}, utils.ToDeleteRef{
+		NamespacedTypedClient: utils.NewDynamicDeleter(r.DynamicClient.Resource(schema.GroupVersionResource{Group: "monitoring.coreos.com", Version: "v1", Resource: "prometheusrules"}).Namespace(utils.Namespace())),
+		ObjName:               utils.ExecFormatErrorsDetected,
+	})
 
 	log.Info("Deleting the ENoExecEvent Deployment resources")
 	if err = utils.DeleteResources(ctx, deploymentRelatedObjsToDelete); err != nil {
@@ -760,9 +774,16 @@ func (r *ClusterPodPlacementConfigReconciler) reconcile(ctx context.Context, clu
 		return err
 	}
 
+	// Monitoring is optional: if its availability cannot be determined, the core operand is still reconciled and
+	// only the monitoring objects are skipped.
+	monitoringAvailable, monitoringErr := r.ensureMonitoring(ctx)
+	if monitoringErr != nil {
+		log.Error(monitoringErr, "Unable to ensure monitoring. The monitoring resources will not be reconciled until it succeeds")
+	}
+
 	execFormatErrorObjects := []client.Object{}
 	if clusterPodPlacementConfig.PluginsEnabled(common.ExecFormatErrorMonitorPluginName) {
-		execFormatErrorObjects, err = r.buildENoExecEventObjects(ctx, clusterPodPlacementConfig)
+		execFormatErrorObjects, err = r.buildENoExecEventObjects(ctx, clusterPodPlacementConfig, monitoringAvailable)
 		if err != nil {
 			return err
 		}
@@ -822,8 +843,7 @@ func (r *ClusterPodPlacementConfigReconciler) reconcile(ctx context.Context, clu
 		}
 	}
 
-	// If the servicemonitors.monitoring.coreos.com CRD is available, we create the ServiceMonitor objects
-	if utils.IsResourceAvailable(ctx, r.DynamicClient, monitoringv1.SchemeGroupVersion.WithResource("servicemonitors")) {
+	if monitoringAvailable {
 		log.V(1).Info("Creating ServiceMonitors")
 		objects = append(objects,
 			buildServiceMonitor(utils.PodPlacementControllerName),
@@ -831,7 +851,7 @@ func (r *ClusterPodPlacementConfigReconciler) reconcile(ctx context.Context, clu
 			buildCPPCAvailabilityAlertRule(),
 		)
 	} else {
-		log.V(1).Info("servicemonitoring.monitoring.coreos.com is not available. Skipping the creation of the ServiceMonitors")
+		log.V(1).Info("servicemonitoring.monitoring.coreos.com is not available or availability could not be determined. Skipping the creation of the ServiceMonitors")
 	}
 	errs := make([]error, 0)
 	for _, o := range objects {
@@ -847,7 +867,7 @@ func (r *ClusterPodPlacementConfigReconciler) reconcile(ctx context.Context, clu
 
 	if err := utils.ApplyResources(ctx, r.ClientSet, r.DynamicClient, r.Recorder, objects); err != nil {
 		log.Error(err, "Unable to apply resources")
-		return mergeWithStatusErr(r.updateStatus(ctx, clusterPodPlacementConfig), err)
+		return mergeWithStatusErr(r.updateStatus(ctx, clusterPodPlacementConfig), err, monitoringErr)
 	}
 
 	if daemonSetDeferred {
@@ -860,6 +880,9 @@ func (r *ClusterPodPlacementConfigReconciler) reconcile(ctx context.Context, clu
 		return newRequeueAfterError(5*time.Second, "waiting for enoexec SA imagePullSecrets before creating DaemonSet")
 	}
 
+	if monitoringErr != nil {
+		return mergeWithStatusErr(r.updateStatus(ctx, clusterPodPlacementConfig), monitoringErr)
+	}
 	return r.updateStatus(ctx, clusterPodPlacementConfig)
 }
 
@@ -944,7 +967,8 @@ func (r *ClusterPodPlacementConfigReconciler) buildPodPlacementConfigObjects(clu
 
 // buildENoExecEventObjects builds the ENoExecEvent plugin resources (ServiceAccounts, RBAC, Deployment, ServiceMonitors)
 // excluding the DaemonSet, which is conditionally appended in reconcile() based on SA readiness.
-func (r *ClusterPodPlacementConfigReconciler) buildENoExecEventObjects(ctx context.Context, clusterPodPlacementConfig *multiarchv1beta1.ClusterPodPlacementConfig) ([]client.Object, error) {
+func (r *ClusterPodPlacementConfigReconciler) buildENoExecEventObjects(ctx context.Context, clusterPodPlacementConfig *multiarchv1beta1.ClusterPodPlacementConfig,
+	monitoringAvailable bool) ([]client.Object, error) {
 	log := ctrllog.FromContext(ctx)
 	logVerbosityLevel := clusterPodPlacementConfig.Spec.LogVerbosity.ToZapLevelInt()
 
@@ -1023,8 +1047,7 @@ func (r *ClusterPodPlacementConfigReconciler) buildENoExecEventObjects(ctx conte
 		buildDeploymentENoExecEventHandler(logVerbosityLevel),
 	}
 
-	// If the servicemonitors.monitoring.coreos.com CRD is available, we create the ServiceMonitor objects
-	if utils.IsResourceAvailable(ctx, r.DynamicClient, monitoringv1.SchemeGroupVersion.WithResource("servicemonitors")) {
+	if monitoringAvailable {
 		log.V(1).Info("Creating ServiceMonitors")
 		objects = append(objects,
 			buildServiceMonitor(utils.EnoexecControllerName),
@@ -1032,7 +1055,7 @@ func (r *ClusterPodPlacementConfigReconciler) buildENoExecEventObjects(ctx conte
 			buildExecFormatErrorsDetectedAlertRule(),
 		)
 	} else {
-		log.V(1).Info("servicemonitoring.monitoring.coreos.com is not available. Skipping the creation of the ServiceMonitors")
+		log.V(1).Info("servicemonitoring.monitoring.coreos.com is not available or availability could not be determined. Skipping the creation of the ServiceMonitors")
 	}
 	return objects, nil
 }
@@ -1213,10 +1236,70 @@ func (r *ClusterPodPlacementConfigReconciler) SetupWithManager(mgr ctrl.Manager)
 		Owns(&rbacv1.RoleBinding{}).
 		Owns(&corev1.ServiceAccount{}).
 		Owns(&admissionv1.MutatingWebhookConfiguration{}, builder.WithPredicates(predicate.GenerationChangedPredicate{}))
-	if utils.IsResourceAvailable(context.Background(), r.DynamicClient,
-		monitoringv1.SchemeGroupVersion.WithResource("servicemonitors")) {
-		c = c.Owns(&monitoringv1.ServiceMonitor{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
-			Owns(&monitoringv1.PrometheusRule{}, builder.WithPredicates(predicate.GenerationChangedPredicate{}))
+
+	// build and store the cache object to be eventually used to reconcile the monitoring
+	var err error
+	if r.controller, err = c.Build(r); err != nil {
+		return err
 	}
-	return c.Complete(r)
+	r.cache = mgr.GetCache()
+
+	// Try to register the monitoring watches at setup time already.
+	// In case of errors, log but ignore it, the reconcile loop will fix the drift anyway.
+	log := mgr.GetLogger().WithName("setup")
+	if _, err := r.ensureMonitoring(ctrllog.IntoContext(context.Background(), log)); err != nil {
+		log.Error(err, "Unable to set up monitoring at startup. It will be retried during reconciliation")
+	}
+	return nil
+}
+
+// monitoringAvailableFunc wraps the logic to check monitoring APIs availability.
+// It is a variable so that tests can replace it.
+var monitoringAvailableFunc = func(ctx context.Context, r *ClusterPodPlacementConfigReconciler) (bool, error) {
+	return utils.IsResourceAvailable(ctx, r.DynamicClient, monitoringv1.SchemeGroupVersion.WithResource("servicemonitors"))
+}
+
+// isMonitoringAvailable reports whether the monitoring APIs (servicemonitors.monitoring.coreos.com) are served.
+func (r *ClusterPodPlacementConfigReconciler) isMonitoringAvailable(ctx context.Context) (bool, error) {
+	return monitoringAvailableFunc(ctx, r)
+}
+
+// watchOwned registers, on the running controller, an ownership watch on the given object type.
+func (r *ClusterPodPlacementConfigReconciler) watchOwned(obj client.Object) error {
+	if r.controller == nil {
+		return errors.New("the controller is not set up: SetupWithManager must be called first")
+	}
+	return r.controller.Watch(source.Kind(r.cache, obj,
+		handler.EnqueueRequestForOwner(r.Scheme, r.RESTMapper(), &multiarchv1beta1.ClusterPodPlacementConfig{},
+			handler.OnlyControllerOwner()),
+		predicate.GenerationChangedPredicate{}))
+}
+
+// ensureMonitoring reports whether the monitoring APIs are available and, when they are, ensures that the ownership
+// watches on the monitoring resources are registered. It returns true only when both are true, so that callers create the monitoring objects only when
+// they are watched.
+func (r *ClusterPodPlacementConfigReconciler) ensureMonitoring(ctx context.Context) (bool, error) {
+	available, err := r.isMonitoringAvailable(ctx)
+	if err != nil || !available {
+		return false, err
+	}
+
+	log := ctrllog.FromContext(ctx)
+	r.monitoringWatchesMu.Lock()
+	defer r.monitoringWatchesMu.Unlock()
+	if !r.serviceMonitorsWatched {
+		if err := r.watchOwned(&monitoringv1.ServiceMonitor{}); err != nil {
+			return false, fmt.Errorf("unable to watch ServiceMonitor objects: %w", err)
+		}
+		r.serviceMonitorsWatched = true
+		log.Info("Started watching the ServiceMonitor objects")
+	}
+	if !r.prometheusRulesWatched {
+		if err := r.watchOwned(&monitoringv1.PrometheusRule{}); err != nil {
+			return false, fmt.Errorf("unable to watch PrometheusRule objects: %w", err)
+		}
+		r.prometheusRulesWatched = true
+		log.Info("Started watching the PrometheusRule objects")
+	}
+	return true, nil
 }
