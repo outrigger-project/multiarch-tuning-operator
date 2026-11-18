@@ -110,6 +110,19 @@ spec:
 EOF
 ```
 
+### Node maintenance and PodDisruptionBudgets
+
+The webhook adds the scheduling gate to pods and the controller removes it. If the webhook is running but the
+controller is not, new pods stay `Pending` until the controller comes back. The operator does not create
+PodDisruptionBudgets for these components.
+
+If you restrict the operand to a few nodes, or add your own PodDisruptionBudgets:
+
+- Run the operand on at least two nodes, and don't drain them at the same time (for example, use a
+  MachineConfigPool with `maxUnavailable: 1`).
+- Never add a PodDisruptionBudget to only the webhook. Add one for both the controller and the webhook, or for neither.
+- Don't add PodDisruptionBudgets on single-node clusters, because node drains would block.
+
 ### Undeploy the ClusterPodPlacementConfig operand
 
 ```shell
