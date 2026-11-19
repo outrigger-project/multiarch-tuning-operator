@@ -133,10 +133,15 @@ func (a *PodSchedulingGateMutatingWebHook) Handle(ctx context.Context, req admis
 	pod.EnsureLabel(utils.NodeAffinityLabel, utils.LabelValueNotSet)
 	pod.EnsureLabel(utils.SchedulingGateLabel, utils.LabelValueNotSet)
 
-	if pod.shouldIgnorePod(cppc, matchingPPCs) {
-		log.V(3).Info("Ignoring the pod")
+	if reason, ignore := pod.shouldIgnorePod(cppc, matchingPPCs); ignore {
+		// Record why the pod is ignored. The pod placement controller turns this
+		// label into an event once the pod exists, for the reasons the pod owner can act on.
+		pod.EnsureLabel(utils.IgnoreReasonLabel, reason)
+		log.V(3).Info("Ignoring the pod", "reason", reason)
 		return a.patchedPodResponse(pod.PodObject(), req)
 	}
+	// The pod is processed: drop a stale ignore reason, e.g., copied from another pod's manifest.
+	pod.EnsureNoLabel(utils.IgnoreReasonLabel)
 
 	// Apply CEL architecture placement in webhook before pod is persisted
 	a.applyCELInWebhook(ctx, pod, matchingPPCs)
