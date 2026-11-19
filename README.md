@@ -113,7 +113,7 @@ EOF
 ### Node maintenance and PodDisruptionBudgets
 
 The webhook adds the scheduling gate to pods and the controller removes it. If the webhook is running but the
-controller is not, new pods stay `Pending` until the controller comes back. The operator does not create
+controller is not, new pods will stay `Pending` until the controller comes back. The operator does not create
 PodDisruptionBudgets for these components.
 
 If you restrict the operand to a few nodes, or add your own PodDisruptionBudgets:
@@ -122,6 +122,28 @@ If you restrict the operand to a few nodes, or add your own PodDisruptionBudgets
   MachineConfigPool with `maxUnavailable: 1`).
 - Never add a PodDisruptionBudget to only the webhook. Add one for both the controller and the webhook, or for neither.
 - Don't add PodDisruptionBudgets on single-node clusters, because node drains would block.
+
+### Pods not processed by the operand
+
+When the operand does not process a pod, it sets the `multiarch.openshift.io/ignore-reason` label on it:
+
+| Value | Reason |
+| --- | --- |
+| `arch-set-by-user` | The pod already constrains `kubernetes.io/arch` |
+| `daemonset` | The pod is owned by a DaemonSet |
+| `node-assigned` | The pod already has `spec.nodeName` set |
+| `control-plane` | The pod targets control plane nodes |
+| `kube-namespace` | The pod runs in a `kube-*` namespace |
+| `operator-namespace` | The pod runs in the operator namespace |
+
+The operand also publishes an `ArchAwarePodIgnored` event with the reason on the pod, on a best-effort basis.
+To list the ignored pods:
+
+```shell
+kubectl get pods -A -l multiarch.openshift.io/ignore-reason --show-labels
+```
+
+Pods in namespaces excluded by the `namespaceSelector` are not seen by the operand and do not get the label.
 
 ### Undeploy the ClusterPodPlacementConfig operand
 

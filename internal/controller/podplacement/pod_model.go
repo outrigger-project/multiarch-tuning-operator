@@ -458,7 +458,8 @@ func (pod *Pod) ensureArchitectureLabels(requirement corev1.NodeSelectorRequirem
 	}
 }
 
-// shouldIgnorePod returns true if the pod should be ignored by the operator.
+// shouldIgnorePod returns whether the pod should be ignored by the operator and, if so, why, as one of the
+// utils.IgnoreReason* values. The reason is empty when the pod should be processed.
 // The operator should ignore the pods in the following cases:
 // - the pod is in the same namespace as the operator
 // - the pod is in a namespace with prefix kube-
@@ -468,7 +469,7 @@ func (pod *Pod) ensureArchitectureLabels(requirement corev1.NodeSelectorRequirem
 // - the pod has required architecture affinity configured AND:
 //   - preferred affinity is already configured, OR
 //   - both CPPC and all matching PPCs have the NodeAffinityScoring plugin disabled
-func (pod *Pod) shouldIgnorePod(cppc *v1beta1.ClusterPodPlacementConfig, matchingPPCs []v1beta1.PodPlacementConfig) bool {
+func (pod *Pod) shouldIgnorePod(cppc *v1beta1.ClusterPodPlacementConfig, matchingPPCs []v1beta1.PodPlacementConfig) (string, bool) {
 	log := ctrllog.FromContext(pod.Ctx())
 
 	cppcPresent := cppc != nil
@@ -492,7 +493,7 @@ func (pod *Pod) shouldIgnorePod(cppc *v1beta1.ClusterPodPlacementConfig, matchin
 			"namespace", pod.Namespace,
 			"reason", "pod is in operator namespace",
 			"operatorNamespace", utils.Namespace())
-		return true
+		return utils.IgnoreReasonOperatorNamespace, true
 	}
 
 	// Check kube- prefix
@@ -501,7 +502,7 @@ func (pod *Pod) shouldIgnorePod(cppc *v1beta1.ClusterPodPlacementConfig, matchin
 			"pod", pod.Name,
 			"namespace", pod.Namespace,
 			"reason", "pod namespace has kube- prefix")
-		return true
+		return utils.IgnoreReasonKubeNamespace, true
 	}
 
 	// Check if pod already assigned to node
@@ -511,7 +512,7 @@ func (pod *Pod) shouldIgnorePod(cppc *v1beta1.ClusterPodPlacementConfig, matchin
 			"namespace", pod.Namespace,
 			"reason", "pod already assigned to node",
 			"nodeName", pod.Spec.NodeName)
-		return true
+		return utils.IgnoreReasonNodeAssigned, true
 	}
 
 	// Check control plane node selector
@@ -520,7 +521,7 @@ func (pod *Pod) shouldIgnorePod(cppc *v1beta1.ClusterPodPlacementConfig, matchin
 			"pod", pod.Name,
 			"namespace", pod.Namespace,
 			"reason", "pod has control plane node selector")
-		return true
+		return utils.IgnoreReasonControlPlane, true
 	}
 
 	// Check if from DaemonSet
@@ -530,7 +531,7 @@ func (pod *Pod) shouldIgnorePod(cppc *v1beta1.ClusterPodPlacementConfig, matchin
 			"namespace", pod.Namespace,
 			"reason", "pod is from DaemonSet",
 			"ownerReferences", pod.OwnerReferences)
-		return true
+		return utils.IgnoreReasonDaemonSet, true
 	}
 
 	// Check architecture configuration
@@ -540,7 +541,7 @@ func (pod *Pod) shouldIgnorePod(cppc *v1beta1.ClusterPodPlacementConfig, matchin
 		"isNodeSelectorConfiguredForArchitecture", isNodeSelectorConfigured)
 
 	if !isNodeSelectorConfigured {
-		return false
+		return "", false
 	}
 
 	// Architecture is configured, check if we should still ignore
@@ -554,7 +555,7 @@ func (pod *Pod) shouldIgnorePod(cppc *v1beta1.ClusterPodPlacementConfig, matchin
 			"pod", pod.Name,
 			"namespace", pod.Namespace,
 			"reason", "architecture configured in nodeSelector AND preferred affinity configured")
-		return true
+		return utils.IgnoreReasonArchSetByUser, true
 	}
 
 	// Check plugin configuration; guard against nil cppc (informer cache not yet populated)
@@ -571,10 +572,10 @@ func (pod *Pod) shouldIgnorePod(cppc *v1beta1.ClusterPodPlacementConfig, matchin
 			"pod", pod.Name,
 			"namespace", pod.Namespace,
 			"reason", "architecture configured in nodeSelector AND preferred affinity not configured AND no plugins enabled (CPPC and all matching PPCs have NodeAffinityScoring disabled)")
-		return true
+		return utils.IgnoreReasonArchSetByUser, true
 	}
 
-	return false
+	return "", false
 }
 
 // isNodeSelectorConfiguredForArchitecture returns true if the pod has already a nodeSelector for the architecture label
@@ -587,7 +588,6 @@ func (pod *Pod) isNodeSelectorConfiguredForArchitecture() bool {
 	// nodeSelectorTerm's MatchExpressions field.
 	for key := range pod.Spec.NodeSelector {
 		if key == utils.ArchLabel {
-			pod.publishIgnorePod()
 			return true
 		}
 	}

@@ -81,6 +81,23 @@ const (
 	ImageInspectionErrorLabel       = "multiarch.openshift.io/image-inspect-error"
 	ImageInspectionErrorCountLabel  = "multiarch.openshift.io/image-inspect-error-count"
 	LabelGroup                      = "multiarch.openshift.io"
+	IgnoreReasonLabel               = "multiarch.openshift.io/ignore-reason"
+)
+
+const (
+	// IgnoreReasonOperatorNamespace: the pod runs in the operator namespace.
+	IgnoreReasonOperatorNamespace = "operator-namespace"
+	// IgnoreReasonKubeNamespace: the pod runs in a namespace with the kube- prefix.
+	IgnoreReasonKubeNamespace = "kube-namespace"
+	// IgnoreReasonNodeAssigned: the pod already has spec.nodeName set.
+	IgnoreReasonNodeAssigned = "node-assigned"
+	// IgnoreReasonControlPlane: the pod has a control plane node selector.
+	IgnoreReasonControlPlane = "control-plane"
+	// IgnoreReasonDaemonSet: the pod is owned by a DaemonSet.
+	IgnoreReasonDaemonSet = "daemonset"
+	// IgnoreReasonArchSetByUser: the pod already constrains the kubernetes.io/arch label and
+	// the operand has nothing to add.
+	IgnoreReasonArchSetByUser = "arch-set-by-user"
 )
 
 const (

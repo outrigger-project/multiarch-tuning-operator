@@ -164,6 +164,7 @@ All operand resources applied via `utils.ApplyResources()` using server-side app
 | `multiarch.openshift.io/multi-arch` | *(present)* | Pod supports multiple architectures |
 | `multiarch.openshift.io/image-inspect-error` | *(present)* | Image inspection failed |
 | `multiarch.openshift.io/fallback-arch` | `<arch>` | Fallback architecture used |
+| `multiarch.openshift.io/ignore-reason` | `operator-namespace`/`kube-namespace`/`node-assigned`/`control-plane`/`daemonset`/`arch-set-by-user` | Why the pod is not processed. Set by the webhook (or by the controller for gated pods that became ignorable). The controller also publishes an `ArchAwarePodIgnored` event with the reason on the pod, best effort, when its watch reports the pod as created (`PodReconciler.publishIgnoredPodEvent`) |
 | `multiarch.openshift.io/operand` | *(present)* | Marks operand resources |
 
 ## Status Conditions
