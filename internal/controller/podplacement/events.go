@@ -7,6 +7,7 @@ const (
 	ImageArchitectureInspectionError              = "ArchAwareInspectionError"
 	ArchitectureAwareNodeAffinitySet              = "ArchAwarePredicateSet"
 	ArchitectureAwareGatedPodIgnored              = "ArchAwareGatedPodIgnored"
+	ArchitectureAwarePodIgnored                   = "ArchAwarePodIgnored"
 	ArchitectureAwareSchedulingGateAdded          = "ArchAwareSchedGateAdded"
 	ArchitectureAwareSchedulingGateRemovalFailure = "ArchAwareSchedGateRemovalFailed"
 	ArchitectureAwareSchedulingGateRemovalSuccess = "ArchAwareSchedGateRemovalSuccess"
@@ -30,7 +31,9 @@ const (
 		"Registry error: "
 	NoSupportedArchitecturesFoundMsg    = "Pod cannot be scheduled due to incompatible image architectures; container images have no supported architectures in common"
 	ArchitectureAwareGatedPodIgnoredMsg = "The gated pod has been modified and is no longer eligible for architecture-aware scheduling"
-	ImageInspectionErrorMaxRetriesMsg   = "The operator was unable to determine the supported architectures after multiple retries. " +
+	// ArchitectureAwarePodIgnoredMsg is followed by the value of the utils.IgnoreReasonLabel label.
+	ArchitectureAwarePodIgnoredMsg    = "The pod is not processed for architecture-aware scheduling, ignore reason: "
+	ImageInspectionErrorMaxRetriesMsg = "The operator was unable to determine the supported architectures after multiple retries. " +
 		"This is typically caused by the image registry being unreachable, returning an error, or a misconfiguration in the cluster's pull secrets or network. " +
 		"Registry error"
 	ArchitectureFallbackSetupMsg = "Image inspection failed; setting the nodeAffinity to the fallback architecture: "

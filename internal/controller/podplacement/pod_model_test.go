@@ -1072,8 +1072,82 @@ func TestPod_shouldIgnorePod(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			pod := newPod(tt.fields.Pod, tt.fields.ctx, tt.fields.recorder)
-			if got := pod.shouldIgnorePod(&v1beta1.ClusterPodPlacementConfig{}, []v1beta1.PodPlacementConfig{}); got != tt.want {
+			if _, got := pod.shouldIgnorePod(&v1beta1.ClusterPodPlacementConfig{}, []v1beta1.PodPlacementConfig{}); got != tt.want {
 				t.Errorf("shouldIgnorePod() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestPod_shouldIgnorePodReason(t *testing.T) {
+	cppcWithScoring := NewClusterPodPlacementConfig().
+		WithName(common.SingletonResourceObjectName).
+		WithNodeAffinityScoring(true).
+		WithNodeAffinityScoringTerm(utils.ArchitectureAmd64, 1).Build()
+	archNodeSelector := []string{utils.ArchLabel, utils.ArchitectureAmd64}
+	tests := []struct {
+		name string
+		pod  *v1.Pod
+		cppc *v1beta1.ClusterPodPlacementConfig
+		want string
+	}{
+		{
+			name: "pod to process",
+			pod:  NewPod().Build(),
+			want: "",
+		},
+		{
+			name: "pod in the operator namespace",
+			pod:  NewPod().WithNamespace(utils.Namespace()).Build(),
+			want: utils.IgnoreReasonOperatorNamespace,
+		},
+		{
+			name: "pod in a kube- namespace",
+			pod:  NewPod().WithNamespace("kube-system").Build(),
+			want: utils.IgnoreReasonKubeNamespace,
+		},
+		{
+			name: "pod with nodeName set",
+			pod:  NewPod().WithNodeName("node-name").Build(),
+			want: utils.IgnoreReasonNodeAssigned,
+		},
+		{
+			name: "pod with control plane node selector",
+			pod:  NewPod().WithNodeSelectors(utils.ControlPlaneNodeSelectorLabel, "").Build(),
+			want: utils.IgnoreReasonControlPlane,
+		},
+		{
+			name: "pod owned by a DaemonSet",
+			pod: NewPod().WithOwnerReferences(
+				NewOwnerReferenceBuilder().WithKind("DaemonSet").WithController(utils.NewPtr(true)).Build()).
+				Build(),
+			want: utils.IgnoreReasonDaemonSet,
+		},
+		{
+			name: "pod with arch nodeSelector and no ClusterPodPlacementConfig",
+			pod:  NewPod().WithNodeSelectors(archNodeSelector...).Build(),
+			want: utils.IgnoreReasonArchSetByUser,
+		},
+		{
+			name: "pod with arch nodeSelector and preferred arch affinity, NodeAffinityScoring enabled",
+			pod: NewPod().WithNodeSelectors(archNodeSelector...).WithPreferredDuringSchedulingIgnoredDuringExecution(
+				NewPreferredSchedulingTerm().WithArchitecture(utils.ArchitectureAmd64).WithWeight(1).Build()).Build(),
+			cppc: cppcWithScoring,
+			want: utils.IgnoreReasonArchSetByUser,
+		},
+		{
+			name: "pod with arch nodeSelector, NodeAffinityScoring enabled: processed for the preferred affinity",
+			pod:  NewPod().WithNodeSelectors(archNodeSelector...).Build(),
+			cppc: cppcWithScoring,
+			want: "",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pod := newPod(tt.pod, context.Background(), nil)
+			reason, ignore := pod.shouldIgnorePod(tt.cppc, nil)
+			if reason != tt.want || ignore != (tt.want != "") {
+				t.Errorf("shouldIgnorePod() = (%q, %v), want (%q, %v)", reason, ignore, tt.want, tt.want != "")
 			}
 		})
 	}
@@ -1127,7 +1201,7 @@ func TestPod_shouldIgnorePodWithPluginsEnabledInCPPC(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			pod := newPod(tt.fields.Pod, tt.fields.ctx, tt.fields.recorder)
-			if got := pod.shouldIgnorePod(NewClusterPodPlacementConfig().
+			if _, got := pod.shouldIgnorePod(NewClusterPodPlacementConfig().
 				WithName(common.SingletonResourceObjectName).
 				WithNodeAffinityScoring(true).
 				WithNodeAffinityScoringTerm(utils.ArchitectureAmd64, 1).Build(),
@@ -1169,7 +1243,7 @@ func TestPod_shouldIgnorePodWithPluginsDisabledInCPPC(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			pod := newPod(tt.fields.Pod, tt.fields.ctx, tt.fields.recorder)
-			if got := pod.shouldIgnorePod(NewClusterPodPlacementConfig().
+			if _, got := pod.shouldIgnorePod(NewClusterPodPlacementConfig().
 				WithName(common.SingletonResourceObjectName).
 				WithNodeAffinityScoring(false).
 				WithNodeAffinityScoringTerm(utils.ArchitectureAmd64, 1).Build(),
@@ -1954,7 +2028,7 @@ func TestPod_shouldIgnorePod_WithMatchingPPCs(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			pod := newPod(tt.pod, ctx, nil)
 			g := NewGomegaWithT(t)
-			result := pod.shouldIgnorePod(tt.cppc, tt.matchingPPCs)
+			_, result := pod.shouldIgnorePod(tt.cppc, tt.matchingPPCs)
 			g.Expect(result).To(Equal(tt.want), "unexpected result from shouldIgnorePod")
 		})
 	}
