@@ -72,6 +72,7 @@ import (
 	operandevents "github.com/openshift/multiarch-tuning-operator/pkg/events"
 	"github.com/openshift/multiarch-tuning-operator/pkg/informers/clusterpodplacementconfig"
 	"github.com/openshift/multiarch-tuning-operator/pkg/utils"
+	"github.com/openshift/multiarch-tuning-operator/pkg/webhookserver"
 )
 
 const (
@@ -146,11 +147,11 @@ func main() {
 	}
 	tlsOpts = append(tlsOpts, disableHTTP2)
 
-	webhookServer := webhook.NewServer(webhook.Options{
+	webhookServer := webhookserver.WithSecurityHeaders(webhook.NewServer(webhook.Options{
 		Port:    9443,
 		CertDir: certDir,
 		TLSOpts: tlsOpts,
-	})
+	}))
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
 		Scheme: scheme,
 		Metrics: metricsserver.Options{

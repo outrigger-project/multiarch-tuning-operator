@@ -69,6 +69,7 @@ import (
 	testingutils "github.com/openshift/multiarch-tuning-operator/pkg/testing/framework"
 	"github.com/openshift/multiarch-tuning-operator/pkg/testing/image/fake/registry"
 	"github.com/openshift/multiarch-tuning-operator/pkg/utils"
+	"github.com/openshift/multiarch-tuning-operator/pkg/webhookserver"
 	//+kubebuilder:scaffold:imports
 )
 
@@ -348,11 +349,11 @@ func seedK8S() {
 
 func runManager() {
 	By("Creating the manager")
-	webhookServer := webhook.NewServer(webhook.Options{
+	webhookServer := webhookserver.WithSecurityHeaders(webhook.NewServer(webhook.Options{
 		Port:    testEnv.WebhookInstallOptions.LocalServingPort,
 		Host:    testEnv.WebhookInstallOptions.LocalServingHost,
 		CertDir: testEnv.WebhookInstallOptions.LocalServingCertDir,
-	})
+	}))
 	mgr, err := ctrl.NewManager(cfg, ctrl.Options{
 		Scheme:                 scheme.Scheme,
 		HealthProbeBindAddress: ":4980",
