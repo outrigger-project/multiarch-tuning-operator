@@ -380,6 +380,10 @@ func (r *PodReconciler) SetupWithManager(mgr ctrl.Manager) error {
 
 // publishIgnoredPodEvent publishes an event, with the ignore reason, for pods that have the
 // utils.IgnoreReasonLabel label. System pods do not get the event emitted.
+//
+// Publishing is best effort: the watch only sees Pending pods, so pods created while the controller is not
+// running (e.g., during a restart or a leader change) that start before it comes back get no event.
+// The label is always set.
 func (r *PodReconciler) publishIgnoredPodEvent(ctx context.Context, e event.CreateEvent, _ workqueue.TypedRateLimitingInterface[reconcile.Request]) {
 	pod, ok := e.Object.(*corev1.Pod)
 	if !ok || r.Recorder == nil {

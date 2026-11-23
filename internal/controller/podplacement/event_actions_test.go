@@ -141,6 +141,9 @@ func TestPod_GateRemovalEventActions(t *testing.T) {
 				g.Expect(err).To(HaveOccurred())
 			} else {
 				g.Expect(err).NotTo(HaveOccurred())
+				stored := &corev1.Pod{}
+				g.Expect(c.Get(t.Context(), client.ObjectKeyFromObject(p), stored)).To(Succeed())
+				g.Expect(stored.Labels).To(HaveKeyWithValue(utils.IgnoreReasonLabel, utils.IgnoreReasonNodeAssigned))
 			}
 			observed := make(map[string]*eventsv1.Event)
 			g.Eventually(func() int {

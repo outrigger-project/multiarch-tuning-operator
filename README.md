@@ -136,8 +136,9 @@ When the operand does not process a pod, it sets the `multiarch.openshift.io/ign
 | `kube-namespace` | The pod runs in a `kube-*` namespace |
 | `operator-namespace` | The pod runs in the operator namespace |
 
-For `arch-set-by-user`, the operand also publishes an `ArchAwarePodIgnored` event on the pod, on a best-effort basis.
-The other reasons concern system pods or pods already bound to a node, so they only get the label.
+For `arch-set-by-user`, the operand also publishes an `ArchAwarePodIgnored` event on the pod, on a best-effort basis:
+pods created while the pod placement controller is unavailable, and that start before it is back, do not get the
+event. The other reasons concern system pods or pods already bound to a node, so they only get the label.
 To list the ignored pods:
 
 ```shell
