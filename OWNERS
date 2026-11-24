@@ -6,6 +6,7 @@ reviewers:
   - jcpowermac
   - bshaw7
   - nischawl
+  - mfbonfigli
 approvers:
   - aleskandro
   - AnnaZivkovic 
@@ -14,4 +15,5 @@ approvers:
   - jcpowermac
   - bshaw7
   - nischawl
+  - mfbonfigli
 components: multiarch-tuning-operator
