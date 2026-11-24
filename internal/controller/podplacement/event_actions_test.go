@@ -16,6 +16,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 
 	"github.com/openshift/multiarch-tuning-operator/api/common/plugins"
 	"github.com/openshift/multiarch-tuning-operator/api/v1beta1"
@@ -140,6 +141,9 @@ func TestPod_GateRemovalEventActions(t *testing.T) {
 				g.Expect(err).To(HaveOccurred())
 			} else {
 				g.Expect(err).NotTo(HaveOccurred())
+				stored := &corev1.Pod{}
+				g.Expect(c.Get(t.Context(), client.ObjectKeyFromObject(p), stored)).To(Succeed())
+				g.Expect(stored.Labels).To(HaveKeyWithValue(utils.IgnoreReasonLabel, utils.IgnoreReasonNodeAssigned))
 			}
 			observed := make(map[string]*eventsv1.Event)
 			g.Eventually(func() int {
@@ -171,6 +175,79 @@ func TestPod_GateRemovalEventActions(t *testing.T) {
 				g.Expect(removed.Type).To(Equal("Normal"))
 				g.Expect(removed.Note).To(Equal(SchedulingGateRemovalSuccessMsg))
 			}
+		})
+	}
+}
+
+func TestPodReconciler_publishIgnoredPodEvent(t *testing.T) {
+	podWithLabels := func(labels map[string]string) *corev1.Pod {
+		return &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
+			Name: "pod", Namespace: "events-test", UID: "uid", Labels: labels,
+		}}
+	}
+	type testCase struct {
+		name             string
+		obj              client.Object
+		wantIgnoreReason string // empty: no event expected
+	}
+	cases := []testCase{
+		{
+			name:             "pod ignored because the architecture is set by the user",
+			obj:              podWithLabels(map[string]string{utils.IgnoreReasonLabel: utils.IgnoreReasonArchSetByUser}),
+			wantIgnoreReason: utils.IgnoreReasonArchSetByUser,
+		},
+		{
+			name: "pod without the ignore reason label",
+			obj:  podWithLabels(map[string]string{utils.SchedulingGateLabel: utils.SchedulingGateLabelValueGated}),
+		},
+		{
+			name: "pod without labels",
+			obj:  podWithLabels(nil),
+		},
+		{
+			name: "object that is not a pod",
+			obj: &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{
+				Name: "cm", Namespace: "events-test",
+				Labels: map[string]string{utils.IgnoreReasonLabel: utils.IgnoreReasonArchSetByUser},
+			}},
+		},
+	}
+	// The other ignore reasons concern system pods or pods already bound to a node: label only, no event.
+	for _, reason := range []string{utils.IgnoreReasonDaemonSet, utils.IgnoreReasonKubeNamespace,
+		utils.IgnoreReasonOperatorNamespace, utils.IgnoreReasonControlPlane, utils.IgnoreReasonNodeAssigned} {
+		cases = append(cases, testCase{
+			name: "pod ignored with reason " + reason,
+			obj:  podWithLabels(map[string]string{utils.IgnoreReasonLabel: reason}),
+		})
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel() // each case has its own recorder; the no-event cases wait 500ms each
+			g := NewWithT(t)
+			s := runtime.NewScheme()
+			g.Expect(scheme.AddToScheme(s)).To(Succeed())
+			recorder, events, cleanup, err := framework.NewTestEventRecorder(t.Context(), s, utils.OperatorName)
+			g.Expect(err).NotTo(HaveOccurred())
+			t.Cleanup(cleanup)
+			original := tc.obj.DeepCopyObject()
+
+			// A nil queue makes the test panic if the handler tries to enqueue a request.
+			(&PodReconciler{Recorder: recorder}).publishIgnoredPodEvent(t.Context(), event.CreateEvent{Object: tc.obj}, nil)
+
+			g.Expect(tc.obj).To(Equal(original), "the handler must not modify the cached object")
+			if tc.wantIgnoreReason == "" {
+				g.Consistently(events, 500*time.Millisecond).ShouldNot(Receive())
+				return
+			}
+			var ev *eventsv1.Event
+			g.Eventually(events, 2*time.Second).Should(Receive(&ev))
+			g.Expect(ev.Reason).To(Equal(ArchitectureAwarePodIgnored))
+			g.Expect(ev.Action).To(Equal(utils.EventActionPodIgnore))
+			g.Expect(ev.Type).To(Equal(corev1.EventTypeNormal))
+			g.Expect(ev.Note).To(Equal(ArchitectureAwarePodIgnoredMsg + tc.wantIgnoreReason))
+			g.Expect(ev.Regarding).To(Equal(corev1.ObjectReference{
+				APIVersion: "v1", Kind: "Pod", Name: "pod", Namespace: "events-test", UID: "uid",
+			}))
 		})
 	}
 }

@@ -71,6 +71,54 @@ var _ = Describe("Internal/Controller/PodPlacement/scheduling_gate_mutating_webh
 					Build()
 				err := k8sClient.Create(ctx, pod)
 				Expect(err).NotTo(HaveOccurred(), "failed to create the pod", err)
+				Expect(pod.Labels).To(HaveKeyWithValue(utils.IgnoreReasonLabel, utils.IgnoreReasonNodeAssigned))
+			})
+			It("should remove a stale ignore reason label from pods it gates", func() {
+				pod := builder.NewPod().
+					WithContainersImages(fmt.Sprintf("%s/%s/%s:latest", registryAddress,
+						registry.PublicRepo, registry.ComputeNameByMediaType(imgspecv1.MediaTypeImageIndex))).
+					WithGenerateName("stale-ignore-reason-").
+					WithNamespace("test-namespace").
+					WithLabels(utils.IgnoreReasonLabel, utils.IgnoreReasonArchSetByUser).
+					Build()
+				Expect(k8sClient.Create(ctx, pod)).To(Succeed())
+				DeferCleanup(func() { _ = k8sClient.Delete(ctx, pod) })
+				Expect(pod.Labels).To(HaveKeyWithValue(utils.SchedulingGateLabel, utils.SchedulingGateLabelValueGated))
+				Expect(pod.Labels).NotTo(HaveKey(utils.IgnoreReasonLabel))
+			})
+			It("should label and publish an event for generateName pods ignored because the architecture is set by the user", func() {
+				// The suite's ClusterPodPlacementConfig enables NodeAffinityScoring, so the pod must set both the
+				// required and the preferred architecture affinity to be ignored.
+				pod := builder.NewPod().
+					WithContainersImages(fmt.Sprintf("%s/%s/%s:latest", registryAddress,
+						registry.PublicRepo, registry.ComputeNameByMediaType(imgspecv1.MediaTypeImageIndex))).
+					WithGenerateName("ignored-arch-set-").
+					WithNamespace("test-namespace").
+					WithNodeSelectors(utils.ArchLabel, utils.ArchitectureAmd64).
+					WithPreferredDuringSchedulingIgnoredDuringExecution(
+						builder.NewPreferredSchedulingTerm().WithArchitecture(utils.ArchitectureAmd64).WithWeight(1).Build()).
+					Build()
+				Expect(k8sClient.Create(ctx, pod)).To(Succeed())
+				DeferCleanup(func() { _ = k8sClient.Delete(ctx, pod) })
+				Expect(pod.Labels).To(HaveKeyWithValue(utils.IgnoreReasonLabel, utils.IgnoreReasonArchSetByUser))
+				Expect(pod.Spec.SchedulingGates).To(BeEmpty())
+
+				clientset, err := kubernetes.NewForConfig(cfg)
+				Expect(err).NotTo(HaveOccurred())
+				Eventually(func(g Gomega) {
+					events, err := framework.GetEventsForObject(ctx, clientset, pod.Name, pod.Namespace)
+					g.Expect(err).NotTo(HaveOccurred())
+					var ignored *eventsv1.Event
+					for i := range events {
+						if events[i].Reason == ArchitectureAwarePodIgnored {
+							ignored = &events[i]
+							break
+						}
+					}
+					g.Expect(ignored).NotTo(BeNil(), "the event for the ignored pod was not published")
+					g.Expect(ignored.Regarding.UID).To(Equal(pod.UID), "the event must be attached to the stored pod")
+					g.Expect(ignored.Note).To(Equal(ArchitectureAwarePodIgnoredMsg + utils.IgnoreReasonArchSetByUser))
+				}, 10*time.Second).Should(Succeed())
 			})
 		})
 	})

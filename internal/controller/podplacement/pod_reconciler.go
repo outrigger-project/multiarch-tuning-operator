@@ -29,9 +29,11 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
 	clientgoevents "k8s.io/client-go/tools/events"
+	"k8s.io/client-go/util/workqueue"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	ctrl2 "sigs.k8s.io/controller-runtime/pkg/controller"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	ctrllog "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -148,8 +150,8 @@ func (r *PodReconciler) processPod(ctx context.Context, pod *Pod) {
 	// Filter to only PPCs that match this pod's labels - do this once for efficiency
 	matchingPPCs := pod.filterMatchingPPCs(ppcList)
 
-	if pod.shouldIgnorePod(cppc, matchingPPCs) {
-		log.V(3).Info("A pod with the scheduling gate should be ignored. Ignoring...")
+	if reason, ignore := pod.shouldIgnorePod(cppc, matchingPPCs); ignore {
+		log.V(3).Info("A pod with the scheduling gate should be ignored. Ignoring...", "reason", reason)
 		// We can reach this branch when:
 		// - The pod has been gated but not processed before the operator changed configuration such that the pod should be ignored.
 		// - The pod has got some other changes in the admission chain from another webhook that makes it not suitable for processing anymore
@@ -157,6 +159,7 @@ func (r *PodReconciler) processPod(ctx context.Context, pod *Pod) {
 		// In both cases, we should just remove the scheduling gate.
 		log.V(1).Info("Removing the scheduling gate from pod.")
 		pod.RemoveSchedulingGate()
+		pod.EnsureLabel(utils.IgnoreReasonLabel, reason)
 		pod.PublishEvent(corev1.EventTypeWarning, ArchitectureAwareGatedPodIgnored, utils.EventActionPodIgnore, ArchitectureAwareGatedPodIgnoredMsg)
 		return
 	}
@@ -348,6 +351,10 @@ func (r *PodReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		Named("pod").
 		For(&corev1.Pod{}).
+		// Publish an event for the pods the webhook ignored because they already constrain the architecture,
+		// as soon as the watch reports them as created.
+		// This handler never enqueues reconcile requests.
+		Watches(&corev1.Pod{}, handler.Funcs{CreateFunc: r.publishIgnoredPodEvent}).
 		// Watch PodPlacementConfig to re-queue gated pods when a PPC is created, updated, or deleted.
 		// Without this, there is a race between a PPC appearing in the API server and the informer
 		// cache syncing it. If a pod is reconciled before the cache has the PPC, the pod is processed
@@ -369,6 +376,30 @@ func (r *PodReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			MaxConcurrentReconciles: maxConcurrentReconciles,
 		}).
 		Complete(r)
+}
+
+// publishIgnoredPodEvent publishes an event, with the ignore reason, for pods that have the
+// utils.IgnoreReasonLabel label. System pods do not get the event emitted.
+//
+// Publishing is best effort: the watch only sees Pending pods, so pods created while the controller is not
+// running (e.g., during a restart or a leader change) that start before it comes back get no event.
+// The label is always set.
+func (r *PodReconciler) publishIgnoredPodEvent(ctx context.Context, e event.CreateEvent, _ workqueue.TypedRateLimitingInterface[reconcile.Request]) {
+	pod, ok := e.Object.(*corev1.Pod)
+	if !ok || r.Recorder == nil {
+		return
+	}
+	// arch-set-by-user is the only reason the pod owner can act on. The other reasons concern system pods
+	// (DaemonSets, kube- and operator namespaces, control plane) or pods already bound to a node, where an
+	// event would only add noise, and for those an event is not emitted although the info remains visible as a label.
+	ignoreReason := pod.Labels[utils.IgnoreReasonLabel]
+	if ignoreReason != utils.IgnoreReasonArchSetByUser {
+		return
+	}
+	log := ctrllog.FromContext(ctx).WithValues("pod", pod.Name, "namespace", pod.Namespace)
+	log.V(3).Info("Publishing the event for an ignored pod", "ignoreReason", ignoreReason)
+	r.Recorder.WithLogger(log).Eventf(pod, nil, corev1.EventTypeNormal, ArchitectureAwarePodIgnored,
+		utils.EventActionPodIgnore, "%s", ArchitectureAwarePodIgnoredMsg+ignoreReason)
 }
 
 // mapPPCToPods returns reconcile requests for all gated pods in the PPC's namespace.
