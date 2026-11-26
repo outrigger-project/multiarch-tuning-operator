@@ -1,5 +1,6 @@
 ARG BUILD_IMAGE=registry.access.redhat.com/ubi9/go-toolset:1.26.10
-ARG RUNTIME_IMAGE=registry.access.redhat.com/ubi9/ubi-minimal:latest
+ARG RUNTIME_IMAGE=registry.access.redhat.com/ubi9/ubi-micro:latest
+ARG RUNTIME_TOOLS_IMAGE=registry.access.redhat.com/ubi9/ubi:latest
 FROM ${BUILD_IMAGE} as builder
 ARG TARGETOS
 ARG TARGETARCH
@@ -37,8 +38,27 @@ RUN GOGC=75 CGO_ENABLED=1 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build 
 RUN GOGC=75 CGO_ENABLED=1 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -o enoexec-daemon cmd/enoexec-daemon/main.go
 
 
-# Use UBI minimal as base image to package the manager binary
+# The runtime image is based on UBI micro, which ships no package manager. The packages the binaries
+# need at runtime are installed into a copy of the UBI micro filesystem by dnf running in a separate
+# tools stage, so dnf itself never ends up in the runtime image:
+# - gpgme and gnupg2: manager links libgpgme (CGO) and gpgme runs gpg to verify image signatures.
+#   UBI minimal only provided them indirectly, through microdnf's dependencies.
+# - ca-certificates: TLS connections to image registries.
+# - openssl-libs: libcrypto and the FIPS provider, loaded at runtime by the FIPS-enabled Go toolchain.
+FROM ${RUNTIME_IMAGE} as runtime-base
+
+FROM ${RUNTIME_TOOLS_IMAGE} as runtime-rootfs
+COPY --from=runtime-base / /mnt/rootfs
+RUN dnf install -y --installroot /mnt/rootfs \
+        --setopt install_weak_deps=False --setopt tsflags=nodocs \
+        gpgme gnupg2 ca-certificates openssl-libs && \
+    dnf --installroot /mnt/rootfs clean all && \
+    rm -rf /mnt/rootfs/var/cache/dnf /mnt/rootfs/var/log/dnf* /mnt/rootfs/var/log/hawkey.log
+
+# The rpm database of the populated filesystem is kept so that image scanners and SBOM tools can
+# discover the installed packages.
 FROM ${RUNTIME_IMAGE}
+COPY --from=runtime-rootfs /mnt/rootfs/ /
 WORKDIR /
 COPY --from=builder /workspace/manager .
 COPY --from=builder /workspace/enoexec-daemon .

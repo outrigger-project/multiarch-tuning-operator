@@ -119,7 +119,8 @@ Create a `.env` file (see `dotenv.example`):
 | `NO_DOCKER=1` | Run builds/tests locally (not in container) |
 | `FORCE_DOCKER=1` | Force Docker instead of Podman |
 | `BUILD_IMAGE=<img>` | Override builder image (default: `ubi9/go-toolset:1.26`) |
-| `RUNTIME_IMAGE=<img>` | Override runtime base image (default: `ubi9/ubi-minimal:latest`) |
+| `RUNTIME_IMAGE=<img>` | Override runtime base image, without a package manager (default: `ubi9/ubi-micro:latest`) |
+| `RUNTIME_TOOLS_IMAGE=<img>` | Override the image whose `dnf` installs the runtime packages into the runtime base; not shipped (default: `ubi9/ubi:latest`) |
 
 ## Key Makefile Variables
 

@@ -4,3 +4,10 @@
 exclude:
   global:
     - vendor/**
+    # The updater CLI entrypoint only. Snyk's path-traversal rule flags the --report CLI
+    # argument flowing into the atomic-publish os.Rename and does not model the
+    # repository-root confinement the CLI enforces before running the updater. Only the
+    # maintainer running the tool controls --report. Snyk Code has no line-level
+    # suppression, and excluding this file removes the taint source while keeping the
+    # updater package itself under scanning.
+    - hack/upgrade-automation/cmd/updater/main.go

@@ -34,7 +34,7 @@ Options:
   --k8s-release  Kubernetes release (1.N.P); preserve module majors, report unavailable versions
   --k8s-target   repeatable exact module=version Kubernetes target (overrides release target)
   --go-bin       Go compiler executable (default: go)
-  --report       JSON report path (default: _output/dependency-upgrade-report.json)
+  --report       JSON report path, within the repository root (default: _output/dependency-upgrade-report.json)
 `
 
 type cliOptions struct {
@@ -100,9 +100,10 @@ func execute(args []string, root string, stdout, stderr io.Writer) int {
 		_, _ = fmt.Fprintf(stderr, "invalid repository root: %v\n", err)
 		return 1
 	}
-	reportPath := options.reportPath
-	if !filepath.IsAbs(reportPath) {
-		reportPath = filepath.Join(absoluteRoot, reportPath)
+	reportPath, err := resolveReportPath(absoluteRoot, options.reportPath)
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "invalid invocation: %v\n%s", err, usage)
+		return 1
 	}
 	if err := validateRepository(absoluteRoot); err != nil {
 		report := updater.Report{
@@ -157,6 +158,26 @@ func writeFailureReport(path string, report updater.Report) (string, error) {
 		path += ".failed"
 	}
 	return path, updater.WriteReport(path, report)
+}
+
+// resolveReportPath resolves the report path against the repository root and rejects
+// values that would place the report outside it. The report is published by renaming a
+// temporary file into place, so confining the destination to the repository root keeps a
+// mistyped --report value from renaming over unrelated files outside the checkout.
+func resolveReportPath(root, reportPath string) (string, error) {
+	root = filepath.Clean(root)
+	if !filepath.IsAbs(reportPath) {
+		reportPath = filepath.Join(root, reportPath)
+	}
+	reportPath = filepath.Clean(reportPath)
+	if !strings.HasPrefix(reportPath, root+string(filepath.Separator)) {
+		return "", fmt.Errorf(
+			"report path %q must stay within the repository root %q",
+			reportPath,
+			root,
+		)
+	}
+	return reportPath, nil
 }
 
 func validateRepository(root string) error {
