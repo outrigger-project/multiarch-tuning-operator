@@ -296,7 +296,9 @@ func TestExecuteReportPublicationControlsDependencyCommit(t *testing.T) {
 			if err := os.WriteFile(sentinel, []byte("original vendor contents"), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			reportPath := filepath.Join(t.TempDir(), "report.json")
+			// The report path must stay within the repository root; a scratch
+			// subdirectory of the fixture exercises publication failure the same way.
+			reportPath := filepath.Join(root, "report.json")
 			if failPublication {
 				if err := os.Mkdir(reportPath, 0o700); err != nil {
 					t.Fatal(err)
@@ -402,4 +404,84 @@ func setFakeGitStatus(t *testing.T, status string) {
 	}
 	t.Setenv("MTO_GIT_STATUS", status)
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
+func TestResolveReportPath(t *testing.T) {
+	absoluteRoot, err := filepath.Abs(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tt := range []struct {
+		name       string
+		reportPath string
+		want       string // empty means an error is expected
+	}{
+		{
+			name:       "default relative path stays inside the root",
+			reportPath: defaultReportPath,
+			want:       filepath.Join(absoluteRoot, defaultReportPath),
+		},
+		{
+			name:       "relative path with parent components that stay inside the root",
+			reportPath: filepath.Join("_output", "..", "report.json"),
+			want:       filepath.Join(absoluteRoot, "report.json"),
+		},
+		{
+			name:       "absolute path inside the root",
+			reportPath: filepath.Join(absoluteRoot, "reports", "report.json"),
+			want:       filepath.Join(absoluteRoot, "reports", "report.json"),
+		},
+		{
+			name:       "relative path escaping the root",
+			reportPath: filepath.Join("..", "report.json"),
+		},
+		{
+			name:       "absolute path escaping the root through parent components",
+			reportPath: filepath.Join(absoluteRoot, "..", "report.json"),
+		},
+		{
+			name:       "absolute path outside the root",
+			reportPath: filepath.Join(os.TempDir(), "report.json"),
+		},
+		{
+			name:       "the repository root itself",
+			reportPath: ".",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := resolveReportPath(absoluteRoot, tt.reportPath)
+			if tt.want == "" {
+				if err == nil {
+					t.Fatalf("resolveReportPath(%q) = %q, want error", tt.reportPath, got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("resolveReportPath(%q) failed: %v", tt.reportPath, err)
+			}
+			if got != tt.want {
+				t.Fatalf("resolveReportPath(%q) = %q, want %q", tt.reportPath, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestExecuteRejectsReportPathOutsideRepositoryRoot(t *testing.T) {
+	root := cliFixture(t)
+	var stdout, stderr bytes.Buffer
+	code := execute(
+		[]string{"--mode", "pin-both", "--report", filepath.Join("..", "escape.json")},
+		root,
+		&stdout,
+		&stderr,
+	)
+	if code != 1 {
+		t.Fatalf("execute() exit = %d, want 1; stderr=%s", code, &stderr)
+	}
+	if !strings.Contains(stderr.String(), "must stay within the repository root") {
+		t.Fatalf("stderr = %s, want report path rejection", &stderr)
+	}
+	if _, err := os.Stat(filepath.Join(filepath.Dir(root), "escape.json")); !os.IsNotExist(err) {
+		t.Fatalf("report escaped the repository root: %v", err)
+	}
 }

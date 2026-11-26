@@ -5,3 +5,4 @@ NO_DOCKER=1 # If you don't want to use docker to build and test the project
 FORCE_DOCKER=1 # By default, podman is used if available, but you can force docker
 BUILD_IMAGE=registry.ci.openshift.org/openshift/release:golang-1.20 # Replace the builder image to use
 RUNTIME_IMAGE=quay.io/centos/centos:stream9-minimal # Replace the runtime stage base image
+RUNTIME_TOOLS_IMAGE=quay.io/centos/centos:stream9 # Replace the image whose dnf installs the runtime packages

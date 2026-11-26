@@ -81,7 +81,7 @@ Protected modules cannot be migrated automatically. A rename with no matching ro
 
 ## Report
 
-The default report is `_output/dependency-upgrade-report.json`; override it with `--report PATH`. The default output directory is ignored by Git so generated reports do not block the next run. A failed run preserves any existing report at the requested path and writes to `<PATH>.failed` instead; a successful run atomically replaces the requested report. If no report exists yet, a failed run writes to the requested path. Reports include:
+The default report is `_output/dependency-upgrade-report.json`; override it with `--report PATH`, which must stay within the repository root. The default output directory is ignored by Git so generated reports do not block the next run. A failed run preserves any existing report at the requested path and writes to `<PATH>.failed` instead; a successful run atomically replaces the requested report. If no report exists yet, a failed run writes to the requested path. Reports include:
 
 - policy inputs and baseline/final Go directive, toolchain, and selected Kubernetes module versions;
 - overall `completed`, `incomplete`, or `failed` status, plus run-level failure and rollback state;
